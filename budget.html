@@ -1420,14 +1420,14 @@ let feedMonth=null, feedDraft=null;
 function feedHTML(){
   const months=monthList();
   const done=Object.keys(S.stmts).filter(k=>S.stmts[k]&&S.stmts[k].rows&&S.stmts[k].rows.length);
-  let h=`<div class="hint">Drop in the month's statement — CSV or PDF. I'll read the description and amount columns, tag each charge, and turn that month's credit-card figure into a hover-able breakdown. Correct any tag and I'll remember that merchant for next time.</div>
+  let h=`<div class="hint">Drop in as many statements as you like at once — CSV or PDF. Each one reads its own dates and files itself under the month it's <b>paid</b>, then tags every charge. Correct a tag and I'll remember that merchant.</div>
   <div class="fg" style="margin-bottom:12px">
-    <div class="f"><label>Which month is this statement for?</label><select id="fMonth">
+    <div class="f"><label>Month (set automatically from each statement)</label><select id="fMonth">
       ${months.map(k=>`<option value="${k}" ${k===(feedMonth||NOW)?"selected":""}>${MFULL[parseYM(k).m-1]} ${parseYM(k).y}${S.stmts[k]?" ✓":""}</option>`).join("")}
     </select></div>
   </div>
-  <button class="mini" id="fPick" style="width:100%;padding:10px;margin-bottom:6px">Choose a statement — CSV or PDF</button>
-  <button class="mini" id="fPaste" style="width:100%;padding:8px;margin-bottom:12px">…or paste the rows instead</button>`;
+  <button class="mini" id="fPick" style="width:100%;padding:10px;margin-bottom:6px">Choose statements — pick as many as you like</button>
+  <button class="mini" id="fPaste" style="width:100%;padding:8px;margin-bottom:12px">…or paste rows from a single statement</button>`;
 
   if(feedBatch&&feedBatch.length){
     const ok=feedBatch.filter(r=>r.ok), bad=feedBatch.filter(r=>!r.ok);
