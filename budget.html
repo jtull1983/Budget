@@ -64,6 +64,8 @@ button{cursor:pointer;background:none;border:none}
   box-shadow:0 -8px 26px rgba(0,0,0,.55)}
 .bottombar .stats{overflow-x:auto;flex-wrap:nowrap;gap:22px;-webkit-overflow-scrolling:touch}
 .bottombar .stat{flex:none}
+.vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+label.mini,label.btn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .statuspill{position:fixed;left:50%;transform:translateX(-50%) translateY(-24px);
   top:calc(10px + env(safe-area-inset-top,0px));z-index:210;
   background:#12242a;border:1px solid var(--line2);border-radius:20px;
@@ -312,10 +314,10 @@ button{cursor:pointer;background:none;border:none}
     <button class="btn" id="btnAddYear">+ Year</button>
     <button class="btn" id="btnApp">Save as app</button>
     <button class="btn" id="btnSave">Save data</button>
-    <button class="btn" id="btnLoad">Load file</button>
+    <label class="btn" id="btnLoad" for="fileIn">Load file</label>
   </div>
-  <input type="file" id="fileIn" accept=".json" style="display:none">
-  <input type="file" id="stmtIn" multiple accept=".csv,.txt,.tsv,.pdf,application/pdf,text/csv" style="display:none">
+  <input type="file" id="fileIn" accept=".json" class="vh">
+  <input type="file" id="stmtIn" multiple accept=".csv,.txt,.tsv,.pdf,application/pdf,text/csv" class="vh">
 </div>
 <div class="statuspill" id="statusPill"></div>
 
@@ -1247,10 +1249,12 @@ document.getElementById("btnBonus").onclick=()=>openDrawer("bonus");
 document.getElementById("btnSync").onclick=()=>openDrawer("sync");
 document.getElementById("btnCard").onclick=()=>openDrawer("card");
 document.getElementById("btnFeed").onclick=()=>{ feedDraft=null; openDrawer("feed"); };
-document.getElementById("stmtIn").onchange=async e=>{
-  const files=e.target.files; e.target.value="";
-  await ingestFiles(files);
-};
+document.getElementById("stmtIn").addEventListener("change",async e=>{
+  const files=e.target.files;
+  try{ await ingestFiles(files); }
+  catch(err){ pill('<b class="err">'+(err&&err.message||"couldn\'t read that")+'</b>'); }
+  finally{ e.target.value=""; }
+});
 /* drag a pile of statements anywhere onto the page */
 ["dragover","drop"].forEach(t=>document.addEventListener(t,e=>e.preventDefault()));
 document.addEventListener("drop",e=>{
@@ -1426,7 +1430,7 @@ function feedHTML(){
       ${months.map(k=>`<option value="${k}" ${k===(feedMonth||NOW)?"selected":""}>${MFULL[parseYM(k).m-1]} ${parseYM(k).y}${S.stmts[k]?" ✓":""}</option>`).join("")}
     </select></div>
   </div>
-  <button class="mini" id="fPick" style="width:100%;padding:10px;margin-bottom:6px">Choose statements — pick as many as you like</button>
+  <label class="mini" for="stmtIn" id="fPick" style="width:100%;padding:12px;margin-bottom:6px">Choose statements — pick as many as you like</label>
   <button class="mini" id="fPaste" style="width:100%;padding:8px;margin-bottom:12px">…or paste rows from a single statement</button>`;
 
   if(feedBatch&&feedBatch.length){
@@ -1437,7 +1441,8 @@ function feedHTML(){
       const gap=Math.abs(r.due-r.total)>0.5;
       h+=`<div style="padding:3px 0">✓ <b>${MFULL[parseYM(sp).m-1]}</b> spending → paid ${MN[parseYM(r.month).m-1]} ·
          bill <b>${money(r.due)}</b>${gap?` <span style="color:var(--dimmer)">(${money(r.total)} charged)</span>`:""} ·
-         ${r.count} charges${r.replaced?" <span style='color:var(--amber)'>(replaced)</span>":""}</div>`;
+         ${r.count} charges${r.replaced?" <span style='color:var(--amber)'>(replaced)</span>":""}${
+         r.guessed?" <span style='color:var(--amber)'>(no dates in file — filed under the month above)</span>":""}</div>`;
     });
     bad.forEach(r=>h+=`<div style="padding:2px 0;color:var(--red)">✗ ${r.name} — ${r.why}</div>`);
     h+=`</div>`;
@@ -1501,16 +1506,18 @@ async function readOne(f){
 }
 /* drop in as many statements as you like; each one files itself by its due date */
 async function ingestFiles(files){
-  const list=[...files]; if(!list.length) return;
+  const list=[...files];
+  if(!list.length){ pill('<b class="warn">no files came through</b>'); return; }
   feedBatch=[]; pill(`Reading ${list.length} statement${list.length>1?"s":""}…`,true);
   for(const f of list){
     const row={name:f.name};
     try{
       const res=parseStatement(await readOne(f));
       if(res.error||!res.rows.length) throw new Error(res.error||"no charges found");
-      const m=res.dates&&res.dates.month;
-      if(!m) throw new Error("couldn't find the dates");
+      let m=res.dates&&res.dates.month, guessed=false;
+      if(!m){ m=feedMonth||NOW; guessed=true; }        /* CSVs often carry no due date */
       if(!monthList().includes(m)) throw new Error("falls outside the plan ("+m+")");
+      row.guessed=guessed;
       row.month=m; row.count=res.rows.length;
       row.total=res.rows.reduce((a,r)=>a+r.amt,0);
       row.due=(res.dates&&res.dates.newBalance)||row.total;
@@ -1548,7 +1555,6 @@ function wireFeed(){
   const sel=document.getElementById("fMonth");
   feedMonth=sel.value;
   sel.onchange=()=>{ feedMonth=sel.value; feedDraft=null; openDrawer("feed"); };
-  document.getElementById("fPick").onclick=()=>document.getElementById("stmtIn").click();
   document.getElementById("fPaste").onclick=()=>{
     const t=prompt("Paste the statement rows (CSV or tab-separated)");
     if(t) ingest(t);
@@ -1995,7 +2001,6 @@ document.getElementById("btnApp").onclick=()=>{
 document.getElementById("btnSave").onclick=()=>{
   deliver(JSON.stringify(S,null,2),"budget-"+stamp()+".json","application/json");
 };
-document.getElementById("btnLoad").onclick=()=>document.getElementById("fileIn").click();
 document.getElementById("fileIn").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   const rd=new FileReader();
@@ -2012,7 +2017,7 @@ document.addEventListener("keydown",e=>{
 const menuPanel=document.getElementById("menuPanel");
 const menuBtn=document.getElementById("btnMenu");
 menuBtn.onclick=()=>{ menuPanel.classList.toggle("open"); menuBtn.classList.toggle("open"); };
-menuPanel.querySelectorAll(".btn").forEach(b=>b.addEventListener("click",()=>{menuPanel.classList.remove("open");menuBtn.classList.remove("open");}));
+menuPanel.querySelectorAll(".btn,label.btn").forEach(b=>b.addEventListener("click",()=>{menuPanel.classList.remove("open");menuBtn.classList.remove("open");}));
 
 /* swipe the grid a month at a time */
 document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>shiftView(+b.dataset.nav));
