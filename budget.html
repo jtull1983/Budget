@@ -49,7 +49,10 @@ button{cursor:pointer;background:none;border:none}
 .toprow{display:flex;align-items:center;gap:12px;flex-wrap:nowrap}
 .brand h1{margin:0;font-size:13px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;
   color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.menubtn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;
+.toprow2{display:flex;gap:8px;align-items:stretch}
+#btnUndo,#btnFit{flex:none;white-space:nowrap}
+@media(max-width:1100px){#btnFit{display:none}}
+.menubtn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
   padding:11px 12px;font-size:12px;letter-spacing:.16em}
 .menubtn .car{font-style:normal;font-size:10px;transition:.18s;color:var(--dimmer)}
 .menubtn.open .car{transform:rotate(180deg);color:var(--teal)}
@@ -78,11 +81,16 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .swipehint button{border:1px solid var(--line2);background:var(--panel2);color:var(--dim);
   border-radius:4px;padding:7px 15px;font-size:15px;line-height:1}
 .swipehint button:disabled{opacity:.3}
-@media(max-width:1100px){ .swipehint{display:flex} }
+.swipehint,.bottombar{display:none !important}
 @media(min-width:1101px){
   .scroller{padding-bottom:14px;overflow-x:auto;overflow-y:hidden}
   .rail{width:max-content;min-width:100%}
   .mcol{flex:0 0 216px;width:216px}
+  /* snap the whole year into view */
+  .scroller.fit{overflow-x:hidden}
+  .scroller.fit .rail{width:100%}
+  .scroller.fit .mcol{flex:1 1 0;width:auto;min-width:0}
+  .scroller.fit .row .lbl{font-size:10.5px}
   .row .lbl{font-size:12px}
   .row .amt{font-size:12.5px}
   .scroller::-webkit-scrollbar{height:12px}
@@ -177,7 +185,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
 .addbtn:hover{border-color:#4a6f79;color:var(--teal)}
 
-.mfoot{flex:none;position:relative;z-index:15;padding:10px 11px;border-top:1px solid var(--line2);
+.mfoot{flex:none;position:relative;z-index:15;height:74px;padding:10px 11px;overflow:hidden;border-top:1px solid var(--line2);
   background:linear-gradient(#16232a,#101a1f)}
 .mfoot .k{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer)}
 .mfoot .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;display:block}
@@ -263,9 +271,16 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .scrim.on{opacity:1;pointer-events:auto}
 
 /* off-book: shown for context, not deducted */
+.row.grp{cursor:pointer}
+.row.grp .lbl{font-weight:700}
+.row.grp .gn{color:var(--dimmer);font-weight:600;font-size:10px}
+.row .tri{color:var(--dimmer);font-size:9px;transition:.15s;flex:none;padding-left:2px}
+.row .tri.up{transform:rotate(180deg);color:var(--teal)}
+.row.child{background:rgba(255,255,255,.02)}
+.row.child .lbl{padding-left:12px;font-weight:600;opacity:.9}
 .row.info .lbl,.row.info .amt{color:var(--dimmer);font-style:italic}
 .row.info .dot{background:var(--dimmer)}
-.mfoot .infon{font-size:10px;font-weight:600;color:var(--dimmer);letter-spacing:.06em;margin-top:2px}
+.mfoot .infon{font-size:9.5px;font-weight:600;color:var(--dimmer);letter-spacing:.04em;margin-top:2px;line-height:1.25}
 .row.off .lbl{color:var(--violet);opacity:.92}
 .row.off .amt{color:var(--violet);opacity:.92;font-style:italic}
 .row.off .dot{background:var(--violet)}
@@ -352,7 +367,11 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
     <div class="brand"><h1 id="appTitle">Household Budget</h1></div>
     <div class="years" id="years"></div>
   </div>
-  <button class="btn menubtn" id="btnMenu"><span>Menu</span><i class="car">▾</i></button>
+  <div class="toprow2">
+    <button class="btn" id="btnUndo" title="Undo">↶ Undo</button>
+    <button class="btn menubtn" id="btnMenu"><span>Menu</span><i class="car">▾</i></button>
+    <button class="btn" id="btnFit">See full year</button>
+  </div>
   <div class="menupanel" id="menuPanel">
     <button class="btn" id="btnRec">Recurring items</button>
     <button class="btn" id="btnBonus">Add bonus</button>
@@ -371,10 +390,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 <div class="statuspill" id="statusPill"></div>
 
 <div class="scroller" id="scroller"><div class="rail" id="rail"></div></div>
-<div class="swipehint" id="swipeHint">
-  <button data-nav="-1">‹</button><span>swipe to move a month</span><button data-nav="1">›</button>
-</div>
-<div class="bottombar"><div class="stats" id="stats"></div></div>
+<div class="swipehint" id="swipeHint" hidden></div>
+<div class="bottombar" id="bottombar" hidden><div class="stats" id="stats"></div></div>
 
 <div id="tip"></div>
 <div class="scrim" id="scrim"></div>
@@ -463,8 +480,21 @@ function migrate(s){
   const want=ym(new Date().getFullYear()+5,12);
   if(cmpYM(s.meta.end,want)<0) s.meta.end=want;
 }
+let undoStack=[], lastSnap=null;
+function snapNow(){ try{ lastSnap=JSON.stringify(S); }catch(e){} }
+function pushUndo(){ if(lastSnap){ undoStack.push(lastSnap); if(undoStack.length>40) undoStack.shift(); } snapNow(); }
+function undo(){
+  if(!undoStack.length){ toast("Nothing to undo"); return; }
+  const prev=undoStack.pop();
+  try{ S=JSON.parse(prev); }catch(e){ return; }
+  migrate(S); lastSnap=prev;
+  S.meta.savedAt=Date.now();
+  localSave(); render(); schedulePush();
+  toast("Undone");
+}
 function localSave(){ try{ localStorage.setItem("budget_state_v8",JSON.stringify(S)); }catch(e){} }
 function save(){
+  pushUndo();
   S.meta.savedAt=Date.now();
   localSave(); stampSaved();
   if(typeof schedulePush==="function") schedulePush();
@@ -957,6 +987,16 @@ function pickAnim(prev,next){
   return Math.abs(next-prev)>=2 ? "anim-shift" : "anim-spill";
 }
 let viewIndex=0;
+const expanded=new Set();
+let fitMode=(()=>{ try{ return localStorage.getItem("budget_fit")==="1"; }catch(e){ return false; } })();
+/* wide screens: slide the current month to the middle */
+function centerWide(){
+  const sc=document.getElementById("scroller");
+  if(!sc||fitMode||innerWidth<=1100) return;
+  const col=sc.querySelector(".mcol.now")||sc.querySelector(".mcol");
+  if(!col) return;
+  sc.scrollLeft=Math.max(0,col.offsetLeft-(sc.clientWidth-col.offsetWidth)/2);
+}
 function perView(){
   const w=innerWidth;
   if(w<=760) return 2;          /* phone: this month and next */
@@ -1026,6 +1066,10 @@ function render(anim,popTab){
   if(popTab){ const t=yEl.querySelector(".ytab.on"); if(t){ t.classList.remove("pop"); void t.offsetWidth; t.classList.add("pop"); } }
 
   greenShift();
+  const sc=document.getElementById("scroller");
+  sc.classList.toggle("fit",fitMode);
+  const fb=document.getElementById("btnFit");
+  if(fb) fb.textContent=fitMode?"Expanded view":"See full year";
   const rail=document.getElementById("rail");
   rail.className="rail"+(anim?" "+anim:"");
   rail.innerHTML="";
@@ -1053,8 +1097,7 @@ function render(anim,popTab){
       <div class="mfoot">
         <div class="k">Left at end · ${money0(M.net)}</div>
         <div class="v ${cls}">${money(M.end)}</div>
-        ${M.offTot?`<div class="obk">${money(Math.abs(M.offTot))} from other accounts</div>`:""}
-        ${M.infoTot?`<div class="infon">${money(Math.abs(M.infoTot))} card — for reference only</div>`:""}
+        ${M.noData?`<div class="infon">not counted for running total</div>`:""}
       </div>`;
     const box=col.querySelector(".rows");
     if(M.noData&&!M.rows.length){
@@ -1063,7 +1106,38 @@ function render(anim,popTab){
       nd.innerHTML=`<div>No records</div><div class="nd2">before the budget started</div>`;
       box.appendChild(nd);
     }
-    M.rows.forEach((r,ri)=>{
+    /* several hits from one rule in a month fold into a single line */
+    const groups=[]; const seen={};
+    M.rows.forEach(r=>{
+      const gid=r.ruleId&&!r.info?r.ruleId:null;
+      if(gid&&seen[gid]!==undefined){ groups[seen[gid]].push(r); return; }
+      if(gid) seen[gid]=groups.length;
+      groups.push([r]);
+    });
+    const shown=[];
+    groups.forEach(g=>{
+      if(g.length<2){ shown.push(g[0]); return; }
+      const key=M.k+"|"+g[0].ruleId;
+      const open=expanded.has(key);
+      shown.push({group:true,key,rows:g,label:g[0].rule?g[0].rule.name:g[0].label,
+        amount:g.reduce((a,x)=>a+x.amount,0),count:g.length,open,
+        kind:g[0].kind,off:g[0].off,manual:g[0].manual,ruleId:g[0].ruleId});
+      if(open) g.forEach(x=>shown.push({...x,child:true}));
+    });
+    shown.forEach((r,ri)=>{
+      if(r.group){
+        const el=document.createElement("div");
+        el.className="row grp "+r.kind+(r.off?" off":"");
+        el.innerHTML=`<span class="dot"></span>
+          <span class="lbl">${r.label} <span class="gn">×${r.count}</span></span>
+          <span class="amt">${money(r.amount)}</span>
+          <span class="tri${r.open?" up":""}">▾</span>`;
+        el.onclick=()=>{ expanded.has(r.key)?expanded.delete(r.key):expanded.add(r.key); render(); };
+        el.onmouseenter=e=>showTip(e,{...r.rows[0],label:r.label+" · "+r.count+" this month"},M.k);
+        el.onmousemove=ev=>{ if(innerWidth>=760) moveTip(ev); };
+        el.onmouseleave=()=>{ if(innerWidth>=760) hideTip(); };
+        box.appendChild(el); return;
+      }
       const el=document.createElement("div");
       el.className="row "+r.kind+(r.oneoff?" oneoff":"")+(r.manual?" manual":"")
                  +(r.ruleId==="cc"?" cc":"")+(r.off?" off":"")+(r.info?" info":"");
@@ -1071,6 +1145,7 @@ function render(anim,popTab){
       el.innerHTML=`<span class="dot"></span><span class="lbl">${r.label}</span>
         <span class="amt${r.manual?" man":""}${r.ovr?" ovr":""}">${money(r.amount)}</span>
         <button class="kill">×</button>`;
+      if(r.child) el.classList.add("child");
       el.querySelector(".amt").onclick=e=>editAmt(e.target,r,M.k);
       el.querySelector(".kill").onclick=()=>removeRow(r);
       if(r.oneoff) el.querySelector(".lbl").ondblclick=()=>{
@@ -1085,7 +1160,7 @@ function render(anim,popTab){
     rail.appendChild(col);
   });
 
-  const hint=document.getElementById("swipeHint");
+  const hint=null;
   if(hint){
     const [lo,hi]=yearBounds();
     hint.querySelector("[data-nav='-1']").disabled = viewIndex<=lo;
@@ -1098,24 +1173,14 @@ function render(anim,popTab){
   const thEl=document.getElementById("appTitle");
   if(thEl&&thEl.textContent!==appT){ thEl.textContent=appT; document.title=appT; }
 
-  const bare = S.rules.every(r=>!amountAt(r,S.meta.end)) && !S.oneoffs.length && !S.meta.opening;
-  const oldE=document.getElementById("emptyState"); if(oldE) oldE.remove();
-  if(bare){
-    const e=document.createElement("div"); e.id="emptyState";
-    e.innerHTML=`<div class="emptybox"><div class="et">Nothing in here yet</div>
-      <div class="eb">If your budget lives in a private GitHub gist, open <b>Sync</b> from the menu,
-      paste your token and gist ID, and your numbers will load in.<br><br>
-      Otherwise start fresh in <b>Recurring items</b>, or bring a saved file in with <b>Load file</b>.</div></div>`;
-    document.getElementById("scroller").after(e);
-  }
-  drawStats(); fitGrid(); localSave(); stampSaved();
+  fitGrid(); localSave(); stampSaved();
   const cb=document.getElementById("btnCard");
   if(cb){ const st=cardBtnState(); cb.textContent=st.label;
           cb.classList.toggle("warn",st.mode==="waiting"); }
   const n=insights().filter(i=>i.tone!=="good").length;
   const ic=document.getElementById("insCount");
   if(ic) ic.textContent=n?("· "+n):"";
-  if(firstPaint){ firstPaint=false; centerNow(true); }
+  if(firstPaint){ firstPaint=false; centerNow(true); setTimeout(centerWide,30); }
 }
 
 /* put the month we're actually in in the middle of the screen */
@@ -1820,7 +1885,7 @@ function schedulePush(){
   if(!syncOn()) return;
   clearTimeout(pushTimer);
   setSync("busy","pending…");
-  pushTimer=setTimeout(()=>syncPush(false),4000);   // settle before hitting the network
+  pushTimer=setTimeout(()=>syncPush(false),2500);   // settle before hitting the network
 }
 
 function syncHTML(){
@@ -2109,9 +2174,8 @@ function wireCard(){
     /* double-tap folds every month at once, or opens them all again */
     hd.ondblclick=e=>{
       e.preventDefault();
-      const anyOpen=cards().some(c=>c.classList.contains("open"));
-      cards().forEach(c=>c.classList.toggle("open",!anyOpen));
-      toast(anyOpen?"All months collapsed":"All months expanded");
+      nav={month:null,cat:null}; openDrawer("card");
+      toast("Back to the overview");
     };
   });
   document.querySelectorAll("[data-move]").forEach(b=>{
@@ -2247,18 +2311,26 @@ document.getElementById("fileIn").onchange=e=>{
 };
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){ closePicker(); closeDrawer(); document.getElementById("menuPanel").classList.remove("open"); document.getElementById("btnMenu").classList.remove("open"); }
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); return; }
   if(e.key==="ArrowLeft") shiftView(-1);
   if(e.key==="ArrowRight") shiftView(1);
 });
 
 /* menu */
+document.getElementById("btnUndo").onclick=undo;
+const fitBtn=document.getElementById("btnFit");
+if(fitBtn) fitBtn.onclick=()=>{
+  fitMode=!fitMode;
+  try{ localStorage.setItem("budget_fit",fitMode?"1":"0"); }catch(e){}
+  render(); setTimeout(centerWide,30);
+};
 const menuPanel=document.getElementById("menuPanel");
 const menuBtn=document.getElementById("btnMenu");
 menuBtn.onclick=()=>{ menuPanel.classList.toggle("open"); menuBtn.classList.toggle("open"); };
 menuPanel.querySelectorAll(".btn,label.btn").forEach(b=>b.addEventListener("click",()=>{menuPanel.classList.remove("open");menuBtn.classList.remove("open");}));
 
 /* swipe the grid a month at a time */
-document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>shiftView(+b.dataset.nav));
+
 (function(){
   const sc=document.getElementById("scroller");
   let x0=null,y0=null,moved=false;
@@ -2301,6 +2373,12 @@ try{
 render();
 stampSaved();
 if(syncOn()&&!netBlocked()) syncPull(true);
+snapNow();
+/* check for a newer copy every few minutes */
+setInterval(()=>{ if(syncOn()&&!netBlocked()&&document.visibilityState!=="hidden") syncPull(true); },180000);
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"&&syncOn()&&!netBlocked()) syncPull(true);
+});
 if(netBlocked()&&syncOn()) setSync("warn","needs a real web address");
 </script>
 </body>
