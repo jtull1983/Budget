@@ -104,9 +104,9 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 
 .scroller{overflow:hidden;padding:0;
   touch-action:pan-y;user-select:none;-webkit-user-select:none}
-.rail{display:flex;align-items:stretch;width:100%;height:var(--gridh,60vh)}
+.rail{display:flex;align-items:stretch;width:100%;max-height:var(--gridh,70vh)}
 .mcol{position:relative;flex:1 1 0;min-width:0;border-right:1px solid var(--line);
-  background:var(--panel);display:flex;flex-direction:column;height:100%;overflow:hidden}
+  background:var(--panel);display:flex;flex-direction:column;max-height:100%;overflow:hidden}
 .mcol.past{background:#0d151a}
 .mcol.now{background:#241f0c;box-shadow:inset 0 0 0 1px var(--amber)}
 .mcol:last-child{border-right:none}
@@ -129,7 +129,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mcol.now .onhand .v{color:#ffd98a}
 .mcol.now .row:hover{background:#33290f}
 
-.rows{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+.rows{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
   -webkit-overflow-scrolling:touch;padding:4px 0 2px;scrollbar-width:thin}
 .rows::-webkit-scrollbar{width:6px}
 .rows::-webkit-scrollbar-thumb{background:#3d545e;border-radius:3px}
@@ -305,6 +305,30 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .emptybox{max-width:430px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);padding:20px 22px}
 .emptybox .et{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--txt);margin-bottom:9px}
 .emptybox .eb{font-size:11.5px;line-height:1.75;color:var(--dim)}
+.pickwrap{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.62);display:none;
+  align-items:flex-end;justify-content:center;padding:0}
+.pickwrap.on{display:flex}
+.pick{width:100%;max-width:520px;background:#0e161a;border:1px solid var(--line2);
+  border-radius:14px 14px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));
+  max-height:86vh;overflow-y:auto;box-shadow:0 -18px 50px rgba(0,0,0,.7)}
+.pick .pt{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt);margin-bottom:3px}
+.pick .pd{font-size:11px;color:var(--dimmer);margin-bottom:14px;line-height:1.5}
+.pickgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.pickgrid button{border:1px solid var(--line2);background:var(--panel2);border-radius:6px;
+  padding:13px 10px;font-size:12px;font-weight:600;text-align:left}
+.pickgrid button.cur{border-color:var(--teal);background:#12262a}
+.pickgrid button:active{background:var(--panel3)}
+.pick .pclose{width:100%;margin-top:12px;padding:12px;border:1px solid var(--line2);
+  border-radius:6px;color:var(--dim);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+/* transaction rows are tappable, no dropdown eating the width */
+.txrow{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:9px 6px;border:none;background:none;border-bottom:1px solid var(--line)}
+.txrow:active{background:var(--panel2)}
+.txrow .d{flex:1;font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.txrow .a{font-size:12px;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums}
+.txrow .c{font-size:9.5px;font-weight:700;padding:3px 7px;border-radius:11px;white-space:nowrap;
+  border:1px solid currentColor;opacity:.9}
+.chead{user-select:none}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(70px);z-index:300;
   background:#173a3c;border:1px solid var(--teal);color:var(--teal);padding:9px 18px;border-radius:4px;
   font-size:11px;letter-spacing:.1em;text-transform:uppercase;transition:.25s;opacity:0}
@@ -349,6 +373,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   <div class="dbody" id="dbody"></div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
 /* ── baked state ──────────────────────────────────────────────
@@ -379,7 +404,7 @@ function defaultState(){
     start:ym(y,m), end:null, manual:true, sort:9999,
     schedule:[{from:ym(y,m),amount:0}]}
   ],
-  over:{}, skip:{}, accountNames:{},
+  over:{}, skip:{}, accountNames:{}, catRules:[],
   bonus:{name:"Yearly bonus", years:{}},
   balancers:{}, stmts:{}, learned:{}, oneoffs:[]
  };
@@ -411,6 +436,7 @@ function migrate(s){
   s.bonus=s.bonus||{name:"Mami's Big Ass Yearly Bonus",years:{}};
   s.balancers=s.balancers||{};
   s.accountNames=s.accountNames||{};
+  s.catRules=s.catRules||[];
   s.meta.title=s.meta.title||"Household Budget";
   /* show the whole calendar year, but remember which months predate any records */
   if(!s.meta.recordsFrom) s.meta.recordsFrom=s.meta.start;
@@ -577,15 +603,15 @@ const CATCOLOR={"Dining":"#ffc873","Delivery apps":"#ff8fb0","Groceries":"#6ff0d
 const RULES=[
  /* third-party delivery apps first: the merchant string usually also names a restaurant */
  [/doordash|\bdd ?\*|grubhub|seamless|uber ?\*? ?eats|ubereats|eatshelp|postmates|caviar|gopuff|drizly|waitr|slice ?app|chownow|\bhungry\b/i,"Delivery apps"],
- [/starbucks|dunkin|coffee|cafe|chipotle|mcdonald|panera|pizza|taco|grill|restaurant|\bbar\b|brewery|sushi|bakery|deli|diner|kitchen|bistro|tavern|\bpub\b|taproom|steakhouse|creamery|juice|smoothie|wingstop|\btst\*|\bsq ?\*|\bsp \b|chopt|qdoba|auntie anne|cheesecake|seasons 52|kpot|mezeh|thai express|pisco|paris baguette|yogitopi|musubi|cheese steak|fooderie|eatsprout|burger king|market@work|vending|handmade ice|tacombi|shiki|rakugaki|flower child|nandos|mackies|sarku|bonchon|habit |five guys|panda express|shake shack|taco bell|dunkin|7-eleven|joe the juice|smoothie king|van leeuwen|levain|neuhaus|patisserie|bakery|donut|espresso|coffee|cheese ?steak|pizza|taqueria|grill\b|tavern|cafe|kettle|juice bar|gelato|creamery|chick[- ]?fil|shake shack|five guys|popeyes|wendy|subway sand|jersey mike|sweetgreen|\bcava\b/i,"Dining"],
+ [/starbucks|dunkin|coffee|cafe|chipotle|mcdonald|panera|pizza|taco|grill|restaurant|\bbar\b|brewery|sushi|bakery|deli|diner|kitchen|bistro|tavern|\bpub\b|taproom|steakhouse|creamery|juice|smoothie|wingstop|\btst\*|\bsq ?\*|\bsp \b|chopt|qdoba|auntie anne|cheesecake|seasons 52|kpot|mezeh|thai express|pisco|paris baguette|yogitopi|musubi|cheese steak|fooderie|eatsprout|burger king|market@work|vending|handmade ice|tacombi|\bbeer\b|\bburger\b|\bbar\b|\bpub\b|steak|\bgrill|chicken|\bwine\b|liquor|brew|uncle julio|longhorn|\bihop\b|guapos|coopers hawk|original pancake|elevation|daves hot|auntie anne|aunte anne|arctic circle|trokadero|sobao|vintage views|filmore|knowles station|bethesda coop|\brise\b|little town|moms of herndon|kiosk\d|h\/r food|int montgomery|cabin john|shiki|rakugaki|flower child|nandos|mackies|sarku|bonchon|habit |five guys|panda express|shake shack|taco bell|dunkin|7-eleven|joe the juice|smoothie king|van leeuwen|levain|neuhaus|patisserie|bakery|donut|espresso|coffee|cheese ?steak|pizza|taqueria|grill\b|tavern|cafe|kettle|juice bar|gelato|creamery|chick[- ]?fil|shake shack|five guys|popeyes|wendy|subway sand|jersey mike|sweetgreen|\bcava\b/i,"Dining"],
  [/safeway|giant|whole foods|trader joe|wegmans|aldi|kroger|harris teeter|publix|costco|sam.s club|bj.s wholesale|grocer|supermarket|food lion|lidl|instacart|\bgiant \d|balducci|grosvenor market|meridian market|streets market|wholefds|whole ?foods|megamart|lidl|el market|pueblo isla/i,"Groceries"],
- [/shell|exxon|chevron|\bbp\b|sunoco|wawa|citgo|marathon|speedway|\bgas\b|fuel|parking|toll|e[- ]?zpass|autozone|jiffy lube|midas|firestone|discount tire|car wash|exxon|\bezpass|\bvatoll\b|sheehy|usaa|geico|progressive|state farm|jiffy lube|car wash|flagship car|sunoco|marathon |\bshell oil|nova petroleum|\bmetro\b|laz parking|colpark|colonial parking|mva eservices|driveezmd|montgomerydot|chargepoint|true shield auto|lyft|dmv|\buber\b|lyft/i,"Gas & auto"],
+ [/shell|exxon|chevron|\bbp\b|sunoco|wawa|citgo|marathon|speedway|\bgas\b|fuel|parking|toll|e[- ]?zpass|autozone|jiffy lube|midas|firestone|discount tire|car wash|exxon|\bezpass|\bvatoll\b|sheehy|usaa|geico|progressive|state farm|jiffy lube|car wash|flagship car|sunoco|marathon |\bshell oil|nova petroleum|\bmetro\b|laz parking|colpark|colonial parking|mva eservices|driveezmd|montgomerydot|chargepoint|true shield auto|lyft|\be z pass|metropolitan washington|\bmcg \b|dmv|\buber\b|lyft/i,"Gas & auto"],
  [/airline|delta|united air|american air|southwest|jetblue|alaska air|hotel|lodge|resort|inn\b|marriott|hilton|hyatt|royal caribbean|\brccl\b|brilliance of the seas|united \d|residence inn|the logan|tav dulles|hudson st|air-margaritaville|resortpass|goldensand|island paradise|coco loco|bonita beach|airbnb|vrbo|expedia|booking\.com|priceline|amtrak|rental car|hertz|avis|enterprise rent/i,"Travel"],
- [/amazon|amzn|\btarget\b|walmart|best buy|home goods|tj ?maxx|marshalls|nordstrom|\bmacy.?s\b|kohl|old navy|\bgap\b|nike|adidas|etsy|ebay|bloomingdale|primark|fabletics|wayfair|ikea|lululemon|zappos|zara|h&m|j\.?crew|anthropologie|crocs|dyson|sephora|homegoods|dollar tree|five below|nordstrom|brooklinen|rothys|vuori|baublebar|adidas|dicks|nordvpn|smarty-me|prose\*|dollarshaveclub|etsy|hooray studios|terrapin bicycles|made by mle|qookie|nanit|flip flop|dushi store|\brei\b|dick.s sporting/i,"Shopping"],
+ [/amazon|amzn|\btarget\b|walmart|best buy|home goods|tj ?maxx|marshalls|nordstrom|\bmacy.?s\b|kohl|old navy|\bgap\b|nike|adidas|etsy|ebay|bloomingdale|primark|fabletics|wayfair|ikea|lululemon|zappos|zara|\bh&m\b|hm\.com|oldnavy|wal-?mart|cartier|virgin feet|j\.?crew|anthropologie|crocs|dyson|sephora|homegoods|dollar tree|five below|nordstrom|brooklinen|rothys|vuori|baublebar|adidas|dicks|nordvpn|smarty-me|prose\*|dollarshaveclub|etsy|hooray studios|terrapin bicycles|made by mle|qookie|nanit|flip flop|dushi store|\brei\b|dick.s sporting/i,"Shopping"],
  [/pepco|verizon|comcast|xfinity|t-?mobile|at&?t|electric|water|\bgas\b (company|bill)|washington gas|internet|wssc|utility|phone/i,"Bills & utilities"],
  [/cvs|walgreens|rite aid|pharmacy|dental|dentist|doctor|medical|clinic|hospital|optical|vision|labcorp|quest diag|urgent care|therapy|health|\bmed\*|drs hauck|capital digestive|privia|trinity health|radiology|anesthes|pediatric|eyecare|dermatology|acupuncture|pharmacy|farmacia|usap\.c/i,"Health"],
  [/salon|nail bar|barber|\bspa\b|hair\b|waxing|lash|brow bar|massage|musely|amber door|cleaners max|motophoto/i,"Personal care"],
- [/daycare|preschool|\bschool\b|tuition|childcare|toys|carter|children|kindercare|goddard|rochambeau|littletown|hyper kidz|jolly yolly|zbounce|happy bounce|tiny headquarters|diggerland|pleasetouch|bonjour books|smith store zoo|nat zoo|childrens mus|\bymca\b|kapow buddy|vera.s bakery/i,"Kids"],
+ [/daycare|preschool|\bschool\b|tuition|childcare|toys|carter|children|kindercare|goddard|rochambeau|littletown|hyper kidz|jolly yolly|zbounce|happy bounce|tiny headquarters|diggerland|pleasetouch|bonjour books|smith store zoo|nat zoo|childrens mus|\bymca\b|kapow buddy|cinepolis|\bcr nat|vera.s bakery/i,"Kids"],
  [/home depot|lowe.s|ace hardware|hardware|plumb|hvac|electrician|landscap|lawn|roof|paint|furniture|cleaning serv|handyman|contractor|strosniders|terminix|\btmx\*|coretec|eero/i,"Home"],
  [/netflix|spotify|hulu|disney\+|apple\.com\/bill|amazon prime|prime video|audible|youtubepremium|lingopie|apple music|icloud|youtube|prime video|hbo|\bmax\b|patreon|substack|adobe|microsoft 365|google storage|chatgpt|openai|anthropic|claude|dropbox|gym|planet fitness|equinox|orangetheory|peloton/i,"Subscriptions"],
  [/\bvet\b|veterinar|chewy|petco|petsmart|pet supplies|boarding|groom/i,"Pets"],
@@ -611,8 +637,21 @@ function normMerchant(desc){
 function categorize(desc){
   const key=normMerchant(desc);
   if(S.learned[key]) return {cat:S.learned[key],learned:true};
+  /* your own keyword rules come first */
+  for(const r of (S.catRules||[])){
+    const words=String(r.words||"").split(",").map(x=>x.trim()).filter(Boolean);
+    if(words.some(wd=>desc.toLowerCase().includes(wd.toLowerCase()))) return {cat:r.cat,learned:false};
+  }
   for(const [re,c] of RULES) if(re.test(desc)) return {cat:c,learned:false};
   return {cat:"Other",learned:false};
+}
+/* re-run tagging over every statement already loaded */
+function retagAll(){
+  let n=0;
+  Object.values(S.stmts||{}).forEach(st=>st&&st.rows&&st.rows.forEach(r=>{
+    const c=categorize(r.desc).cat; if(c!==r.cat){ r.cat=c; n++; }
+  }));
+  save(); render(); return n;
 }
 /* split a CSV line, respecting quotes */
 function splitLine(line,delim){
@@ -1517,6 +1556,22 @@ function feedHTML(){
     });
     h+=`</div></div></div>`;
   }
+  h+=`<div class="card" id="rulesCard"><div class="chead"><span class="car">▸</span>
+      <span class="nm">Tagging rules</span><span class="cad">${(S.catRules||[]).length} of your own</span></div>
+      <div class="cbody">
+      <div class="hint" style="margin:6px 0 10px">Type a word or two that appears in the charge — <b>beer</b>, <b>burger</b>,
+      <b>pharmacy</b> — and pick where it should go. Comma-separate several. Your rules beat the built-in ones,
+      and anything you've corrected by hand beats both.</div>`;
+  (S.catRules||[]).forEach((r,i)=>{
+    h+=`<div class="step" style="gap:6px">
+      <input data-rw="${i}" value="${String(r.words||"").replace(/"/g,"&quot;")}" placeholder="beer, burger" style="flex:1">
+      <select data-rc="${i}" style="width:118px;background:#0c1418;border:1px solid var(--line2);border-radius:3px;
+        padding:4px 5px;font-size:10.5px;color:${CATCOLOR[r.cat]}">
+        ${CATS.map(c=>`<option ${c===r.cat?"selected":""}>${c}</option>`).join("")}</select>
+      <button class="x" data-rx="${i}">×</button></div>`;
+  });
+  h+=`<div class="crow"><button class="mini" id="rAdd">+ add a rule</button>
+       <button class="mini" id="rRetag">Re-tag everything now</button></div></div></div>`;
   if(Object.keys(S.learned).length)
     h+=`<div class="flag good"><div class="ft">Learned merchants · ${Object.keys(S.learned).length}</div>
       <div class="fb">Every tag you correct sticks, so the next statement comes in cleaner. <button class="del" id="fForget" style="margin-left:6px">Forget all</button></div></div>`;
@@ -1569,6 +1624,27 @@ function ingest(text){                       /* pasted text, single */
   toast(res.rows.length+" charges read"+(auto?" · filed under "+MN[parseYM(auto).m-1]:""));
 }
 function wireFeed(){
+  const rc=document.getElementById("rulesCard");
+  if(rc){
+    rc.querySelector(".chead").onclick=()=>rc.classList.toggle("open");
+    document.getElementById("rAdd").onclick=()=>{
+      S.catRules.push({words:"",cat:"Dining"}); save(); openDrawer("feed");
+      const c=document.getElementById("rulesCard"); if(c) c.classList.add("open");
+    };
+    document.getElementById("rRetag").onclick=()=>{
+      const n=retagAll(); openDrawer("feed");
+      const c=document.getElementById("rulesCard"); if(c) c.classList.add("open");
+      toast(n?n+" charges re-tagged":"nothing changed");
+    };
+    document.querySelectorAll("[data-rw]").forEach(i=>i.onchange=()=>{
+      S.catRules[+i.dataset.rw].words=i.value; save(); });
+    document.querySelectorAll("[data-rc]").forEach(sel=>sel.onchange=()=>{
+      S.catRules[+sel.dataset.rc].cat=sel.value; save(); openDrawer("feed");
+      const c=document.getElementById("rulesCard"); if(c) c.classList.add("open"); });
+    document.querySelectorAll("[data-rx]").forEach(b=>b.onclick=()=>{
+      S.catRules.splice(+b.dataset.rx,1); save(); openDrawer("feed");
+      const c=document.getElementById("rulesCard"); if(c) c.classList.add("open"); });
+  }
   const applyAll=document.getElementById("fApplyAll");
   if(applyAll) applyAll.onclick=()=>{
     let n=0;
@@ -1971,26 +2047,58 @@ function catHTML(){
   let h=crumbs()+`<div class="flag" style="border-left-color:${CATCOLOR[c]||"var(--teal)"}">
       <div class="ft">${c}${nav.month?" · "+prettySpend(nav.month):" · "+y}</div>
       <div class="fb"><b>${money(tot)}</b> across <b>${tx.length}</b> charges.
-      Tap any tag to move it — I'll remember that merchant and re-file it everywhere.</div></div>`;
+      Tap any charge to move it — I'll remember that merchant and re-file it everywhere. Tap a month to fold it away.</div></div>`;
   const byM={}; tx.forEach(r=>(byM[r.spend]=byM[r.spend]||[]).push(r));
   Object.keys(byM).sort().reverse().forEach(m=>{
     const rows=byM[m], sub=rows.reduce((a,r)=>a+r.amt,0);
     h+=`<div class="card open"><div class="chead"><span class="nm">${prettySpend(m)}</span>
       <span class="am">${money(sub)} · ${rows.length}</span></div><div class="cbody">`;
     rows.forEach(r=>{
-      h+=`<div class="step" style="gap:6px;align-items:center">
-        <span style="flex:1;font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc}</span>
-        <span style="font-size:11.5px;color:${r.amt<0?"var(--teal)":"var(--txt)"};font-variant-numeric:tabular-nums">${money(r.amt)}</span>
-        <select data-move="${r.filed}|${r.idx}" style="width:112px;background:#0c1418;border:1px solid var(--line2);
-          border-radius:3px;padding:3px 4px;font-size:10px;color:${CATCOLOR[r.cat]}">
-          ${CATS.map(x=>`<option ${x===r.cat?"selected":""}>${x}</option>`).join("")}
-        </select></div>`;
+      h+=`<button class="txrow" data-move="${r.filed}|${r.idx}">
+        <span class="d">${r.desc}</span>
+        <span class="a" style="color:${r.amt<0?"var(--teal)":"var(--txt)"}">${money(r.amt)}</span>
+        <span class="c" style="color:${CATCOLOR[r.cat]||"var(--dim)"}">${r.cat}</span></button>`;
     });
     h+=`</div></div>`;
   });
   return h;
 }
+function openPicker(filed,idx){
+  const row=S.stmts[filed]&&S.stmts[filed].rows[idx]; if(!row) return;
+  const same=[];
+  Object.values(S.stmts).forEach(st=>st&&st.rows&&st.rows.forEach(o=>{
+    if(normMerchant(o.desc)===normMerchant(row.desc)) same.push(o); }));
+  const wrap=document.getElementById("pickWrap");
+  document.getElementById("pick").innerHTML=
+    `<div class="pt">${row.desc}</div>
+     <div class="pd">${money(row.amt)} · currently <b style="color:${CATCOLOR[row.cat]}">${row.cat}</b>${
+       same.length>1?` · ${same.length} charges from this merchant will move together`:""}</div>
+     <div class="pickgrid">${CATS.map(c=>
+       `<button data-pick="${c}" class="${c===row.cat?"cur":""}" style="color:${CATCOLOR[c]||"var(--dim)"}">${c}</button>`).join("")}</div>
+     <button class="pclose" id="pickCancel">Cancel</button>`;
+  wrap.classList.add("on");
+  document.getElementById("pickCancel").onclick=closePicker;
+  wrap.onclick=e=>{ if(e.target===wrap) closePicker(); };
+  document.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{
+    const cat=b.dataset.pick, key=normMerchant(row.desc);
+    S.learned[key]=cat;
+    Object.values(S.stmts).forEach(st=>st&&st.rows&&st.rows.forEach(o=>{
+      if(normMerchant(o.desc)===key) o.cat=cat; }));
+    save(); render(); closePicker(); openDrawer("card");
+    toast(same.length>1?same.length+" moved to "+cat:"Moved to "+cat);
+  });
+}
+function closePicker(){ document.getElementById("pickWrap").classList.remove("on"); }
+
 function wireCard(){
+  /* tap a month heading to fold that list away */
+  document.querySelectorAll("#dbody .card .chead").forEach(hd=>{
+    hd.onclick=()=>hd.parentElement.classList.toggle("open");
+  });
+  document.querySelectorAll("[data-move]").forEach(b=>{
+    const [k,i]=b.dataset.move.split("|");
+    b.onclick=e=>{ e.preventDefault(); openPicker(k,+i); };
+  });
   document.querySelectorAll("[data-crumb]").forEach(b=>b.onclick=()=>{
     if(b.dataset.crumb==="root"){ nav={month:null,cat:null}; } else { nav.cat=null; }
     openDrawer("card");
@@ -2001,16 +2109,7 @@ function wireCard(){
   document.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
     nav.cat=b.dataset.cat; openDrawer("card");
   });
-  document.querySelectorAll("[data-move]").forEach(sel=>sel.onchange=()=>{
-    const [k,i]=sel.dataset.move.split("|");
-    const row=S.stmts[k].rows[+i]; if(!row) return;
-    const key=normMerchant(row.desc);
-    S.learned[key]=sel.value;
-    Object.values(S.stmts).forEach(st=>st&&st.rows&&st.rows.forEach(o=>{
-      if(normMerchant(o.desc)===key) o.cat=sel.value; }));
-    save(); render(); openDrawer("card");
-    toast("Moved to "+sel.value);
-  });
+
 }
 
 function insights(){
@@ -2128,7 +2227,7 @@ document.getElementById("fileIn").onchange=e=>{
   rd.readAsText(f);
 };
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape"){ closeDrawer(); document.getElementById("menuPanel").classList.remove("open"); document.getElementById("btnMenu").classList.remove("open"); }
+  if(e.key==="Escape"){ closePicker(); closeDrawer(); document.getElementById("menuPanel").classList.remove("open"); document.getElementById("btnMenu").classList.remove("open"); }
   if(e.key==="ArrowLeft") shiftView(-1);
   if(e.key==="ArrowRight") shiftView(1);
 });
