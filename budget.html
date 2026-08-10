@@ -79,7 +79,17 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   border-radius:4px;padding:7px 15px;font-size:15px;line-height:1}
 .swipehint button:disabled{opacity:.3}
 @media(max-width:1100px){ .swipehint{display:flex} }
-@media(min-width:1101px){ .scroller{padding-bottom:92px} }
+@media(min-width:1101px){
+  .scroller{padding-bottom:14px;overflow-x:auto;overflow-y:hidden}
+  .rail{width:max-content;min-width:100%}
+  .mcol{flex:0 0 216px;width:216px}
+  .row .lbl{font-size:12px}
+  .row .amt{font-size:12.5px}
+  .scroller::-webkit-scrollbar{height:12px}
+  .scroller::-webkit-scrollbar-track{background:#0c1216;border-top:1px solid var(--line)}
+  .scroller::-webkit-scrollbar-thumb{background:#6fe0cf;border-radius:6px;border:3px solid #0c1216}
+  .scroller::-webkit-scrollbar-thumb:hover{background:#9df3e6}
+}
 @media(max-width:760px){
   .top{padding:12px 12px;padding-top:calc(18px + env(safe-area-inset-top,0px))}
   .brand h1{font-size:12px}
@@ -104,9 +114,9 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 
 .scroller{overflow:hidden;padding:0;
   touch-action:pan-y;user-select:none;-webkit-user-select:none}
-.rail{display:flex;align-items:stretch;width:100%;max-height:var(--gridh,70vh)}
+.rail{display:flex;align-items:stretch;width:100%;height:var(--gridh,70vh)}
 .mcol{position:relative;flex:1 1 0;min-width:0;border-right:1px solid var(--line);
-  background:var(--panel);display:flex;flex-direction:column;max-height:100%;overflow:hidden}
+  background:var(--panel);display:flex;flex-direction:column;height:100%;overflow:hidden}
 .mcol.past{background:#0d151a}
 .mcol.now{background:#241f0c;box-shadow:inset 0 0 0 1px var(--amber)}
 .mcol:last-child{border-right:none}
@@ -129,7 +139,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mcol.now .onhand .v{color:#ffd98a}
 .mcol.now .row:hover{background:#33290f}
 
-.rows{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+.rows{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
   -webkit-overflow-scrolling:touch;padding:4px 0 2px;scrollbar-width:thin}
 .rows::-webkit-scrollbar{width:6px}
 .rows::-webkit-scrollbar-thumb{background:#3d545e;border-radius:3px}
@@ -974,7 +984,8 @@ function fitGrid(){
   const sc=document.getElementById("scroller"); if(!sc) return;
   const bar=document.querySelector(".bottombar"), hint=document.getElementById("swipeHint");
   const top=sc.getBoundingClientRect().top;
-  const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0);
+  const wide=(window.innerWidth||0)>1100;
+  const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0)+(wide?20:0);
   const h=Math.max(320,(window.innerHeight||800)-top-below-6);
   document.documentElement.style.setProperty("--gridh",h+"px");
 }
@@ -2047,7 +2058,7 @@ function catHTML(){
   let h=crumbs()+`<div class="flag" style="border-left-color:${CATCOLOR[c]||"var(--teal)"}">
       <div class="ft">${c}${nav.month?" · "+prettySpend(nav.month):" · "+y}</div>
       <div class="fb"><b>${money(tot)}</b> across <b>${tx.length}</b> charges.
-      Tap any charge to move it — I'll remember that merchant and re-file it everywhere. Tap a month to fold it away.</div></div>`;
+      Tap any charge to move it — I'll remember that merchant and re-file it everywhere. Tap a month to fold it away, double-tap to fold them all.</div></div>`;
   const byM={}; tx.forEach(r=>(byM[r.spend]=byM[r.spend]||[]).push(r));
   Object.keys(byM).sort().reverse().forEach(m=>{
     const rows=byM[m], sub=rows.reduce((a,r)=>a+r.amt,0);
@@ -2092,8 +2103,16 @@ function closePicker(){ document.getElementById("pickWrap").classList.remove("on
 
 function wireCard(){
   /* tap a month heading to fold that list away */
+  const cards=()=>[...document.querySelectorAll("#dbody .card")];
   document.querySelectorAll("#dbody .card .chead").forEach(hd=>{
     hd.onclick=()=>hd.parentElement.classList.toggle("open");
+    /* double-tap folds every month at once, or opens them all again */
+    hd.ondblclick=e=>{
+      e.preventDefault();
+      const anyOpen=cards().some(c=>c.classList.contains("open"));
+      cards().forEach(c=>c.classList.toggle("open",!anyOpen));
+      toast(anyOpen?"All months collapsed":"All months expanded");
+    };
   });
   document.querySelectorAll("[data-move]").forEach(b=>{
     const [k,i]=b.dataset.move.split("|");
