@@ -51,6 +51,10 @@ button{cursor:pointer;background:none;border:none}
   color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toprow2{display:flex;gap:8px;align-items:stretch}
 #btnUndo,#btnFit{flex:none;white-space:nowrap}
+.navarr{flex:none;display:none;align-items:center;justify-content:center;
+  width:30px;padding:0;font-size:15px;line-height:1}
+@media(min-width:1101px){.navarr{display:inline-flex}}
+body.fitOn .navarr{display:none}
 @media(max-width:1100px){#btnFit{display:none}}
 .menubtn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
   padding:11px 12px;font-size:12px;letter-spacing:.16em}
@@ -85,7 +89,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 @media(min-width:1101px){
   .scroller{padding-bottom:14px;overflow-x:auto;overflow-y:hidden}
   .rail{width:max-content;min-width:100%}
-  .mcol{flex:0 0 248px;width:248px}
+  .mcol{flex:0 0 var(--colw,248px);width:var(--colw,248px)}
   /* snap the whole year into view */
   .scroller.fit{overflow-x:hidden}
   .scroller.fit .rail{width:100%}
@@ -391,7 +395,9 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
   </div>
   <div class="toprow2">
     <button class="btn" id="btnUndo" title="Undo">↶ Undo</button>
+    <button class="btn navarr" id="btnLeft" title="Back a month">‹</button>
     <button class="btn menubtn" id="btnMenu"><span>Menu</span><i class="car">▾</i></button>
+    <button class="btn navarr" id="btnRight" title="Forward a month">›</button>
     <button class="btn" id="btnFit">See full year</button>
   </div>
   <div class="menupanel" id="menuPanel">
@@ -1062,6 +1068,10 @@ function fitGrid(){
   const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0)+(wide?20:0);
   const h=Math.max(320,(window.innerHeight||800)-top-below-6);
   document.documentElement.style.setProperty("--gridh",h+"px");
+  if(wide&&!fitMode){
+    const cw=Math.floor((sc.clientWidth||1200)/6);
+    sc.style.setProperty("--colw",cw+"px");
+  } else sc.style.removeProperty("--colw");
 }
 function render(anim,popTab){
   MODEL=build();
@@ -1093,6 +1103,7 @@ function render(anim,popTab){
     clampView();
     render("anim-spill",true);
     if(next===parseYM(NOW).y) setTimeout(()=>centerNow(true),20);
+    setTimeout(centerWide,40);
   });
   const pv=document.getElementById("yprev"), nx=document.getElementById("ynext");
   if(pv) pv.onclick=()=>{ winStart=Math.max(0,winStart-1); render(null,false); };
@@ -1102,6 +1113,7 @@ function render(anim,popTab){
   greenShift();
   const sc=document.getElementById("scroller");
   sc.classList.toggle("fit",fitMode);
+  document.body.classList.toggle("fitOn",fitMode);
   const fb=document.getElementById("btnFit");
   if(fb) fb.textContent=fitMode?"Expanded view":"See full year";
   const rail=document.getElementById("rail");
@@ -2422,6 +2434,16 @@ if(fitBtn) fitBtn.onclick=()=>{
   try{ localStorage.setItem("budget_fit_v2",fitMode?"1":"0"); }catch(e){}
   render(); setTimeout(centerWide,30);
 };
+function nudgeCols(dir){
+  const sc=document.getElementById("scroller");
+  if(!sc||fitMode) return;
+  const col=sc.querySelector(".mcol");
+  const w=col?col.offsetWidth:Math.floor(sc.clientWidth/6);
+  sc.scrollBy({left:dir*w,behavior:"smooth"});
+}
+{ const L=document.getElementById("btnLeft"), R=document.getElementById("btnRight");
+  if(L) L.onclick=()=>nudgeCols(-1);
+  if(R) R.onclick=()=>nudgeCols(1); }
 const menuPanel=document.getElementById("menuPanel");
 const menuBtn=document.getElementById("btnMenu");
 menuBtn.onclick=()=>{ menuPanel.classList.toggle("open"); menuBtn.classList.toggle("open"); };
@@ -2453,7 +2475,7 @@ menuPanel.querySelectorAll(".btn,label.btn").forEach(b=>b.addEventListener("clic
 let rzTimer=null, lastPer=perView();
 addEventListener("resize",()=>{
   clearTimeout(rzTimer);
-  rzTimer=setTimeout(()=>{ fitGrid(); if(perView()!==lastPer){ lastPer=perView(); render(null); } },160);
+  rzTimer=setTimeout(()=>{ fitGrid(); if(perView()!==lastPer){ lastPer=perView(); render(null); } centerWide(); },160);
 });
 /* Android/Chrome installability — the manifest is generated from inside the file */
 try{
