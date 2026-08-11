@@ -85,7 +85,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 @media(min-width:1101px){
   .scroller{padding-bottom:14px;overflow-x:auto;overflow-y:hidden}
   .rail{width:max-content;min-width:100%}
-  .mcol{flex:0 0 216px;width:216px}
+  .mcol{flex:0 0 248px;width:248px}
   /* snap the whole year into view */
   .scroller.fit{overflow-x:hidden}
   .scroller.fit .rail{width:100%}
@@ -192,7 +192,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mfoot .v.ok{color:var(--teal)} .mfoot .v.low{color:var(--amber)} .mfoot .v.neg{color:var(--red)}
 .mfoot .delta{font-size:9.5px;color:var(--dimmer);font-variant-numeric:tabular-nums}
 
-#tip{position:fixed;z-index:200;pointer-events:none;opacity:0;transition:opacity .1s;
+#tip{position:fixed;z-index:200;pointer-events:none;opacity:0;transform:translateY(4px);
+  transition:opacity .26s ease,transform .26s ease;
   background:#111c21;border:1px solid var(--line2);border-radius:6px;padding:10px 12px;
   min-width:216px;max-width:290px;max-height:78vh;overflow:hidden;
   box-shadow:0 12px 34px rgba(0,0,0,.8)}
@@ -202,7 +203,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   #tip .tr{font-size:12px;padding:3px 0}
   #tip .tt{font-size:12px}
 }
-#tip.show{opacity:1}
+#tip.show{opacity:1;transform:none}
 #tip .tt{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--txt);margin-bottom:2px}
 #tip .td{font-size:10px;color:var(--dimmer);margin-bottom:8px}
 #tip .tr{display:flex;justify-content:space-between;gap:14px;font-size:11px;padding:2px 0;color:var(--dim)}
@@ -276,6 +277,9 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row.grp .gn{color:var(--dimmer);font-weight:600;font-size:10px}
 .row .tri{color:var(--dimmer);font-size:9px;transition:.15s;flex:none;padding-left:2px}
 .row .tri.up{transform:rotate(180deg);color:var(--teal)}
+.row.bud .amt{color:#9ad6a0}
+.row.bud.grp .lbl{color:#9ad6a0}
+.row.bud .cut{font-size:9.5px;color:var(--dimmer);font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
 .row.child{background:rgba(255,255,255,.02)}
 .row.child .lbl{padding-left:12px;font-weight:600;opacity:.9}
 .row.info .lbl,.row.info .amt{color:var(--dimmer);font-style:italic}
@@ -330,6 +334,24 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .emptybox{max-width:430px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);padding:20px 22px}
 .emptybox .et{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--txt);margin-bottom:9px}
 .emptybox .eb{font-size:11.5px;line-height:1.75;color:var(--dim)}
+.lockwrap{position:fixed;inset:0;z-index:400;display:none;align-items:center;justify-content:center;
+  background:rgba(4,7,9,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.lockwrap.on{display:flex}
+body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspill{
+  filter:blur(9px);pointer-events:none;user-select:none}
+.lockbox{width:290px;max-width:88vw;background:#0e161a;border:1px solid var(--line2);
+  border-radius:16px;padding:22px 20px;box-shadow:0 24px 70px rgba(0,0,0,.75);text-align:center}
+.lockbox .lt{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--txt);font-weight:700}
+.lockbox .ld{font-size:10.5px;color:var(--dimmer);margin-top:6px}
+.dots{display:flex;gap:11px;justify-content:center;margin:20px 0 18px}
+.dots i{width:12px;height:12px;border-radius:50%;border:1px solid var(--line2);display:block}
+.dots i.on{background:var(--teal);border-color:var(--teal)}
+.dots.bad i{border-color:var(--red)}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.keys button{padding:15px 0;font-size:18px;font-weight:600;border:1px solid var(--line2);
+  border-radius:9px;background:var(--panel2);color:var(--txt)}
+.keys button:active{background:var(--panel3);border-color:var(--teal)}
+.keys button.wide{grid-column:span 1;font-size:12px;color:var(--dim)}
 .pickwrap{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.62);display:none;
   align-items:flex-end;justify-content:center;padding:0}
 .pickwrap.on{display:flex}
@@ -400,6 +422,14 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   <div class="dbody" id="dbody"></div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="lockwrap" id="lockWrap">
+  <div class="lockbox">
+    <div class="lt">Enter PIN</div>
+    <div class="ld" id="lockWhy">Locked after three minutes idle</div>
+    <div class="dots" id="lockDots"></div>
+    <div class="keys" id="lockKeys"></div>
+  </div>
+</div>
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
@@ -464,6 +494,8 @@ function migrate(s){
   s.balancers=s.balancers||{};
   s.accountNames=s.accountNames||{};
   s.catRules=s.catRules||[];
+  s.meta.ccTarget=s.meta.ccTarget??5000;
+  s.meta.holdCat=s.meta.holdCat||"Groceries";
   s.meta.title=s.meta.title||"Household Budget";
   /* show the whole calendar year, but remember which months predate any records */
   if(!s.meta.recordsFrom) s.meta.recordsFrom=s.meta.start;
@@ -988,14 +1020,16 @@ function pickAnim(prev,next){
 }
 let viewIndex=0;
 const expanded=new Set();
-let fitMode=(()=>{ try{ return localStorage.getItem("budget_fit")==="1"; }catch(e){ return false; } })();
+let fitMode=(()=>{ try{ return localStorage.getItem("budget_fit_v2")==="1"; }catch(e){ return false; } })();
 /* wide screens: slide the current month to the middle */
 function centerWide(){
   const sc=document.getElementById("scroller");
   if(!sc||fitMode||innerWidth<=1100) return;
   const col=sc.querySelector(".mcol.now")||sc.querySelector(".mcol");
   if(!col) return;
-  sc.scrollLeft=Math.max(0,col.offsetLeft-(sc.clientWidth-col.offsetWidth)/2);
+  const want=col.offsetLeft-(sc.clientWidth-col.offsetWidth)/2;
+  const max=sc.scrollWidth-sc.clientWidth;
+  sc.scrollLeft=Math.max(0,Math.min(want,max));   /* clamps near either end */
 }
 function perView(){
   const w=innerWidth;
@@ -1124,7 +1158,33 @@ function render(anim,popTab){
         kind:g[0].kind,off:g[0].off,manual:g[0].manual,ruleId:g[0].ruleId});
       if(open) g.forEach(x=>shown.push({...x,child:true}));
     });
+    const plan=trimPlan();
+    if(plan) shown.push({budget:true,plan});
     shown.forEach((r,ri)=>{
+      if(r.budget){
+        const p=r.plan, key=M.k+"|budget", open=expanded.has(key);
+        const el=document.createElement("div");
+        el.className="row grp bud exp";
+        el.innerHTML=`<span class="dot"></span>
+          <span class="lbl">Budget <span class="gn">target</span></span>
+          <span class="amt">${money(-p.target)}</span>
+          <span class="tri${open?" up":""}">▾</span>`;
+        el.onclick=()=>{ expanded.has(key)?expanded.delete(key):expanded.add(key); render(); };
+        el.onmouseenter=e=>showTip(e,{budgetPlan:p,label:"Budget target",amount:-p.target,day:99},M.k);
+        el.onmousemove=ev=>{ if(innerWidth>=760) moveTip(ev); };
+        el.onmouseleave=()=>{ if(innerWidth>=760) hideTip(); };
+        box.appendChild(el);
+        if(open) p.rows.forEach(x=>{
+          const c=document.createElement("div");
+          c.className="row child bud exp";
+          c.innerHTML=`<span class="dot"></span>
+            <span class="lbl" style="color:${CATCOLOR[x.cat]||"var(--dim)"}">${x.cat}${x.held?" <span class='gn'>held</span>":""}</span>
+            <span class="amt">${money(-x.target)}</span>
+            <span class="cut">${x.held?"—":money(-x.cut)}</span>`;
+          box.appendChild(c);
+        });
+        return;
+      }
       if(r.group){
         const el=document.createElement("div");
         el.className="row grp "+r.kind+(r.off?" off":"");
@@ -1256,8 +1316,13 @@ function drawStats(){
 
 /* ---------- tooltip ---------- */
 const tip=document.getElementById("tip");
-let tipOwner=null, tipShownAt=0;
+let tipOwner=null, tipShownAt=0, tipTimer=null;
 function showTip(e,r,k){
+  clearTimeout(tipTimer);
+  const ev={clientX:e.clientX,clientY:e.clientY,currentTarget:e.currentTarget};
+  tipTimer=setTimeout(()=>reallyShowTip(ev,r,k),360);   /* let the pointer settle first */
+}
+function reallyShowTip(e,r,k){
   const {y}=parseYM(k);
   const name=r.balancer?"Balancer":r.bonus?S.bonus.name:r.oneoff?r.oneoff.name:r.rule.name;
   let ytd=0,ytdCount=0,yearTotal=0,planTotal=0,planCount=0,monthTotal=0,remaining=0;
@@ -1301,6 +1366,19 @@ function showTip(e,r,k){
     const M=MODEL.find(x=>x.k===k);
     h+=`<div class="hr"></div><div class="tr"><span>Visits this month</span><b>${M.cleanCount}${M.cleanCount>2?" (3-visit)":""}</b></div>
         <div class="tr"><span>Month total</span><b>${money(monthTotal)}</b></div>`;
+  }
+  if(r.budgetPlan){
+    const p=r.budgetPlan;
+    let hh=`<div class="tt">Budget target</div><div class="td">from ${p.n} statements</div>
+      <div class="tr"><span>Card averages</span><b>${money(p.avgTot)} a month</b></div>
+      <div class="tr"><span>Target</span><b>${money(p.target)}</b></div>
+      <div class="tr"><span>Over by</span><b>${money(p.over)}</b></div><div class="hr"></div>
+      <div class="tr"><span>${p.hold} held at</span><b>${money(p.keep)}</b></div>
+      <div class="tr"><span>Everything else</span><b>${(p.f*100).toFixed(0)}% of today</b></div>
+      <div class="note">That's a ${((1-p.f)*100).toFixed(0)}% cut to every category except ${p.hold.toLowerCase()}.
+      Tap the row to see each target.</div>`;
+    tip.innerHTML=hh; tip.classList.add("show");
+    tipOwner=e.currentTarget||null; tipShownAt=Date.now(); moveTip(e); return;
   }
   if(r.info) h+=`<div class="note">This statement predates the budget, so it's here for reference only — it isn't subtracted from any balance. Your opening cash already accounts for it.</div>`;
   else if(r.off) h+=`<div class="note">Paid from ${acctLabel(r.account)} — not your main one. It shows here so you can see the whole household picture, but it is <b>not</b> subtracted from the month's ending balance.</div>`;
@@ -1351,7 +1429,7 @@ function moveTip(e){
   if(y+h>vh-pad) y=Math.max(pad,vh-h-pad);
   tip.style.left=x+"px"; tip.style.top=y+"px";
 }
-function hideTip(){ tip.classList.remove("show"); tipOwner=null; }
+function hideTip(){ clearTimeout(tipTimer); tip.classList.remove("show"); tipOwner=null; }
 /* on a touch screen the card sticks after a tap, so any tap clears it */
 document.addEventListener("click",e=>{
   if(Date.now()-tipShownAt<450) return;          // don't kill the tap that opened it
@@ -1414,6 +1492,7 @@ function recHTML(){
   <div class="fg" style="margin-bottom:14px">
     <div class="f"><label>Starting cash</label><input id="mOpen" value="${S.meta.opening}"></div>
     <div class="f"><label>Low-balance alert</label><input id="mBuf" value="${S.meta.buffer}"></div>
+    <div class="f"><label>Card budget target</label><input id="mCC" value="${S.meta.ccTarget}"></div>
     <div class="f"><label>Plan ends</label><input id="mEnd" value="${S.meta.end}"></div>
   </div>`;
   S.rules.forEach(r=>{
@@ -1524,6 +1603,7 @@ function wireRec(){
   });
   bind(document.getElementById("mOpen"),v=>S.meta.opening=parseFloat(v)||0);
   bind(document.getElementById("mBuf"),v=>S.meta.buffer=parseFloat(v)||0);
+  bind(document.getElementById("mCC"), v=>S.meta.ccTarget=parseFloat(v)||5000);
   bind(document.getElementById("mEnd"),v=>{if(/^\d{4}-\d{2}$/.test(v))S.meta.end=v;});
 }
 
@@ -2006,6 +2086,24 @@ function catsOf(tx){
   const by={}; tx.forEach(r=>by[r.cat]=(by[r.cat]||0)+r.amt);
   return Object.entries(by).filter(e=>Math.abs(e[1])>0.005).sort((a,b)=>b[1]-a[1]);
 }
+/* what every category has to come down to so the card lands on target,
+   with one category (groceries by default) left alone */
+function trimPlan(){
+  const keys=Object.keys(S.stmts||{}).filter(k=>S.stmts[k]&&S.stmts[k].rows&&S.stmts[k].rows.length);
+  if(keys.length<2) return null;
+  const by={}; let tot=0;
+  keys.forEach(k=>S.stmts[k].rows.forEach(r=>{ by[r.cat]=(by[r.cat]||0)+r.amt; tot+=r.amt; }));
+  const n=keys.length, avgTot=tot/n, hold=S.meta.holdCat||"Groceries";
+  const avg={}; Object.entries(by).forEach(([c,v])=>avg[c]=v/n);
+  const keep=avg[hold]||0, rest=avgTot-keep, room=(S.meta.ccTarget||5000)-keep;
+  const f=rest>0?Math.max(0,room/rest):0;
+  const rows=Object.entries(avg).sort((a,b)=>b[1]-a[1]).map(([c,v])=>{
+    const t=c===hold?v:v*f;
+    return {cat:c,now:v,target:t,cut:v-t,held:c===hold};
+  });
+  return {n,avgTot,hold,keep,room,f,rows,target:S.meta.ccTarget||5000,
+          over:avgTot-(S.meta.ccTarget||5000)};
+}
 function cardBtnState(){
   const y=YEAR, d=cardYear(y);
   if(d.keys.length<2) return {label:"Awaiting card info", mode:"waiting", d};
@@ -2321,7 +2419,7 @@ document.getElementById("btnUndo").onclick=undo;
 const fitBtn=document.getElementById("btnFit");
 if(fitBtn) fitBtn.onclick=()=>{
   fitMode=!fitMode;
-  try{ localStorage.setItem("budget_fit",fitMode?"1":"0"); }catch(e){}
+  try{ localStorage.setItem("budget_fit_v2",fitMode?"1":"0"); }catch(e){}
   render(); setTimeout(centerWide,30);
 };
 const menuPanel=document.getElementById("menuPanel");
@@ -2370,8 +2468,57 @@ try{
   document.head.appendChild(link);
 }catch(e){}
 
+/* ── PIN ─────────────────────────────────────────────── */
+const PIN="6669", IDLE_MS=180000;
+let entry="", idleTimer=null, locked=false;
+function drawDots(bad){
+  const d=document.getElementById("lockDots");
+  d.className="dots"+(bad?" bad":"");
+  d.innerHTML=[0,1,2,3].map(i=>`<i class="${i<entry.length?"on":""}"></i>`).join("");
+}
+function lock(why){
+  if(locked) return;
+  locked=true; entry="";
+  document.getElementById("lockWhy").textContent=why||"Locked after three minutes idle";
+  document.getElementById("lockWrap").classList.add("on");
+  document.body.classList.add("locked");
+  drawDots(false);
+}
+function unlock(){
+  locked=false; entry="";
+  document.getElementById("lockWrap").classList.remove("on");
+  document.body.classList.remove("locked");
+  armIdle();
+}
+function armIdle(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>lock(),IDLE_MS); }
+function keyIn(ch){
+  if(ch==="del"){ entry=entry.slice(0,-1); drawDots(false); return; }
+  if(entry.length>=4) return;
+  entry+=ch; drawDots(false);
+  if(entry.length===4){
+    if(entry===PIN) setTimeout(unlock,120);
+    else setTimeout(()=>{ entry=""; drawDots(true); setTimeout(()=>drawDots(false),700); },140);
+  }
+}
+(function(){
+  const k=document.getElementById("lockKeys");
+  k.innerHTML=[1,2,3,4,5,6,7,8,9].map(n=>`<button data-k="${n}">${n}</button>`).join("")
+    +`<button class="wide" data-k="del">Del</button><button data-k="0">0</button><span></span>`;
+  k.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>keyIn(b.dataset.k));
+  addEventListener("keydown",e=>{
+    if(!locked) return;
+    if(/^[0-9]$/.test(e.key)) keyIn(e.key);
+    else if(e.key==="Backspace") keyIn("del");
+    e.stopPropagation();
+  },true);
+  ["pointerdown","keydown","wheel","touchstart"].forEach(t=>
+    addEventListener(t,()=>{ if(!locked) armIdle(); },{passive:true,capture:true}));
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"&&!locked) armIdle(); });
+})();
+
 render();
 stampSaved();
+lock("Enter your PIN to open the budget");
 if(syncOn()&&!netBlocked()) syncPull(true);
 snapNow();
 /* check for a newer copy every few minutes */
