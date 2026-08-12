@@ -287,16 +287,71 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row.bud .cut{font-size:9.5px;color:var(--dimmer);font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
 .row.child{background:rgba(255,255,255,.02)}
 .row.child .lbl{padding-left:12px;font-weight:600;opacity:.9}
-/* the cycle that's still filling in — warms up as it walks toward the target */
-.row.heat{border-radius:4px;animation:heatIn .5s ease both}
+/* the cycle that's still filling in — warms up as it walks toward the target.
+   every animation lives on a pseudo-element so it can't fight the spill-in
+   animation the row itself already uses when a month slides into view. */
+.row.heat{border-radius:4px;overflow:hidden}
+.row.heat>*{position:relative;z-index:2}
+.row.heat::before,.row.heat::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none}
 .row.heat .amt{font-weight:800}
+
+/* 1 — plenty of room. slow drifting glitter. */
 .row.heat1{background:rgba(240,196,80,.13);box-shadow:inset 2px 0 0 #f0c450}
 .row.heat1 .amt{color:#f5d071}
+.row.heat1::before{
+  background-image:
+    radial-gradient(1.6px 1.6px at 11% 32%,#fff3c4,transparent 60%),
+    radial-gradient(1.2px 1.2px at 34% 71%,#ffd970,transparent 60%),
+    radial-gradient(1.7px 1.7px at 58% 24%,#fff6d0,transparent 60%),
+    radial-gradient(1.2px 1.2px at 82% 66%,#ffe08a,transparent 60%);
+  animation:glint 5.4s ease-in-out infinite}
+.row.heat1::after{
+  background-image:
+    radial-gradient(1.3px 1.3px at 22% 62%,#fff1bb,transparent 60%),
+    radial-gradient(1.7px 1.7px at 46% 40%,#ffe9a8,transparent 60%),
+    radial-gradient(1.2px 1.2px at 70% 78%,#fff6d0,transparent 60%),
+    radial-gradient(1.5px 1.5px at 93% 30%,#ffdf85,transparent 60%);
+  animation:glint 6.7s ease-in-out infinite 1.9s}
+@keyframes glint{0%,100%{opacity:.12}30%{opacity:.85}55%{opacity:.2}80%{opacity:.7}}
+
+/* 2 — halfway. a warm light sweeps across every few seconds. */
 .row.heat2{background:rgba(240,148,60,.15);box-shadow:inset 2px 0 0 #f0943c}
 .row.heat2 .amt{color:#ffab5e}
+.row.heat2::before{
+  background:linear-gradient(100deg,transparent 34%,rgba(255,190,110,.3) 50%,transparent 66%);
+  background-size:240% 100%;animation:sweep 4.2s linear infinite}
+@keyframes sweep{from{background-position:190% 0}to{background-position:-90% 0}}
+
+/* 3 — nearly there. a steady, quickening heartbeat. */
 .row.heat3{background:rgba(232,84,72,.17);box-shadow:inset 2px 0 0 #e85448}
-.row.heat3 .amt{color:#ff8b7e}
-@keyframes heatIn{from{background:transparent;box-shadow:inset 0 0 0 rgba(0,0,0,0)}}
+.row.heat3 .amt{color:#ff8b7e;animation:throbtext 1.45s ease-in-out infinite}
+.row.heat3::before{
+  background:radial-gradient(130% 180% at 0% 50%,rgba(232,84,72,.5),transparent 72%);
+  animation:throb 1.45s ease-in-out infinite}
+@keyframes throb{0%,100%{opacity:.3}50%{opacity:.95}}
+@keyframes throbtext{0%,100%{color:#ff8b7e}50%{color:#ffd0c6}}
+
+/* 4 — past the target. it's on fire. */
+.row.heat4{background:rgba(104,22,10,.4);box-shadow:inset 2px 0 0 #ff5722}
+.row.heat4 .amt{color:#ffd48a;animation:emberglow 1.1s ease-in-out infinite;
+  text-shadow:0 0 7px rgba(255,120,30,.85)}
+.row.heat4::before{
+  background-image:
+    radial-gradient(52% 96% at 50% 100%,rgba(255,232,150,.9),rgba(255,128,24,.8) 46%,transparent 80%),
+    radial-gradient(58% 92% at 50% 100%,rgba(255,104,20,.95),transparent 74%);
+  background-size:13px 17px,21px 21px;background-position:0 100%,7px 100%;
+  background-repeat:repeat-x;mix-blend-mode:screen;
+  animation:lick .58s ease-in-out infinite alternate}
+.row.heat4::after{
+  background-image:radial-gradient(46% 90% at 50% 100%,rgba(255,246,200,.95),transparent 76%);
+  background-size:9px 13px;background-position:4px 100%;background-repeat:repeat-x;
+  mix-blend-mode:screen;animation:lick2 .44s ease-in-out infinite alternate}
+@keyframes lick{from{background-size:13px 11px,21px 14px;opacity:.72}
+                to{background-size:13px 19px,21px 24px;opacity:.95}}
+@keyframes lick2{from{background-size:9px 7px;opacity:.4}
+                 to{background-size:9px 15px;opacity:.8}}
+@keyframes emberglow{0%,100%{text-shadow:0 0 5px rgba(255,120,30,.7)}
+                     50%{text-shadow:0 0 12px rgba(255,180,60,1)}}
 .row.info .lbl,.row.info .amt{color:var(--dimmer);font-style:italic}
 .row.info .dot{background:var(--dimmer)}
 .mfoot .infon{font-size:9.5px;font-weight:600;color:var(--dimmer);letter-spacing:.04em;margin-top:2px;line-height:1.25}
@@ -343,7 +398,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .anim-spill .mcol{animation:popCol .45s cubic-bezier(.34,1.5,.5,1) both}
 .anim-spill .row{animation:spillIn .42s cubic-bezier(.34,1.25,.5,1) both}
 @media (prefers-reduced-motion:reduce){
-  .anim-shift .mcol,.anim-spill .mcol,.anim-spill .row,.ytab.pop,.mcol.now.pulse,.mcol.now.pulse::after{animation:none}
+  .anim-shift .mcol,.anim-spill .mcol,.anim-spill .row,.ytab.pop,.mcol.now.pulse,.mcol.now.pulse::after,
+  .row.heat::before,.row.heat::after,.row.heat .amt{animation:none}
 }
 #emptyState{padding:34px 20px 120px;display:flex;justify-content:center}
 .emptybox{max-width:430px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);padding:20px 22px}
@@ -644,7 +700,7 @@ function heatLevel(k){
   const tgt=Math.abs(Number(S.meta.ccTarget)||0);
   if(!tgt) return 1;
   const f=Math.abs(lt)/tgt;
-  return f>=0.9?3:f>=0.6?2:1;
+  return f>=1?4:f>=0.85?3:f>=0.6?2:1;
 }
 function liveTotal(){
   const st=liveStmt(); if(!st) return null;
@@ -1242,8 +1298,7 @@ function render(anim,popTab){
           c.className="row child bud exp";
           c.innerHTML=`<span class="dot"></span>
             <span class="lbl" style="color:${CATCOLOR[x.cat]||"var(--dim)"}">${x.cat}${x.held?" <span class='gn'>held</span>":""}</span>
-            <span class="amt">${money(-x.target)}</span>
-            <span class="cut">${x.held?"—":money(-x.cut)}</span>`;
+            <span class="amt">${money(-x.target)}</span>`;
           box.appendChild(c);
         });
         return;
@@ -1571,7 +1626,8 @@ function recHTML(){
     const cur=amountAt(r,S.meta.end);
     h+=`<div class="card" data-r="${r.id}">
       <div class="chead"><span class="car">▸</span><span class="nm">${r.name}</span>
-        <span class="cad">${r.cadence}${r.manual?" · manual":""}${r.offbook?" · off-book":""}</span></div>
+        <span class="cad">${r.cadence}${r.manual?" · manual":""}${r.offbook?" · off-book":""}</span>
+        <span class="am" style="color:${cur>=0?"var(--teal)":"#f0a894"}">${money(cur)}</span></div>
       <div class="cbody">
         <div class="fg">
           <div class="f" style="flex:2"><label>Name</label><input data-f="name" value="${r.name}"></div>
