@@ -2420,11 +2420,45 @@ document.getElementById("fileIn").onchange=e=>{
   rd.onload=()=>{try{S=JSON.parse(rd.result);migrate(S);save();render();toast("Loaded");}catch(x){toast("That file didn't parse");}};
   rd.readAsText(f);
 };
+/* one step back, innermost thing first */
+function stepBack(){
+  const pick=document.getElementById("pickWrap");
+  if(pick&&pick.classList.contains("on")){ closePicker(); return true; }
+  if(drawer.classList.contains("open")){
+    /* card drawer drills year > month > category; unwind it a level at a time */
+    if(nav.cat){ nav.cat=null; openDrawer("card"); return true; }
+    if(nav.month){ nav.month=null; openDrawer("card"); return true; }
+    closeDrawer(); return true;
+  }
+  const mp=document.getElementById("menuPanel");
+  if(mp.classList.contains("open")){ closeMenu(); return true; }
+  return false;
+}
+function menuOpen(){ return document.getElementById("menuPanel").classList.contains("open"); }
+function openMenu(){ document.getElementById("menuPanel").classList.add("open");
+                     document.getElementById("btnMenu").classList.add("open"); }
+function closeMenu(){ document.getElementById("menuPanel").classList.remove("open");
+                      document.getElementById("btnMenu").classList.remove("open"); }
+/* typing in a field? keys belong to the field, not the app */
+function typing(t){ return t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable); }
+
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape"){ closePicker(); closeDrawer(); document.getElementById("menuPanel").classList.remove("open"); document.getElementById("btnMenu").classList.remove("open"); }
+  if(locked) return;
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); return; }
-  if(e.key==="ArrowLeft") shiftView(-1);
-  if(e.key==="ArrowRight") shiftView(1);
+  if(typing(e.target)) return;
+
+  if(e.key==="Escape"||e.key==="Backspace"){ if(stepBack()) e.preventDefault(); return; }
+
+  if(e.key==="ArrowDown"){ if(!menuOpen()&&!drawer.classList.contains("open")){ e.preventDefault(); openMenu(); } return; }
+  if(e.key==="ArrowUp"){ if(menuOpen()){ e.preventDefault(); closeMenu(); } return; }
+
+  if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
+    if(drawer.classList.contains("open")) return;
+    const d=e.key==="ArrowRight"?1:-1;
+    /* wide + expanded: slide the rail. everywhere else: page the window of months */
+    if(innerWidth>1100&&!fitMode) nudgeCols(d); else shiftView(d);
+    e.preventDefault();
+  }
 });
 
 /* menu */
@@ -2447,8 +2481,8 @@ function nudgeCols(dir){
   if(R) R.onclick=()=>nudgeCols(1); }
 const menuPanel=document.getElementById("menuPanel");
 const menuBtn=document.getElementById("btnMenu");
-menuBtn.onclick=()=>{ menuPanel.classList.toggle("open"); menuBtn.classList.toggle("open"); };
-menuPanel.querySelectorAll(".btn,label.btn").forEach(b=>b.addEventListener("click",()=>{menuPanel.classList.remove("open");menuBtn.classList.remove("open");}));
+menuBtn.onclick=()=>{ menuOpen()?closeMenu():openMenu(); };
+menuPanel.querySelectorAll(".btn,label.btn").forEach(b=>b.addEventListener("click",closeMenu));
 
 /* swipe the grid a month at a time */
 
@@ -2536,7 +2570,16 @@ function keyIn(ch){
   },true);
   ["pointerdown","keydown","wheel","touchstart"].forEach(t=>
     addEventListener(t,()=>{ if(!locked) armIdle(); },{passive:true,capture:true}));
-  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"&&!locked) armIdle(); });
+  let pickAt=0;
+  ["fileIn","stmtIn"].forEach(id=>{ const el=document.getElementById(id);
+    if(el){ el.addEventListener("click",()=>pickAt=Date.now());
+            el.addEventListener("change",()=>pickAt=Date.now()); } });
+  const picking=()=>Date.now()-pickAt<90000;
+  document.addEventListener("visibilitychange",()=>{
+    if(document.visibilityState==="hidden"){ if(!picking()) lock("Locked while you were away"); return; }
+    if(!locked) armIdle();
+  });
+  addEventListener("pagehide",()=>{ if(!picking()) lock("Locked while you were away"); });
 })();
 
 render();
