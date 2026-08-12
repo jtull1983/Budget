@@ -604,6 +604,33 @@ function payoffDone(rule){
   for(const key in map) if(map[key].applied&&map[key].left<=0) return key.split("#")[1];
   return null;
 }
+
+/* ---------- live card feed ----------
+   Spending runs the 4th to the 3rd and lands on the following month's bill.
+   One month accumulates live; everything past it keeps its flat target.
+   A closed cycle stays live a few more days so late-posting charges land. */
+const CYCLE_DAY=4, GRACE_DAYS=4;
+function nextMonth(k){ const {y,m}=parseYM(k); return m===12?ym(y+1,1):ym(y,m+1); }
+function liveCycle(today){
+  const d=today||new Date();
+  const day=d.getDate();
+  let y=d.getFullYear(), m=d.getMonth()+1;
+  const back=()=>{ m--; if(m<1){ m=12; y--; } };
+  if(day<CYCLE_DAY) back();                                  /* still inside last month's cycle */
+  else if(day<CYCLE_DAY+GRACE_DAYS) back();                  /* grace on the cycle that just shut */
+  const startM=ym(y,m), bill=nextMonth(startM), e=parseYM(bill);
+  return {start:startM+"-04",
+          end:String(e.y)+"-"+String(e.m).padStart(2,"0")+"-03",
+          spend:startM, bill:bill};
+}
+function liveStmt(){
+  const st=S.stmts&&S.stmts[liveCycle().bill];
+  return (st&&st.live&&st.rows)?st:null;
+}
+function liveTotal(){
+  const st=liveStmt(); if(!st) return null;
+  return st.rows.reduce((a,r)=>a+r.amt,0);
+}
 function build(){
   _pstamp++; _pcache={};
   const out=[]; let onhand=S.meta.opening;
@@ -617,6 +644,10 @@ function build(){
         if(S.skip[key]) return;
         const ovr=key in S.over;
         let amt=ovr?S.over[key]:amountAt(r,k);
+        /* hand-typed always wins; otherwise the live cycle shows real spend */
+        if(!ovr&&r.id==="cc"&&k===liveCycle().bill){
+          const lt=liveTotal(); if(lt!==null) amt=-Math.round(lt*100)/100;
+        }
         if(r.payoff){ const pe=payoffMap(r)[key]; if(!pe||!pe.applied) return; amt=pe.amount; }
         let label=r.name;
         if(r.cadence==="biweekly")
@@ -1337,7 +1368,8 @@ function showTip(e,r,k){
 }
 function reallyShowTip(e,r,k){
   const {y}=parseYM(k);
-  const name=r.balancer?"Balancer":r.bonus?S.bonus.name:r.oneoff?r.oneoff.name:r.rule.name;
+  const name=r.balancer?"Balancer":r.bonus?S.bonus.name:r.oneoff?r.oneoff.name
+             :(r.rule?r.rule.name:(String(r.label||"").split(" · ")[0]||"—"));
   let ytd=0,ytdCount=0,yearTotal=0,planTotal=0,planCount=0,monthTotal=0,remaining=0;
   for(const M of MODEL){
     const inYear=parseYM(M.k).y===y;
@@ -1392,6 +1424,13 @@ function reallyShowTip(e,r,k){
       Tap the row to see each target.</div>`;
     tip.innerHTML=hh; tip.classList.add("show");
     tipOwner=e.currentTarget||null; tipShownAt=Date.now(); moveTip(e); return;
+  }
+  if(r.ruleId==="cc"&&k===liveCycle().bill&&liveStmt()){
+    const st=liveStmt(), cats=catsOf(st.rows);
+    h+=`<div class="hr"></div><div class="tr"><span>Live · ${st.cycle.start} to ${st.cycle.end}</span><b>${st.rows.length} charges</b></div>`;
+    cats.slice(0,8).forEach(([c,v])=>{ h+=`<div class="tr"><span>${c}</span><b>${money(-v)}</b></div>`; });
+    if(cats.length>8) h+=`<div class="tr"><span>${cats.length-8} more</span><b></b></div>`;
+    h+=`<div class="note">Adding up as you spend. Type a number in and yours wins instead.</div>`;
   }
   if(r.info) h+=`<div class="note">This statement predates the budget, so it's here for reference only — it isn't subtracted from any balance. Your opening cash already accounts for it.</div>`;
   else if(r.off) h+=`<div class="note">Paid from ${acctLabel(r.account)} — not your main one. It shows here so you can see the whole household picture, but it is <b>not</b> subtracted from the month's ending balance.</div>`;
@@ -1981,6 +2020,78 @@ function schedulePush(){
   pushTimer=setTimeout(()=>syncPush(false),2500);   // settle before hitting the network
 }
 
+
+/* ---------- SimpleFIN client ----------
+   The access URL is the credential. Its own key, never in the state object,
+   so exporting a copy with data baked in can't carry it. */
+const SFKEY="budget_sfin_v1";
+let sfin=(()=>{ try{ return JSON.parse(localStorage.getItem(SFKEY))||{}; }catch(e){ return {}; } })();
+function saveSfin(){ try{ localStorage.setItem(SFKEY,JSON.stringify(sfin)); }catch(e){} }
+function sfinOn(){ return !!sfin.accessUrl; }
+/* fetch() refuses a URL with user:pass@ in it, so split them out by hand */
+function sfinParts(){
+  const u=new URL(sfin.accessUrl);
+  const auth="Basic "+btoa(decodeURIComponent(u.username)+":"+decodeURIComponent(u.password));
+  u.username=""; u.password="";
+  return {base:u.toString().replace(/\/$/,""), auth};
+}
+async function sfinClaim(setupToken){
+  const claim=atob(String(setupToken).trim());
+  const r=await fetch(claim,{method:"POST"});
+  if(!r.ok) throw new Error("claim failed ("+r.status+") — setup tokens work once only");
+  const url=(await r.text()).trim();
+  if(!/^https:\/\//.test(url)) throw new Error("that didn't come back as a URL");
+  sfin.accessUrl=url; sfin.lastErr=""; saveSfin();
+  return url;
+}
+/* a payment isn't spending — it just moves the balance */
+const SFIN_PAYMENT=/\b(payment|autopay|thank you|pymt|e-?payment)\b/i;
+async function sfinPull(quiet){
+  if(!sfinOn()) return;
+  const c=liveCycle();
+  const from=Math.floor(new Date(c.start+"T00:00:00").getTime()/1000);
+  setSync("busy","card feed…");
+  try{
+    const {base,auth}=sfinParts();
+    const r=await fetch(base+"/accounts?start-date="+from,{headers:{Authorization:auth}});
+    if(!r.ok) throw new Error("card feed said "+r.status);
+    const j=await r.json();
+    const errs=[].concat(j.errors||[],j.errlist||[]).filter(Boolean);
+    const endMs=new Date(c.end+"T23:59:59").getTime();
+    const startMs=new Date(c.start+"T00:00:00").getTime();
+    const rows=[], seen={};
+    (j.accounts||[]).forEach(a=>{
+      (a.transactions||[]).forEach(t=>{
+        const when=Number(t.posted||t.transacted_at||0)*1000;
+        if(!when||when<startMs||when>endMs) return;
+        const desc=String(t.description||t.payee||"").trim();
+        if(SFIN_PAYMENT.test(desc)) return;
+        const amt=-Number(t.amount||0);              /* purchases arrive negative */
+        if(!amt) return;
+        /* no stable ids from the bridge — match on what the row actually is */
+        const sig=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
+        if(seen[sig]) return; seen[sig]=1;
+        rows.push({desc, amt, date:new Date(when).toISOString().slice(0,10),
+                   cat:categorize(desc).cat});
+      });
+    });
+    /* a filed statement is the real thing — never overwrite one */
+    const held=S.stmts[c.bill];
+    if(held&&!held.live){ setSync("ok","statement already filed"); return; }
+    /* any month that has rolled out of the live window stops updating */
+    Object.keys(S.stmts).forEach(k=>{ if(k!==c.bill&&S.stmts[k]&&S.stmts[k].live) delete S.stmts[k].live; });
+    S.stmts[c.bill]={rows, live:true, source:"feed", cycle:{start:c.start,end:c.end},
+                     pulledAt:Date.now()};
+    sfin.lastPull=Date.now(); sfin.lastErr=errs.length?String(errs[0]):""; saveSfin();
+    save(); render();
+    setSync(errs.length?"warn":"ok", errs.length?String(errs[0]).slice(0,40):"card feed updated");
+    if(!quiet) toast(rows.length+" charges · "+money(-rows.reduce((a,x)=>a+x.amt,0)));
+  }catch(e){
+    sfin.lastErr=e.message; saveSfin();
+    setSync("err",e.message.slice(0,40));
+    if(!quiet) toast(e.message);
+  }
+}
 function syncHTML(){
   let h="";
   const loc=whereAmI();
@@ -2023,6 +2134,28 @@ function syncHTML(){
       Last save wins — but if the copy on GitHub is newer than the one this device started from, it stops and
       warns you instead of overwriting. Use <b>Pull now</b> to take theirs, or <b>Push now</b> twice to force yours.</div></div>`;
   }
+  const c=liveCycle(), lt=liveTotal();
+  h+=`<div class="hr" style="margin:18px 0 12px"></div>`;
+  h+=`<div class="hint">A live feed from your card, read-only. It fills in
+    <b>${MFULL[parseYM(c.bill).m-1]} ${parseYM(c.bill).y}</b> as you spend —
+    ${c.start} to ${c.end}. Every later month keeps its flat target.</div>`;
+  if(!sfinOn()){
+    h+=`<div class="flag"><div class="ft">Connect the card</div><div class="fb">
+      Sign up at <b>beta-bridge.simplefin.org</b>, link the card, then make a setup token under
+      Apps → New Connection and paste it below. It's read-only and works once.</div></div>
+      <div class="fg"><div class="f"><label>Setup token</label>
+      <input id="sfTok" type="password" placeholder="long string from the bridge"></div></div>
+      <div class="crow"><button class="mini" id="sfConnect">Connect card</button></div>`;
+  } else {
+    h+=`<div class="flag good"><div class="ft">Card connected</div><div class="fb">
+      ${lt!==null?`<b>${money(-lt)}</b> so far this cycle, across ${liveStmt().rows.length} charges.`
+                 :"Nothing pulled yet."}
+      ${sfin.lastPull?`<br>Last checked ${new Date(sfin.lastPull).toLocaleString()}.`:""}
+      <br>Checks once an hour.</div></div>`;
+    if(sfin.lastErr) h+=`<div class="flag bad"><div class="ft">The bridge said</div><div class="fb">${sfin.lastErr}</div></div>`;
+    h+=`<div class="crow"><button class="mini" id="sfPull">Check card now</button>
+        <div style="flex:1"></div><button class="del" id="sfOff">Disconnect card</button></div>`;
+  }
   return h;
 }
 function wireSync(){
@@ -2051,6 +2184,20 @@ function wireSync(){
   const off=document.getElementById("sOff");
   if(off) off.onclick=()=>{ if(confirm("Disconnect this device? The gist stays where it is.")){
     sync={token:"",gistId:"",lastPulled:0}; saveSync(); setSync("ok",""); openDrawer("sync"); toast("Disconnected"); } };
+  const sfc=document.getElementById("sfConnect");
+  if(sfc) sfc.onclick=async()=>{
+    const v=document.getElementById("sfTok").value.trim();
+    if(!v){ toast("Paste the setup token first"); return; }
+    setSync("busy","connecting card…");
+    try{ await sfinClaim(v); await sfinPull(); toast("Card connected"); }
+    catch(e){ setSync("err",e.message.slice(0,40)); toast(e.message); }
+    openDrawer("sync");
+  };
+  const sfp=document.getElementById("sfPull");
+  if(sfp) sfp.onclick=()=>sfinPull().then(()=>openDrawer("sync"));
+  const sfo=document.getElementById("sfOff");
+  if(sfo) sfo.onclick=()=>{ if(confirm("Disconnect the card feed? Charges already pulled stay put.")){
+    sfin={}; saveSfin(); openDrawer("sync"); toast("Card disconnected"); } };
 }
 
 
@@ -2102,7 +2249,7 @@ function catsOf(tx){
 /* what every category has to come down to so the card lands on target,
    with one category (groceries by default) left alone */
 function trimPlan(){
-  const keys=Object.keys(S.stmts||{}).filter(k=>S.stmts[k]&&S.stmts[k].rows&&S.stmts[k].rows.length);
+  const keys=Object.keys(S.stmts||{}).filter(k=>S.stmts[k]&&S.stmts[k].rows&&S.stmts[k].rows.length&&!S.stmts[k].live);
   if(keys.length<2) return null;
   const by={}; let tot=0;
   keys.forEach(k=>S.stmts[k].rows.forEach(r=>{ by[r.cat]=(by[r.cat]||0)+r.amt; tot+=r.amt; }));
@@ -2589,6 +2736,9 @@ if(syncOn()&&!netBlocked()) syncPull(true);
 snapNow();
 /* check for a newer copy every few minutes */
 setInterval(()=>{ if(syncOn()&&!netBlocked()&&document.visibilityState!=="hidden") syncPull(true); },180000);
+/* the bridge expects 24 calls a day at most — hourly, never the 3-minute gist rhythm */
+setInterval(()=>{ if(sfinOn()&&!netBlocked()&&document.visibilityState!=="hidden") sfinPull(true); },3600000);
+setTimeout(()=>{ if(sfinOn()&&!netBlocked()) sfinPull(true); },2500);
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"&&syncOn()&&!netBlocked()) syncPull(true);
 });
