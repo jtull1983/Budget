@@ -2171,6 +2171,154 @@ async function sfinPull(quiet){
 }
 /* Does the bank tell us WHICH card a charge came from? This shows every field
    it actually sends, so we can look instead of guess. */
+
+/* ---------- Buddy the Budget ----------
+   ntfy.sh takes a plain POST and pushes it to every phone subscribed to a topic.
+   No account and no API key — which means the topic name IS the password, so it
+   lives in its own storage key and never rides along in an export. */
+const NTKEY="budget_ntfy_v1";
+let ntfy=(()=>{ try{ return JSON.parse(localStorage.getItem(NTKEY))||{}; }catch(e){ return {}; } })();
+function saveNtfy(){ try{ localStorage.setItem(NTKEY,JSON.stringify(ntfy)); }catch(e){} }
+function ntfyOn(){ return !!ntfy.topic; }
+function rollTopic(){
+  const a="abcdefghijkmnpqrstuvwxyz23456789"; let o="";
+  for(let i=0;i<10;i++) o+=a[Math.floor(Math.random()*a.length)];
+  return "buddybudget-"+o;
+}
+
+const BUDDY_HI=[
+ "hiiii\u2026 so Buddy the Budget here\u2026",
+ "hiiiii\u2026 Buddy the Budget checking in\u2026",
+ "heyyy\u2026 it's Buddy the Budget\u2026",
+ "hiiii\u2026 ya boy Buddy the Budget\u2026",
+ "hiiiii\u2026 Buddy the Budget, back again\u2026",
+ "hiii\u2026 Buddy the Budget, reporting for duty\u2026"];
+
+const BUDDY={
+good:[
+ "y'all are doing really well with your budget. kinda the best little savers ever and def NOT some broke ass bitches.",
+ "checked the card. it's behaving. y'all are basically financially responsible adults and I'm a little emotional about it.",
+ "biiiiitch you doin a good job. that's it. that's the message.",
+ "the numbers look GOOD. suspiciously good. did y'all get a second job or just develop character?",
+ "no notes. genuinely no notes. I came here to roast and I'm leaving inspired.",
+ "y'all are under budget and I'm telling everyone. the group chat knows. the neighbors know.",
+ "this is what fiscal responsibility looks like and honestly? it's hot.",
+ "spending's chill. Xavier's college fund thanks you. he doesn't know yet but he thanks you.",
+ "I ran the math twice because I didn't believe it. y'all are fine. y'all are MORE than fine.",
+ "certified not broke. framed certificate pending. mail is slow.",
+ "y'all keep this up and I'm gonna have to find a new hobby.",
+ "budget's healthy, vibes are immaculate, Buddy is at peace.",
+ "living below your means and above everyone's expectations. incredible.",
+ "still in the green. y'all are boring in the best possible financial way.",
+ "the card is quiet. eerily quiet. I love it here.",
+ "gold star. two gold stars. I'm running out of gold stars.",
+ "y'all treat this budget better than most people treat their houseplants.",
+ "nothing to report except excellence. gross. I'm proud.",
+ "this is the good timeline. the one where y'all have money left at the end of the month.",
+ "biiiiitch. thriving. that's the whole update, go about your day."],
+early:[
+ "yooooo what the heck is going on. y'all should work for the government with that level of disregard for a budget! yowzers.",
+ "it is EARLY. why does this card look like it's already been through a whole month??",
+ "biiiiyoch!!! stop spending all your money! damn!",
+ "we are like nine seconds into this cycle and y'all already went crazy. slow it down.",
+ "somebody had a moment. the card knows. I know. we all know.",
+ "this is a marathon and y'all sprinted out of the gate straight into a Target.",
+ "the month just started and the number is already SPICY. explain yourselves.",
+ "hey. hi. it's barely the start and y'all are pacing like it's day twenty. concerning!",
+ "I'm not mad I'm just doing math out loud and the math is screaming.",
+ "whoa whoa whoa. we don't come out swinging like that this early.",
+ "y'all opened this cycle like it owed you money. it does not.",
+ "rough start! genuinely impressive rough start. bad, but impressive.",
+ "did somebody rediscover online shopping? because it shows.",
+ "this pace is not sustainable. I'd know. I'm literally a pace calculator.",
+ "the cycle is a baby. y'all are already feeding it steak.",
+ "front-loaded the spending like a mortgage. except worse. much worse.",
+ "hold up. we are WAY out over our skis this early on.",
+ "I'd like to file a formal complaint about how this month is going so far.",
+ "big early number. big early feelings. let's chill.",
+ "y'all really said 'budget? in THIS economy?' and then ignored it. bold."],
+blown:[
+ "your cards could probably get stolen and they'd spend less money than y'all.",
+ "budget's gone. blown clean past it. there are still days left in this month and I'm scared.",
+ "I've seen natural disasters with better spending restraint.",
+ "this isn't a budget anymore, it's a suggestion y'all ignored in writing.",
+ "congrats! y'all beat the budget. by going THROUGH it. that's not how winning works.",
+ "biiiiyoch!!! stop spending all your money! DAMN!",
+ "a thief with your card would've been gentler. and probably guiltier.",
+ "the number went past the line and just kept walking. didn't even look back.",
+ "remember the budget? me neither apparently.",
+ "this is less 'over budget' and more 'budget-adjacent memory.'",
+ "I would say slow down but we're way past that. now I'm just watching.",
+ "y'all didn't break the budget, y'all disintegrated it. molecularly.",
+ "somewhere a financial advisor woke up sweating and doesn't know why.",
+ "blew through it with days to spare. genuinely a record. horrible record.",
+ "the budget called. it's not angry, it's disappointed. and also gone.",
+ "at this point just tell me what we're celebrating so I can plan around it.",
+ "I ran the numbers, then ran them again, then took a walk.",
+ "this month is a crime scene and the card is the weapon.",
+ "we are so far past the line the line needs binoculars.",
+ "y'all spent the budget, the buffer, and my will to keep counting."],
+close:[
+ "y'all rock. you're just\u2026 the best\u2026 we are SO close to the finish line, don't blink.",
+ "almost there!! a few more days of not buying stuff and we take this whole thing.",
+ "tight, but y'all are gonna make it. I believe. I have charts.",
+ "home stretch. sit on your hands. eat what's in the fridge. we WIN this.",
+ "so close I can taste it. and what I taste is not takeout, because we're not ordering any.",
+ "y'all are right at the edge and holding. that's genuinely impressive.",
+ "don't spend it now!! we're too close!! I'm literally begging in ALL CAPS!!",
+ "a few days left and the number's holding. this is the boring heroic part.",
+ "this is the last mile. nobody quits at the last mile.",
+ "y'all played it tight and it's about to pay off. hang on.",
+ "so close. beautifully close. terrifyingly close. hold the line.",
+ "the finish line is RIGHT there. do not go to Target. do not.",
+ "cutting it fine but y'all are still in it. proud of you honestly.",
+ "couple more days. the fridge has food. the fridge is your friend.",
+ "y'all are running a photo finish and I'm losing my mind in the best way.",
+ "nearly made it. NEARLY. keep the card in the drawer for a minute.",
+ "this close, every day you don't spend is a whole win. rack them up.",
+ "y'all are doing the hard boring part right. that's the whole game.",
+ "so proud. so nervous. mostly proud. slightly nervous.",
+ "we're almost home. don't get cute now."]};
+
+function monthLen(d){ return new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); }
+/* which of the four moods fits where the live cycle currently sits */
+function nudgeBucket(d){
+  const tgt=Math.abs(Number(S.meta.ccTarget)||0), lt=liveTotal();
+  if(!tgt||lt===null) return null;
+  const pct=Math.abs(lt)/tgt, day=d.getDate(), left=monthLen(d)-day;
+  if(pct>=1) return "blown";
+  if(day<=12&&pct>=0.45) return "early";
+  if(left<=8&&pct>=0.85) return "close";
+  return "good";
+}
+function buddyLine(b){
+  const pick=a=>a[Math.floor(Math.random()*a.length)];
+  return pick(BUDDY_HI)+" "+pick(BUDDY[b]);
+}
+async function ntfySend(msg,tag){
+  const r=await fetch("https://ntfy.sh/"+encodeURIComponent(ntfy.topic),{
+    method:"POST", body:msg,
+    headers:{"X-Title":"Buddy the Budget","X-Tags":tag||"moneybag"}});
+  if(!r.ok) throw new Error("ntfy said "+r.status);
+}
+/* every other day, 5th through the 30th. the last-sent date lives in state so it
+   syncs — otherwise the phone and the Mac would each fire their own copy. */
+function nudgeCheck(force,now){
+  if(!ntfyOn()||netBlocked()) return Promise.resolve();
+  const d=now||new Date(), stamp=d.toISOString().slice(0,10);
+  if(!force){
+    const day=d.getDate();
+    if(day<5||day>30) return Promise.resolve();
+    if(S.meta.lastNudge&&(new Date(stamp)-new Date(S.meta.lastNudge))/86400000<2) return Promise.resolve();
+  }
+  const b=nudgeBucket(d);
+  if(!b) return Promise.resolve();
+  const tag={good:"tada",early:"eyes",blown:"fire",close:"crossed_fingers"}[b];
+  return ntfySend(buddyLine(b),tag).then(()=>{
+    ntfy.lastErr=""; ntfy.lastSent=Date.now(); ntfy.lastMood=b; saveNtfy();
+    if(!force){ S.meta.lastNudge=stamp; save(); }
+  }).catch(e=>{ ntfy.lastErr=String(e.message||e); saveNtfy(); });
+}
 function sfinPeekHTML(){
   if(!sfinRaw) return `<div class="fb">Hit <b>Check card now</b> first, then press this again.</div>`;
   const accts=sfinRaw.accounts||[];
@@ -2260,6 +2408,29 @@ function syncHTML(){
         <div class="flag" id="sfPeekBox" style="display:none"><div class="ft">What the bank actually sends</div>
         <div id="sfPeekBody"></div></div>`;
   }
+  h+=`<div class="hr" style="margin:18px 0 12px"></div>`;
+  h+=`<div class="hint">Buddy the Budget pushes a note to both your phones every
+    other day, the 5th through the 30th, in whichever mood the card has earned.</div>`;
+  if(!ntfyOn()){
+    h+=`<div class="flag"><div class="ft">Set up the nudges</div><div class="fb">
+      Install <b>ntfy</b> from the App Store on both phones, subscribe to the topic
+      below, then save it here. Anyone who knows the topic gets the messages, so keep
+      it long and don't post it anywhere.</div></div>
+      <div class="fg"><div class="f"><label>ntfy topic</label>
+      <input id="ntTopic" placeholder="${rollTopic()}"></div></div>
+      <div class="crow"><button class="mini" id="ntRoll">Roll me one</button>
+      <button class="mini" id="ntSave">Save topic</button></div>`;
+  } else {
+    h+=`<div class="flag good"><div class="ft">Buddy is on duty</div><div class="fb">
+      Topic <b>${ntfy.topic}</b>.
+      ${ntfy.lastSent?`Last nudge ${new Date(ntfy.lastSent).toLocaleString()}`
+                     +`${ntfy.lastMood?" ("+ntfy.lastMood+")":""}.`:"Nothing sent yet."}
+      ${S.meta.lastNudge?`<br>Next one is due after ${S.meta.lastNudge} plus two days.`:""}
+      </div></div>`;
+    if(ntfy.lastErr) h+=`<div class="flag bad"><div class="ft">ntfy said</div><div class="fb">${ntfy.lastErr}</div></div>`;
+    h+=`<div class="crow"><button class="mini" id="ntTest">Send one now</button>
+        <div style="flex:1"></div><button class="del" id="ntOff">Turn Buddy off</button></div>`;
+  }
   return h;
 }
 function wireSync(){
@@ -2297,6 +2468,17 @@ function wireSync(){
     catch(e){ setSync("err",e.message.slice(0,40)); toast(e.message); }
     openDrawer("sync");
   };
+  const ntr=document.getElementById("ntRoll"), nts=document.getElementById("ntSave");
+  if(ntr) ntr.onclick=()=>{ document.getElementById("ntTopic").value=rollTopic(); };
+  if(nts) nts.onclick=()=>{
+    const v=document.getElementById("ntTopic").value.trim();
+    if(v.length<8){ toast("Make it longer than that"); return; }
+    ntfy.topic=v; saveNtfy(); openDrawer("sync"); toast("Buddy is listening");
+  };
+  const ntt=document.getElementById("ntTest"), nto=document.getElementById("ntOff");
+  if(ntt) ntt.onclick=()=>nudgeCheck(true).then(()=>{ openDrawer("sync");
+    toast(ntfy.lastErr?"Didn't send":"Sent"); });
+  if(nto) nto.onclick=()=>{ ntfy={}; saveNtfy(); openDrawer("sync"); toast("Buddy off"); };
   const sfk=document.getElementById("sfPeek");
   if(sfk) sfk.onclick=()=>{
     const box=document.getElementById("sfPeekBox");
@@ -2849,6 +3031,9 @@ setInterval(()=>{ if(syncOn()&&!netBlocked()&&document.visibilityState!=="hidden
 /* the bridge expects 24 calls a day at most — hourly, never the 3-minute gist rhythm */
 setInterval(()=>{ if(sfinOn()&&!netBlocked()&&document.visibilityState!=="hidden") sfinPull(true); },3600000);
 setTimeout(()=>{ if(sfinOn()&&!netBlocked()) sfinPull(true); },2500);
+/* after the card has had a chance to land, see if Buddy owes anyone a message */
+setTimeout(()=>nudgeCheck(),7000);
+setInterval(()=>{ if(document.visibilityState!=="hidden") nudgeCheck(); },3600000);
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"&&syncOn()&&!netBlocked()) syncPull(true);
 });
