@@ -171,6 +171,10 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row.exp .amt{color:#ffb8a4}
 .row .amt.man{color:var(--amber)}
 .row .amt.ovr{border-bottom:1px dotted #6d8d96}
+/* sits outside .lbl — inside it, the label's ellipsis swallowed it on a phone */
+.row .frz{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #7a6320;border-radius:3px;
+  color:var(--amber);font-size:9.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.row .frz:hover{background:#3a2f0e}
 .row .kill{position:absolute;right:1px;top:50%;transform:translateY(-50%);opacity:0;color:var(--dimmer);font-size:13px;line-height:1;padding:0 2px;border-radius:2px;background:var(--panel2)}
 .row:hover .kill{opacity:1}
 .row .kill:hover{color:var(--red)}
@@ -543,7 +547,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v29";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v30";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1426,6 +1430,18 @@ function render(anim,popTab){
       /* the flash rides on its own element — the heat ramp owns both pseudo-elements */
       if(el.classList.contains("livecc")){
         const fl=document.createElement("i"); fl.className="rowflash"; el.appendChild(fl);
+        /* a typed number on the live row stops the feed updating it, which looks
+           exactly like the feed being wrong. Say so, and make it one tap to undo. */
+        if(r.ovr){
+          const chip=document.createElement("span");
+          chip.className="frz"; chip.textContent="typed";
+          chip.title="This row is holding a number you typed. Tap to follow the card feed again.";
+          chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation();
+            delete S.over[r.key]; save(); render();
+            const lt=liveTotal();
+            toast(lt===null?"Back on the live feed":"Back on the live feed · "+money(-lt)); };
+          el.insertBefore(chip,el.querySelector(".amt"));
+        }
       }
       el.querySelector(".amt").onclick=e=>editAmt(e.target,r,M.k);
       el.querySelector(".kill").onclick=()=>removeRow(r);
@@ -1498,6 +1514,19 @@ function pulseLiveCard(){
   });
 }
 
+/* What this cell would show if nobody had typed in it. `amountAt` alone isn't
+   that number on the card row: the live cycle comes from the feed, and later
+   months carry their planned purchases. Comparing against the wrong baseline is
+   what let a tap-and-tap-away freeze the live total. */
+function naturalAmt(r,k){
+  if(r.ruleId==="cc"&&k===liveCycle().bill){
+    const lt=liveTotal();
+    if(lt!==null) return -Math.round(lt*100)/100;
+  }
+  let a=amountAt(r.rule,k);
+  if(r.ruleId==="cc"){ const ex=plannedOnBill(k); if(ex) a-=ex; }
+  return a;
+}
 /* sign lock: money out stays money out unless you lead with + */
 function signed(raw,anchor){
   const s=String(raw).trim();
@@ -1520,12 +1549,17 @@ function editAmt(span,r,k){
                : (r.rule.kind==="income"?1:-1);
   const inp=document.createElement("input"); inp.className="amtin";
   inp.value=Math.abs(r.amount); span.replaceWith(inp); inp.focus(); inp.select();
+  const started=inp.value;
   const done=ok=>{
+    /* opened it and touched nothing? that's a look, not an edit. Without this,
+       tapping the live card row and tapping away pinned it at whatever the feed
+       happened to say at that second, and it never moved again. */
+    if(ok&&inp.value===started){ render(); return; }
     if(ok){
       const v=signed(inp.value,anchor);
       if(v!==null){
         if(r.oneoff) r.oneoff.amount=v;
-        else if(v===amountAt(r.rule,k)) delete S.over[r.key];
+        else if(v===naturalAmt(r,k)) delete S.over[r.key];   /* same as the feed = release it */
         else S.over[r.key]=v;
         save();
       }
