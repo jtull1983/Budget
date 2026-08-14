@@ -273,7 +273,13 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .flag.good{border-left-color:var(--teal)}
 .dbody .yes{color:var(--teal);font-weight:700}
 .dbody .no{color:var(--red);font-weight:700}
-.dbody .dline{display:flex;justify-content:space-between;gap:14px;padding:2px 0}
+.dbody .maybe{color:var(--amber);font-weight:700}
+.dbody .dline{display:flex;justify-content:space-between;gap:14px;padding:2px 0;
+  align-items:baseline}
+.dbody .dline>span:first-child{flex:0 0 auto;white-space:nowrap}
+.dbody .dline>span:last-child{flex:1 1 auto;text-align:right;min-width:0}
+.dbody .dnote{margin-top:7px;padding-top:6px;border-top:1px solid var(--line);
+  color:var(--dimmer);font-size:11px;line-height:1.55}
 .topicline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
 .topicline code{background:#0b1418;border:1px solid var(--line2);border-radius:4px;
   padding:4px 7px;font-size:12px;color:var(--cyan);user-select:all;word-break:break-all}
@@ -537,7 +543,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v27";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v29";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1431,7 +1437,12 @@ function render(anim,popTab){
              have one. pointerup opened the drawer but the click that followed
              reached the scrim and shut it again. */
           lb.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); hideTip();
-            nav={month:el.dataset.ccMonth,cat:null}; cardView="cat"; openDrawer("card"); }; }
+            /* the column is the month the bill arrives; the drawer wants the
+               month the money was spent, which is the cycle before it. Handing
+               the raw column key over showed the NEXT statement — so the August
+               row opened the live cycle. */
+            nav={month:prevMonth(el.dataset.ccMonth),cat:null};
+            cardView="cat"; openDrawer("card"); }; }
       }
       if(r.oneoff) el.querySelector(".lbl").ondblclick=()=>{
         const n=prompt("Rename line",r.oneoff.name); if(n){r.oneoff.name=n;save();render();}
@@ -2628,12 +2639,15 @@ async function ntfyCancel(seq){
    see it — a plain poll hides anything that hasn't been delivered yet. */
 async function ntfyPending(){
   const r=await fetch("https://ntfy.sh/"+encodeURIComponent(ntfy.topic)
-                      +"/json?poll=1&sched=1&since=12h");
+                      +"/json?poll=1&sched=1&since=all");
   if(!r.ok) throw new Error("ntfy said "+r.status);
-  const now=Math.floor(Date.now()/1000);
+  /* everything the topic will admit to. No filtering on `time` — a scheduled
+     message may be stamped with its delivery time or its publish time depending
+     on the server, and guessing wrong makes a real queue look empty. The check
+     tells the two apart with a one-off title instead. */
   return (await r.text()).split("\n").filter(Boolean).map(l=>{
     try{ return JSON.parse(l); }catch(e){ return null; }
-  }).filter(m=>m&&m.event==="message"&&m.time>now);
+  }).filter(m=>m&&m.event==="message");
 }
 const TAGS={good:"tada",early:"eyes",blown:"fire",close:"crossed_fingers",
             cycle:"calendar",silent:"see_no_evil"};
@@ -2903,26 +2917,43 @@ function wireSync(){
   if(nsc) nsc.onclick=async()=>{
     const box=document.getElementById("ntDiag");
     const line=(k,v,ok)=>`<div class="dline"><span>${k}</span><span class="${
-      ok===true?"yes":ok===false?"no":""}">${v}</span></div>`;
+      ok===true?"yes":ok===false?"no":"maybe"}">${v}</span></div>`;
     box.innerHTML=`<div class="flag"><div class="ft">Checking</div><div class="fb">talking to ntfy…</div></div>`;
-    const seq="buddydiag", at=Math.floor(Date.now()/1000)+900, T="Buddy diagnostics";
-    const mine=async()=>(await ntfyPending()).filter(m=>m.title===T).length;
+    /* a title nothing else can wear, so anything matching is from this run and
+       no timestamp guessing is needed */
+    const seq="buddydiag", at=Math.floor(Date.now()/1000)+900;
+    const T="Buddy diagnostics "+Math.random().toString(36).slice(2,6);
+    let seen=0;
+    const read=async()=>{ const all=await ntfyPending(); seen=all.length;
+                          return all.filter(m=>m.title===T).length; };
     let h="";
     try{
       await ntfyCancel(seq);
       await ntfySend("If this reaches a phone, cancelling failed.","wrench",seq,at,T);
-      const a=await mine();
-      h+=line("Scheduled one",a===1?"the server has it":"server shows "+a,a===1);
+      const a=await read();
+      const blind=a===0;      /* the topic won't show us its queue */
+      h+=line("Scheduled one",
+              a===1?"the server has it":blind?"can't see it":"server shows "+a,
+              a===1?true:blind?null:false);
       await ntfySend("Second one, same id.","wrench",seq,at,T);
-      const b=await mine();
+      const b=await read();
       h+=line("Sent a second under that id",
-              b===1?"replaced the first":"server now holds "+b,b===1);
+              blind?"can't tell":b===1?"replaced the first":"server now holds "+b,
+              blind?null:b===1);
       await ntfyCancel(seq);
-      const c=await mine();
-      h+=line("Cancelled it",c===0?"gone":"still holding "+c,c===0);
-      h+=`<div class="dline"><span>Either way</span><span>the app cancels before it
-          requeues, so a broken replace can't make two messages</span></div>`;
-      box.innerHTML=`<div class="flag ${c===0?"good":"bad"}"><div class="ft">ntfy queue check</div>
+      const c=await read();
+      h+=line("Cancelled it",
+              blind?"delete sent":c===0?"gone":"still holding "+c,
+              blind?null:c===0);
+      h+=`<div class="dnote">${blind
+        ? `This topic returned ${seen} message${seen===1?"":"s"} and none of them
+           were the ones just queued, so the check can't see what ntfy is holding
+           and can't answer the replace question either way. It doesn't change
+           anything: the app cancels before every requeue, so a replace that
+           doesn't work still can't produce two messages.`
+        : `Either way the app cancels before it requeues, so a broken replace
+           can't make two messages.`}</div>`;
+      box.innerHTML=`<div class="flag ${blind?"":"good"}"><div class="ft">ntfy queue check</div>
         <div class="fb">${h}</div></div>`;
     }catch(e){
       box.innerHTML=`<div class="flag bad"><div class="ft">ntfy queue check</div>
@@ -3105,9 +3136,14 @@ function crumbs(){
 function monthHTML(){
   const y=YEAR, tx=cardTx(y,null,nav.month), cats=catsOf(tx);
   const tot=tx.reduce((a,r)=>a+r.amt,0), mx=Math.max(...cats.map(c=>Math.abs(c[1])),1);
-  let h=crumbs()+`<div class="flag"><div class="ft">${prettySpend(nav.month)}</div>
+  const bill=nextMonth(nav.month), lc=liveCycle();
+  let h=crumbs()+`<div class="flag"><div class="ft">${prettySpend(nav.month)} spending</div>
     <div class="fb"><b>${money(tot)}</b> across <b>${tx.length}</b> charges,
-    in <b>${cats.length}</b> categories.</div></div>
+    in <b>${cats.length}</b> categories.
+    <div class="gn" style="margin-top:5px">${nav.month===lc.spend
+      ? `Still filling — this is the ${lc.start} to ${lc.end} cycle, and it lands on the
+         <b>${prettySpend(bill)}</b> bill.`
+      : `Landed on the <b>${prettySpend(bill)}</b> bill.`}</div></div></div>
     <div class="crow" style="margin-bottom:10px">
       <button class="mini${cardView==="cat"?" on":""}" id="cvCat">By category</button>
       <button class="mini${cardView==="time"?" on":""}" id="cvTime">By date</button></div>`;
