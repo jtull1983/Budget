@@ -547,7 +547,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v30";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v32";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2639,9 +2639,22 @@ function nudgeBucket(d){
   if(left<=8&&pct>=0.85) return "close";
   return "good";
 }
+/* The number, every time. A queued message carries whatever was true when it was
+   queued — ntfy delivers fixed text — so the silent one, which is deliberately
+   two days stale, says as much rather than stating an old figure as fact. */
+function buddyTail(b){
+  const lt=liveTotal();
+  if(lt===null) return "";
+  const spent=money(Math.abs(lt));
+  const tgt=effTarget(liveCycle().spend);
+  const of=tgt?" of "+money(tgt):"";
+  return b==="silent"
+    ? " last number I had was "+spent+of+" on this cycle."
+    : " we're at "+spent+of+" on the card this cycle.";
+}
 function buddyLine(b){
   const pick=a=>a[Math.floor(Math.random()*a.length)];
-  return pick(BUDDY_HI)+" "+pick(BUDDY[b]);
+  return pick(BUDDY_HI)+" "+pick(BUDDY[b])+buddyTail(b);
 }
 const NUDGE_HOUR=20;                       /* everything lands at 8pm local */
 const ymdLocal=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
@@ -2856,7 +2869,8 @@ function syncHTML(){
   }
   h+=`<div class="hr" style="margin:18px 0 12px"></div>`;
   h+=`<div class="hint">Buddy the Budget lands at 8pm, every day, in whichever mood the
-    card has earned. Opening the app re-queues tonight and tomorrow with fresh numbers.
+    card has earned, and always with the running total on the end. Opening the app
+    re-queues tonight and tomorrow with fresh numbers.
     Stay away two days and he says so. The ${CYCLE_DAY}th gets its own announcement
     when the billing cycle turns over.</div>`;
   if(!ntfyOn()){
@@ -2873,7 +2887,10 @@ function syncHTML(){
       <div class="topicline">Topic <code id="ntShow">${ntfy.topic}</code>
         <button class="mini" id="ntCopy">Copy</button></div>
       ${ntfy.lastSent?`Last nudge ${new Date(ntfy.lastSent).toLocaleString()}`
-                     +`${ntfy.lastMood?" ("+ntfy.lastMood+")":""}.`:"Nothing sent yet."}
+                     +`${ntfy.lastMood?" ("+ntfy.lastMood+")":""}.`
+        :Object.keys(S.meta.buddyQ||{}).length
+          ?"Nothing sent from this device — the queue below came from another one."
+          :"Nothing sent yet."}
       ${S.meta.lastNudge?`<br>Next one is due after ${S.meta.lastNudge} plus two days.`:""}
       </div></div>`;
     if(ntfy.lastErr) h+=`<div class="flag bad"><div class="ft">ntfy said</div><div class="fb">${ntfy.lastErr}</div></div>`;
@@ -2952,7 +2969,9 @@ function wireSync(){
     const box=document.getElementById("ntDiag");
     const line=(k,v,ok)=>`<div class="dline"><span>${k}</span><span class="${
       ok===true?"yes":ok===false?"no":"maybe"}">${v}</span></div>`;
-    box.innerHTML=`<div class="flag"><div class="ft">Checking</div><div class="fb">talking to ntfy…</div></div>`;
+    const say=t=>box.innerHTML=`<div class="flag"><div class="ft">Checking</div>
+      <div class="fb">${t}</div></div>`;
+    say("talking to ntfy…");
     /* a title nothing else can wear, so anything matching is from this run and
        no timestamp guessing is needed */
     const seq="buddydiag", at=Math.floor(Date.now()/1000)+900;
@@ -2960,33 +2979,48 @@ function wireSync(){
     let seen=0;
     const read=async()=>{ const all=await ntfyPending(); seen=all.length;
                           return all.filter(m=>m.title===T).length; };
+    /* ntfy writes to its message cache in batches, so a message published a
+       moment ago is not in a poll yet. Reading straight back said "can't see it"
+       about a queue that was really there. Give it a few seconds before judging. */
+    const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+    const settle=async(want,tries)=>{
+      let n=await read();
+      for(let i=0;i<(tries||5)&&!want(n);i++){ await sleep(1500); n=await read(); }
+      return n;
+    };
     let h="";
     try{
       await ntfyCancel(seq);
       await ntfySend("If this reaches a phone, cancelling failed.","wrench",seq,at,T);
-      const a=await read();
+      say("waiting for ntfy to show it…");
+      const a=await settle(n=>n>=1,5);
       const blind=a===0;      /* the topic won't show us its queue */
       h+=line("Scheduled one",
               a===1?"the server has it":blind?"can't see it":"server shows "+a,
               a===1?true:blind?null:false);
       await ntfySend("Second one, same id.","wrench",seq,at,T);
-      const b=await read();
+      say("sent a second under the same id…");
+      /* look for a duplicate rather than for the first copy: if one never turns
+         up, replace did its job */
+      const b=await settle(n=>n>=2,4);
       h+=line("Sent a second under that id",
               blind?"can't tell":b===1?"replaced the first":"server now holds "+b,
               blind?null:b===1);
       await ntfyCancel(seq);
-      const c=await read();
+      say("cancelling…");
+      const c=await settle(n=>n===0,4);
       h+=line("Cancelled it",
               blind?"delete sent":c===0?"gone":"still holding "+c,
               blind?null:c===0);
       h+=`<div class="dnote">${blind
-        ? `This topic returned ${seen} message${seen===1?"":"s"} and none of them
-           were the ones just queued, so the check can't see what ntfy is holding
-           and can't answer the replace question either way. It doesn't change
-           anything: the app cancels before every requeue, so a replace that
-           doesn't work still can't produce two messages.`
+        ? `The topic answered with ${seen} message${seen===1?"":"s"}, so the
+           connection is fine — it just never showed the two this check queued,
+           even after waiting. Nothing here is broken by that: the app cancels
+           before every requeue, so a replace that doesn't work still can't
+           produce two messages.`
         : `Either way the app cancels before it requeues, so a broken replace
-           can't make two messages.`}</div>`;
+           can't make two messages. The topic is holding ${seen} message${
+           seen===1?"":"s"} in total.`}</div>`;
       box.innerHTML=`<div class="flag ${blind?"":"good"}"><div class="ft">ntfy queue check</div>
         <div class="fb">${h}</div></div>`;
     }catch(e){
