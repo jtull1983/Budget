@@ -271,6 +271,12 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   padding:10px 12px;margin-bottom:9px;background:var(--panel)}
 .flag.bad{border-left-color:var(--red)}
 .flag.good{border-left-color:var(--teal)}
+.dbody .yes{color:var(--teal);font-weight:700}
+.dbody .no{color:var(--red);font-weight:700}
+.dbody .dline{display:flex;justify-content:space-between;gap:14px;padding:2px 0}
+.topicline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.topicline code{background:#0b1418;border:1px solid var(--line2);border-radius:4px;
+  padding:4px 7px;font-size:12px;color:var(--cyan);user-select:all;word-break:break-all}
 .flag .ft{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--txt);margin-bottom:4px}
 .flag .fb{font-size:11px;color:var(--dim);line-height:1.6}
 .catrow{display:block;width:100%;text-align:left;background:none;border:none;padding:2px 4px;border-radius:4px}
@@ -298,6 +304,22 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
    animation the row itself already uses when a month slides into view. */
 .ytab:focus-visible,.menupanel .btn:focus-visible{outline:2px solid var(--cyan);
   outline-offset:2px;border-radius:3px}
+/* keyboard focus inside a drawer, and on anything we made tabbable by hand */
+.dbody :focus-visible,.dbody [role="button"]:focus-visible{outline:2px solid var(--cyan);
+  outline-offset:2px;border-radius:3px}
+.dbody:focus{outline:none}
+/* where Tab will start. deliberately loud — it is meant to be spotted. */
+@keyframes kbBlink{0%,100%{outline-color:var(--cyan);box-shadow:0 0 0 0 rgba(110,231,240,0)}
+  50%{outline-color:#eafcff;box-shadow:0 0 12px 2px rgba(110,231,240,.45)}}
+.kbfocus{outline:2px solid var(--cyan);outline-offset:2px;border-radius:3px;
+  animation:kbBlink .85s ease-in-out infinite}
+/* the accumulating card row flashes like the current month does, two beats later.
+   it rides on a child element, not a pseudo-element, because the heat ramp already
+   owns ::before and ::after on this row. */
+@keyframes ccFlash{0%,100%{opacity:0}45%{opacity:.42}}
+.mcol .row>.rowflash{position:absolute;inset:0;z-index:46;pointer-events:none;opacity:0;
+  border-radius:3px;background:linear-gradient(#ffd98a,#ffb851);box-shadow:inset 0 0 0 2px #ffe1a3}
+.mcol .row.livepulse>.rowflash{animation:ccFlash 1s ease-in-out 2 both;animation-delay:2s}
 .row.heat{border-radius:4px;overflow:hidden}
 .row.heat>*{position:relative;z-index:2}
 .row.heat::before,.row.heat::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none}
@@ -407,7 +429,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .anim-spill .row{animation:spillIn .42s cubic-bezier(.34,1.25,.5,1) both}
 @media (prefers-reduced-motion:reduce){
   .anim-shift .mcol,.anim-spill .mcol,.anim-spill .row,.ytab.pop,.mcol.now.pulse,.mcol.now.pulse::after,
-  .row.heat::before,.row.heat::after,.row.heat .amt{animation:none}
+  .row.heat::before,.row.heat::after,.row.heat .amt,.kbfocus,
+  .mcol .row.livepulse>.rowflash{animation:none}
 }
 #emptyState{padding:34px 20px 120px;display:flex;justify-content:center}
 .emptybox{max-width:430px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);padding:20px 22px}
@@ -500,7 +523,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="scrim" id="scrim"></div>
 <div class="drawer" id="drawer">
   <div class="dhead"><h2 id="dtitle">Recurring items</h2><button class="btn xbtn" id="dclose" title="Close">✕</button></div>
-  <div class="dbody" id="dbody"></div>
+  <div class="dbody" id="dbody" tabindex="-1"></div>
 </div>
 <div class="toast" id="toast"></div>
 <div class="lockwrap" id="lockWrap">
@@ -514,7 +537,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v26";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v27";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -709,7 +732,14 @@ function plannedFor(spendMonth){
 }
 /* extra riding on the bill that arrives in month k */
 function plannedOnBill(k){ return plannedFor(prevMonth(k)); }
-function plansOnBill(k){ return ((S.plans)||[]).filter(x=>x.ym===prevMonth(k)); }
+
+/* the plans belonging to month k itself — what the Budget row in that column shows */
+function plansFor(k){ if(!Array.isArray(S.plans)) S.plans=[]; return S.plans.filter(x=>x.ym===k); }
+/* the number the card is actually being held to that month. a planned purchase
+   raises the bar rather than eating into it: budget 5k + a 1k mattress = 6k. */
+function effTarget(spendMonth){
+  return Math.abs(Number(S.meta.ccTarget)||0)+plannedFor(spendMonth);
+}
 function liveStmt(){
   const st=S.stmts&&S.stmts[liveCycle().bill];
   return (st&&st.live&&st.rows)?st:null;
@@ -718,7 +748,7 @@ function liveStmt(){
 function heatLevel(k){
   if(k!==liveCycle().bill) return 0;
   const lt=liveTotal(); if(lt===null) return 0;
-  const tgt=Math.abs(Number(S.meta.ccTarget)||0);
+  const tgt=effTarget(liveCycle().spend);
   if(!tgt) return 1;
   const f=Math.abs(lt)/tgt;
   return f>=1?4:f>=0.85?3:f>=0.6?2:1;
@@ -1275,13 +1305,15 @@ function render(anim,popTab){
              + (M.cleanCount>2?'<span class="tag clean">3 cleans</span>':"")
              + (now?'<span class="tag now">now</span>':"");
     const cls=M.end<0?"neg":M.end<S.meta.buffer?"low":"ok";
+    /* open the Budget row and the button below changes what it adds */
+    const budOpen=expanded.has(M.k+"|budget");
     col.innerHTML=`
       <div class="mhead">
         <div class="mname">${MFULL[m-1].slice(0,perView()>3?3:9)} ${perView()<=3?"’"+String(y).slice(2):""} ${tags}</div>
         <div class="onhand"><span class="k">On hand</span><span class="v">${money(M.onhand)}</span></div>
       </div>
       <div class="rows"></div>
-      <div class="addrow"><button class="addbtn">+ add to budget</button></div>
+      <div class="addrow"><button class="addbtn">${budOpen?"+ add a budget line":"+ add a new line"}</button></div>
       <div class="mfoot">
         <div class="k">Left at end · ${money0(M.net)}</div>
         <div class="v ${cls}">${money(M.end)}</div>
@@ -1315,14 +1347,16 @@ function render(anim,popTab){
     let plan=trimPlan();
     /* with no statement history there's no category breakdown yet — but a planned
        purchase still needs somewhere to show itself */
-    if(!plan&&plannedOnBill(M.k)) plan={target:S.meta.ccTarget||0,rows:[],bare:true};
+    if(!plan&&plannedFor(M.k)) plan={target:S.meta.ccTarget||0,rows:[],bare:true};
     if(plan) shown.push({budget:true,plan});
     shown.forEach((r,ri)=>{
       if(r.budget){
         const p=r.plan, key=M.k+"|budget", open=expanded.has(key);
         const el=document.createElement("div");
         el.className="row grp bud exp";
-        const px=plannedOnBill(M.k);
+        /* what you plan to SPEND this month. the bill it inflates is next month's,
+           and that is where the credit-card row picks it up. */
+        const px=plannedFor(M.k);
         el.innerHTML=`<span class="dot"></span>
           <span class="lbl">Budget <span class="gn">${px?"target + planned":"target"}</span></span>
           <span class="amt">${money(-(p.target+px))}</span>
@@ -1341,11 +1375,13 @@ function render(anim,popTab){
               <span class="amt">${money(-x.target)}</span>`;
             box.appendChild(c);
           });
-          plansOnBill(M.k).forEach(pl=>{
+          plansFor(M.k).forEach(pl=>{
             const c=document.createElement("div");
             c.className="row child bud exp planned";
+            const onBill=nextMonth(pl.ym);
             c.innerHTML=`<span class="dot"></span>
-              <span class="lbl">${pl.name} <span class="gn">planned ${MN[parseYM(pl.ym).m-1]}</span></span>
+              <span class="lbl">${pl.name} <span class="gn">${
+                onBill===liveCycle().bill?"already on the live card":MN[parseYM(onBill).m-1]+" bill"}</span></span>
               <span class="amt">${money(-Math.abs(pl.amt))}</span>
               <span class="kill" title="Drop this plan">×</span>`;
             c.querySelector(".kill").onclick=ev=>{ ev.stopPropagation();
@@ -1374,12 +1410,17 @@ function render(anim,popTab){
       if(r.ruleId==="cc"&&!r.info){
         const hv=heatLevel(M.k); if(hv) el.classList.add("heat","heat"+hv);
         el.dataset.ccMonth=M.k;      /* the label opens the pane; the amount still edits */
+        if(M.k===liveCycle().bill) el.classList.add("livecc");
       }
       if(anim==="anim-spill") el.style.animationDelay=(0.06+ri*0.022)+"s";
       el.innerHTML=`<span class="dot"></span><span class="lbl">${r.label}</span>
         <span class="amt${r.manual?" man":""}${r.ovr?" ovr":""}">${money(r.amount)}</span>
         <button class="kill">×</button>`;
       if(r.child) el.classList.add("child");
+      /* the flash rides on its own element — the heat ramp owns both pseudo-elements */
+      if(el.classList.contains("livecc")){
+        const fl=document.createElement("i"); fl.className="rowflash"; el.appendChild(fl);
+      }
       el.querySelector(".amt").onclick=e=>editAmt(e.target,r,M.k);
       el.querySelector(".kill").onclick=()=>removeRow(r);
       if(el.dataset.ccMonth){
@@ -1400,7 +1441,7 @@ function render(anim,popTab){
       el.onmouseleave=()=>{ if(innerWidth>=760) hideTip(); };
       box.appendChild(el);
     });
-    col.querySelector(".addbtn").onclick=()=>addToBudget(M.k);
+    col.querySelector(".addbtn").onclick=()=>budOpen?addBudgetLine(M.k):addOneoff(M.k);
     rail.appendChild(col);
   });
 
@@ -1437,6 +1478,13 @@ function centerNow(pulse){
   if(i>=0){ viewIndex=i; clampView(); render(null); }
   const col=document.querySelector(".mcol.now");
   if(col&&pulse){ col.classList.remove("pulse"); void col.offsetWidth; col.classList.add("pulse"); }
+  if(pulse) pulseLiveCard();
+}
+/* same two beats as the current month, two seconds behind it (the delay is in the CSS) */
+function pulseLiveCard(){
+  document.querySelectorAll(".row.livecc").forEach(el=>{
+    el.classList.remove("livepulse"); void el.offsetWidth; el.classList.add("livepulse");
+  });
 }
 
 /* sign lock: money out stays money out unless you lead with + */
@@ -1480,33 +1528,30 @@ function removeRow(r){
   if(r.info){ toast("Reference only — remove it in Feed me info"); return; }
   if(r.balancer){ delete S.balancers[r.key.split("#")[1]]; save(); render(); toast("Balancer removed"); return; }
   if(r.bonus){openDrawer("bonus");return;} if(r.oneoff) S.oneoffs=S.oneoffs.filter(o=>o.id!==r.oneoff.id); else S.skip[r.key]=1; save(); render(); }
-/* the month shown is the month the bill lands, so the purchase itself belongs
-   to the cycle before it — that's what gets offered as the default. */
-function addToBudget(k){
-  const n=prompt("What are you buying?  (e.g. New mattress)"); if(!n) return;
+/* A budget line is a purchase you'll put on the card in THIS month. It raises this
+   month's budget straight away and lands on next month's bill, because that's when
+   the money actually leaves. The live cycle is the exception — real charges are
+   already arriving there, so the bill is left alone and only the budget moves. */
+function addBudgetLine(k){
+  const n=prompt("What are you buying on the card in "+prettySpend(k)+"?  (e.g. New mattress)");
+  if(!n) return;
   const a=prompt("Roughly how much?","1000"); if(a===null) return;
   const v=Math.abs(signed(a,-1)); if(!v||isNaN(v)) return;
-  const spendDefault=prevMonth(k);
-  const card=confirm("Going on the card?\n\nOK — it inflates a card bill.\nCancel — it's cash or another account, added straight to this month.");
-  if(!card){
-    S.oneoffs.push({id:uid(),ym:k,name:n,amount:-v,day:99});
-    save(); render(); toast("Added to "+prettySpend(k)); return;
-  }
-  const when=prompt("Which month will you buy it?  (YYYY-MM)\n\nThe bill lands the month after.",spendDefault);
-  if(!when||!/^\d{4}-\d{2}$/.test(when.trim())) return;
-  const ym=when.trim();
   S.plans=S.plans||[];
-  S.plans.push({id:uid(),ym,name:n,amt:v});
+  S.plans.push({id:uid(),ym:k,name:n,amt:v});
   save(); render();
-  toast(n+" planned for "+prettySpend(ym)+" — lands on the "+prettySpend(nextMonth(ym))+" bill");
+  toast(nextMonth(k)===liveCycle().bill
+    ? n+" added to the "+prettySpend(k)+" budget — the live card already sees the real charges"
+    : n+" added to the "+prettySpend(k)+" budget — lands on the "+prettySpend(nextMonth(k))+" bill");
 }
+/* a plain line in this month — cash, another account, anything that isn't the card */
 function addOneoff(k){
-  const n=prompt("What is it?  (e.g. Vet bill)"); if(!n) return;
+  const n=prompt("New line in "+prettySpend(k)+" — what is it?  (e.g. Vet bill)"); if(!n) return;
   const a=prompt("How much?  Money out by default — lead with + if it's money coming in.","500"); if(a===null) return;
   const v=signed(a,-1); if(v===null) return;
   const d=prompt("Day of month (optional)","15");
   S.oneoffs.push({id:uid(),ym:k,name:n,amount:v,day:d?+d:99});
-  save(); render(); toast("Added");
+  save(); render(); toast("Added to "+prettySpend(k));
 }
 
 function drawStats(){
@@ -1578,6 +1623,15 @@ function reallyShowTip(e,r,k){
   }
   if(r.budgetPlan){
     const p=r.budgetPlan;
+    if(p.bare){
+      tip.innerHTML=`<div class="tt">Budget target</div>
+        <div class="td">no finished statements yet</div>
+        <div class="tr"><span>Target</span><b>${money(p.target)}</b></div>
+        <div class="note">Planned purchases for this month are listed underneath.
+        They land on next month's card bill.</div>`;
+      tip.classList.add("show");
+      tipOwner=e.currentTarget||null; tipShownAt=Date.now(); moveTip(e); return;
+    }
     let hh=`<div class="tt">Budget target</div><div class="td">from ${p.n} statements</div>
       <div class="tr"><span>Card averages</span><b>${money(p.avgTot)} a month</b></div>
       <div class="tr"><span>Target</span><b>${money(p.target)}</b></div>
@@ -1672,6 +1726,22 @@ function openDrawer(w){
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
   else if(w==="card") wireCard(); else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
+  tabifyDrawer();
+  /* park focus at the top of the panel so the first Tab lands on the first control
+     rather than dropping the user into whichever text field happens to be first */
+  const db=document.getElementById("dbody");
+  if(db) db.focus({preventScroll:true});
+}
+/* anything in here with a click handler of its own can be reached and fired from
+   the keyboard. `el.onclick` is truthy only where the code assigned one, which is
+   how every clickable row in these panels is wired. */
+function tabifyDrawer(){
+  const db=document.getElementById("dbody"); if(!db) return;
+  db.querySelectorAll("*").forEach(el=>{
+    if(!el.onclick) return;
+    if(el.matches("button,input,select,textarea,label,a")) return;
+    el.tabIndex=0; el.setAttribute("role","button");
+  });
 }
 function closeDrawer(){ drawer.classList.remove("open"); scrim.classList.remove("on"); }
 document.getElementById("dclose").onclick=closeDrawer;
@@ -2516,7 +2586,7 @@ function nudgeBucket(d){
   /* the day the cycle turns over gets its own announcement, and it fires whether
      or not there's a target or a feed yet — there's nothing to measure on day one */
   if(d.getDate()===CYCLE_DAY) return "cycle";
-  const tgt=Math.abs(Number(S.meta.ccTarget)||0), lt=liveTotal();
+  const tgt=effTarget(liveCycle(d).spend), lt=liveTotal();
   if(!tgt||lt===null) return null;
   const pct=Math.abs(lt)/tgt, day=d.getDate(), left=monthLen(d)-day;
   if(pct>=1) return "blown";
@@ -2535,14 +2605,35 @@ const addDays=(d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return x; 
 const at8pm=d=>Math.floor(new Date(d.getFullYear(),d.getMonth(),d.getDate(),NUDGE_HOUR,0,0)/1000);
 const seqFor=d=>"buddy"+ymdLocal(d).replace(/-/g,"");
 
-/* Posting to <topic>/<sequence-id> replaces any undelivered message already
-   sitting under that id, so re-running this never stacks up duplicates. */
-async function ntfySend(msg,tag,seq,atEpoch){
-  const url="https://ntfy.sh/"+encodeURIComponent(ntfy.topic)+(seq?"/"+seq:"");
-  const h={"X-Title":"Buddy the Budget","X-Tags":tag||"moneybag"};
+/* ntfy documents that posting to <topic>/<sequence-id> replaces an undelivered
+   message already sitting under that id. Tested live against ntfy.sh and it did
+   NOT — both copies arrived. So nothing here trusts replace. Every requeue is an
+   explicit DELETE first, and a message is only published once the cancel came
+   back clean. Worst case we lose a nudge; we never send two. */
+const ntfyURL=seq=>"https://ntfy.sh/"+encodeURIComponent(ntfy.topic)
+                  +(seq?"/"+encodeURIComponent(seq):"");
+async function ntfySend(msg,tag,seq,atEpoch,title){
+  const h={"X-Title":title||"Buddy the Budget","X-Tags":tag||"moneybag"};
   if(atEpoch) h["X-Delay"]=String(atEpoch);
-  const r=await fetch(url,{method:"POST",body:msg,headers:h});
+  const r=await fetch(ntfyURL(seq),{method:"POST",body:msg,headers:h});
   if(!r.ok) throw new Error("ntfy said "+r.status);
+}
+/* 404 means there was nothing under that id, which is the state we wanted anyway */
+async function ntfyCancel(seq){
+  const r=await fetch(ntfyURL(seq),{method:"DELETE"});
+  if(!r.ok&&r.status!==404) throw new Error("ntfy said "+r.status);
+  return true;
+}
+/* what is actually sitting on the server, undelivered. sched=1 is the only way to
+   see it — a plain poll hides anything that hasn't been delivered yet. */
+async function ntfyPending(){
+  const r=await fetch("https://ntfy.sh/"+encodeURIComponent(ntfy.topic)
+                      +"/json?poll=1&sched=1&since=12h");
+  if(!r.ok) throw new Error("ntfy said "+r.status);
+  const now=Math.floor(Date.now()/1000);
+  return (await r.text()).split("\n").filter(Boolean).map(l=>{
+    try{ return JSON.parse(l); }catch(e){ return null; }
+  }).filter(m=>m&&m.event==="message"&&m.time>now);
 }
 const TAGS={good:"tada",early:"eyes",blown:"fire",close:"crossed_fingers",
             cycle:"calendar",silent:"see_no_evil"};
@@ -2552,7 +2643,9 @@ const TAGS={good:"tada",early:"eyes",blown:"fire",close:"crossed_fingers",
 function nudgeSig(d){
   const b=nudgeBucket(d); if(!b) return null;
   const lt=liveTotal();
-  return b+"|"+(lt===null?"-":Math.round(Math.abs(lt)));
+  /* to the nearest $50. Every requeue now costs a cancel plus a publish, so the
+     bar for "this is different news" is higher than it was. */
+  return b+"|"+(lt===null?"-":Math.round(Math.abs(lt)/50)*50);
 }
 /* every other day, 5th through the 30th. the last-sent date lives in state so it
    syncs — otherwise the phone and the Mac would each fire their own copy. */
@@ -2560,12 +2653,15 @@ function nudgeSig(d){
    that last one being the "nobody has opened this" message, which only ever
    arrives if you genuinely don't come back. Each open rewrites the ones that
    haven't fired yet, so what's pending is always as fresh as your last visit. */
-function nudgeSchedule(now){
-  if(!ntfyOn()||netBlocked()) return Promise.resolve();
-  if(syncOn()&&!pulledOK) return Promise.resolve();
+async function nudgeSchedule(now){
+  if(!ntfyOn()||netBlocked()) return;
+  if(syncOn()&&!pulledOK) return;
   const d=now||new Date(), today=ymdLocal(d);
   if(!S.meta.buddyQ||typeof S.meta.buddyQ!=="object") S.meta.buddyQ={};
-  const q=S.meta.buddyQ, jobs=[];
+  const q=S.meta.buddyQ;
+  /* v26 and earlier stored a bare signature string here */
+  Object.keys(q).forEach(id=>{ if(typeof q[id]==="string") q[id]={sig:q[id]}; });
+  let touched=false, failed="";
 
   /* gone long enough that the silent message already went out? say hello properly,
      right now, whatever the hour — that's the point of coming back. */
@@ -2573,7 +2669,8 @@ function nudgeSchedule(now){
   const gap=ran?Math.round((new Date(today)-new Date(ran))/86400000):0;
   if(ran&&gap>=2){
     const b=nudgeBucket(d)||"good";
-    jobs.push(ntfySend("(back at last) "+buddyLine(b),TAGS[b]));
+    try{ await ntfySend("(back at last) "+buddyLine(b),TAGS[b]); touched=true; }
+    catch(e){ failed=String(e.message||e); }
   }
 
   const sig=nudgeSig(d);
@@ -2582,22 +2679,32 @@ function nudgeSchedule(now){
     if(d.getHours()<NUDGE_HOUR) slots.push([0,sig]);   /* tonight, if 8pm hasn't passed */
     slots.push([1,sig]);                               /* tomorrow, same picture */
     slots.push([2,"silent"]);                          /* and if we never hear from you */
-    slots.forEach(([n,want])=>{
-      const day=addDays(d,n), id=seqFor(day);
-      if(q[id]===want) return;                         /* nothing has changed */
+    for(const [n,want] of slots){
+      const day=addDays(d,n), id=seqFor(day), have=q[id];
+      if(have&&have.sig===want&&!have.unsure) continue;      /* nothing has changed */
+      if(have&&have.stuck) continue;                         /* a cancel already failed here */
+      /* clear the slot before filling it. if this throws, the old message stays and
+         we leave well alone — one stale nudge beats two fresh ones. */
+      if(have){
+        try{ await ntfyCancel(id); }
+        catch(e){ have.stuck=1; touched=true; failed=String(e.message||e); continue; }
+      }
       const b=want==="silent"?"silent":want.split("|")[0];
-      jobs.push(ntfySend(buddyLine(b),TAGS[b],id,at8pm(day))
-        .then(()=>{ q[id]=want; }));
-    });
+      /* written down BEFORE the send, so a reply we never see can't turn into a
+         second copy tomorrow — it comes back as unsure and gets cancelled first */
+      q[id]={sig:want,unsure:1}; touched=true;
+      try{ await ntfySend(buddyLine(b),TAGS[b],id,at8pm(day)); delete q[id].unsure; }
+      catch(e){ failed=String(e.message||e); }
+    }
   }
 
-  Object.keys(q).forEach(id=>{ if(id<seqFor(d)) delete q[id]; });   /* drop what's past */
+  Object.keys(q).forEach(id=>{ if(id<seqFor(d)){ delete q[id]; touched=true; } });
 
-  if(!jobs.length){ S.meta.buddyRan=today; return Promise.resolve(); }
-  return Promise.all(jobs).then(()=>{
-    ntfy.lastErr=""; ntfy.lastSent=Date.now(); saveNtfy();
-    S.meta.buddyRan=today; S.meta.lastNudge=today; save();
-  }).catch(e=>{ ntfy.lastErr=String(e.message||e); saveNtfy(); });
+  ntfy.lastErr=failed;
+  if(!failed&&touched) ntfy.lastSent=Date.now();
+  saveNtfy();
+  S.meta.buddyRan=today;
+  if(touched){ S.meta.lastNudge=today; save(); }
 }
 /* the Send-one-now button: straight out, no delay, no sequence id, no bookkeeping */
 function nudgeCheck(force,now){
@@ -2715,7 +2822,8 @@ function syncHTML(){
       <button class="mini" id="ntSave">Save topic</button></div>`;
   } else {
     h+=`<div class="flag good"><div class="ft">Buddy is on duty</div><div class="fb">
-      Topic <b>${ntfy.topic}</b>.
+      <div class="topicline">Topic <code id="ntShow">${ntfy.topic}</code>
+        <button class="mini" id="ntCopy">Copy</button></div>
       ${ntfy.lastSent?`Last nudge ${new Date(ntfy.lastSent).toLocaleString()}`
                      +`${ntfy.lastMood?" ("+ntfy.lastMood+")":""}.`:"Nothing sent yet."}
       ${S.meta.lastNudge?`<br>Next one is due after ${S.meta.lastNudge} plus two days.`:""}
@@ -2724,12 +2832,16 @@ function syncHTML(){
     const q=S.meta.buddyQ||{};
     const qk=Object.keys(q).sort();
     if(qk.length) h+=`<div class="flag"><div class="ft">Queued at ntfy</div><div class="fb">${
-      qk.map(id=>{ const y=id.slice(5,9),m=id.slice(9,11),dd=id.slice(11,13);
-        return `${m}/${dd} 8pm \u2014 <b>${q[id]==="silent"?"the silent one":q[id].split("|")[0]}</b>`;
+      qk.map(id=>{ const m=id.slice(9,11),dd=id.slice(11,13);
+        const e=q[id], sg=typeof e==="string"?e:(e&&e.sig)||"?";
+        return `${m}/${dd} 8pm \u2014 <b>${sg==="silent"?"the silent one":sg.split("|")[0]}</b>`
+             + (e&&e.stuck?` <span class="gn">(couldn't be replaced — left as is)</span>`:"")
+             + (e&&e.unsure?` <span class="gn">(send unconfirmed)</span>`:"");
       }).join("<br>")}</div></div>`;
     h+=`<div class="crow"><button class="mini" id="ntTest">Send one now</button>
-        <button class="mini" id="ntSched">Test the replace</button>
-        <div style="flex:1"></div><button class="del" id="ntOff">Turn Buddy off</button></div>`;
+        <button class="mini" id="ntSched">Check the queue</button>
+        <div style="flex:1"></div><button class="del" id="ntOff">Turn Buddy off</button></div>
+        <div id="ntDiag"></div>`;
   }
   return h;
 }
@@ -2775,18 +2887,48 @@ function wireSync(){
     if(v.length<8){ toast("Make it longer than that"); return; }
     ntfy.topic=v; saveNtfy(); openDrawer("sync"); toast("Buddy is listening");
   };
+  const ntc=document.getElementById("ntCopy");
+  if(ntc) ntc.onclick=async()=>{
+    try{ await navigator.clipboard.writeText(ntfy.topic); toast("Topic copied"); }
+    catch(e){ const r=document.createRange(); r.selectNode(document.getElementById("ntShow"));
+      getSelection().removeAllRanges(); getSelection().addRange(r); toast("Selected — copy it"); }
+  };
   const ntt=document.getElementById("ntTest"), nto=document.getElementById("ntOff");
   if(ntt) ntt.onclick=()=>nudgeCheck(true).then(()=>{ openDrawer("sync");
     toast(ntfy.lastErr?"Didn't send":"Sent"); });
-  /* queue two messages 40s out under one id — exactly one should arrive */
+  /* Publish, look, publish again, look, cancel, look. Everything is scheduled a
+     quarter of an hour out and cancelled at the end, so nothing reaches a phone
+     unless a step genuinely failed — in which case the message says so. */
   const nsc=document.getElementById("ntSched");
   if(nsc) nsc.onclick=async()=>{
-    const at=Math.floor(Date.now()/1000)+40;
+    const box=document.getElementById("ntDiag");
+    const line=(k,v,ok)=>`<div class="dline"><span>${k}</span><span class="${
+      ok===true?"yes":ok===false?"no":""}">${v}</span></div>`;
+    box.innerHTML=`<div class="flag"><div class="ft">Checking</div><div class="fb">talking to ntfy…</div></div>`;
+    const seq="buddydiag", at=Math.floor(Date.now()/1000)+900, T="Buddy diagnostics";
+    const mine=async()=>(await ntfyPending()).filter(m=>m.title===T).length;
+    let h="";
     try{
-      await ntfySend("Test 1 of 2 — if you see THIS one, replace did not work.","x","buddytest",at);
-      await ntfySend("Test 2 of 2 — only this should arrive, in ~40 seconds. Replace works.","white_check_mark","buddytest",at);
-      toast("Queued — watch for one message in 40s");
-    }catch(e){ toast("Failed: "+(e.message||e)); }
+      await ntfyCancel(seq);
+      await ntfySend("If this reaches a phone, cancelling failed.","wrench",seq,at,T);
+      const a=await mine();
+      h+=line("Scheduled one",a===1?"the server has it":"server shows "+a,a===1);
+      await ntfySend("Second one, same id.","wrench",seq,at,T);
+      const b=await mine();
+      h+=line("Sent a second under that id",
+              b===1?"replaced the first":"server now holds "+b,b===1);
+      await ntfyCancel(seq);
+      const c=await mine();
+      h+=line("Cancelled it",c===0?"gone":"still holding "+c,c===0);
+      h+=`<div class="dline"><span>Either way</span><span>the app cancels before it
+          requeues, so a broken replace can't make two messages</span></div>`;
+      box.innerHTML=`<div class="flag ${c===0?"good":"bad"}"><div class="ft">ntfy queue check</div>
+        <div class="fb">${h}</div></div>`;
+    }catch(e){
+      box.innerHTML=`<div class="flag bad"><div class="ft">ntfy queue check</div>
+        <div class="fb">${h}${line("Stopped",String(e.message||e),false)}</div></div>`;
+      try{ await ntfyCancel(seq); }catch(_){}
+    }
   };
   if(nto) nto.onclick=()=>{ ntfy={}; saveNtfy(); openDrawer("sync"); toast("Buddy off"); };
   const sfk=document.getElementById("sfPeek");
@@ -3214,9 +3356,29 @@ function stepBack(){
   return false;
 }
 function menuOpen(){ return document.getElementById("menuPanel").classList.contains("open"); }
+/* everything the keyboard can land on, in the order it appears. disabled and
+   off-screen controls are dropped — .focus() is a no-op on those and Tab would
+   sit there forever looking broken. */
+const KBSEL="button,input,select,textarea,label.btn,[tabindex]";
+function kbIn(root){
+  return [...root.querySelectorAll(KBSEL)].filter(el=>{
+    if(el.disabled||el.hidden) return false;
+    if(el.tagName==="INPUT"&&/^(file|hidden)$/.test(el.type)) return false;
+    if(el.tabIndex<0) return false;
+    return el.offsetParent!==null;
+  });
+}
+/* the flashing box. only ever one, and only ever in the menu. */
+function kbMark(el){
+  document.querySelectorAll(".kbfocus").forEach(x=>x.classList.remove("kbfocus"));
+  if(el){ el.classList.add("kbfocus"); el.focus(); }
+}
 function openMenu(){ document.getElementById("menuPanel").classList.add("open");
-                     document.getElementById("btnMenu").classList.add("open"); }
+                     document.getElementById("btnMenu").classList.add("open");
+                     /* Tab starts here, and it says so */
+                     kbMark(kbIn(document.getElementById("menuPanel"))[0]); }
 function closeMenu(){ document.getElementById("menuPanel").classList.remove("open");
+  kbMark(null);
   if(document.activeElement&&document.activeElement.closest&&
      document.activeElement.closest("#menuPanel")) document.activeElement.blur();
                       document.getElementById("btnMenu").classList.remove("open"); }
@@ -3227,27 +3389,40 @@ document.addEventListener("keydown",e=>{
   if(locked) return;
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); return; }
   if(e.ctrlKey&&e.key.toLowerCase()==="l"){ e.preventDefault(); lock("Locked from the keyboard"); return; }
+
+  /* Tab is handled before the typing check — in a text field it moves on anyway,
+     and letting the browser have it would walk focus out of the app entirely */
+  if(e.key==="Tab"){
+    const dOpen=drawer.classList.contains("open");
+    const list = dOpen ? kbIn(drawer)
+               : menuOpen() ? kbIn(document.getElementById("menuPanel"))
+               : [...document.querySelectorAll(".ytab:not(.arrow)")];
+    if(!list.length) return;
+    e.preventDefault();
+    const at=list.indexOf(document.activeElement);
+    let next;
+    if(at<0) next = (dOpen||menuOpen()) ? 0
+                  : Math.max(0,list.findIndex(b=>b.classList.contains("on")));
+    else next=(at+(e.shiftKey?-1:1)+list.length)%list.length;
+    if(menuOpen()&&!dOpen) kbMark(list[next]); else list[next].focus();
+    return;
+  }
+  /* Enter on something we made tabbable by hand */
+  if((e.key==="Enter"||e.key===" ")&&e.target&&e.target.getAttribute
+     &&e.target.getAttribute("role")==="button"){
+    e.preventDefault(); e.target.click(); return;
+  }
+  if(e.key==="Enter"&&e.target&&e.target.tagName==="LABEL"&&e.target.classList.contains("btn")){
+    e.preventDefault(); e.target.click(); return;
+  }
+  /* Esc in a field gives the field up first, then the app takes the next one */
+  if(e.key==="Escape"&&typing(e.target)){ e.target.blur(); e.preventDefault(); return; }
   if(typing(e.target)) return;
 
   if(e.key==="Escape"||e.key==="Backspace"){ if(stepBack()) e.preventDefault(); return; }
 
   if(e.key==="ArrowDown"){ if(!menuOpen()&&!drawer.classList.contains("open")){ e.preventDefault(); openMenu(); } return; }
   if(e.key==="ArrowUp"){ if(menuOpen()){ e.preventDefault(); closeMenu(); } return; }
-
-  /* Tab walks the year tabs, or the menu's own items while it's open */
-  if(e.key==="Tab"&&!drawer.classList.contains("open")){
-    const list=menuOpen()
-      ? [...document.querySelectorAll("#menuPanel .btn")]
-      : [...document.querySelectorAll(".ytab:not(.arrow)")];
-    if(!list.length) return;
-    e.preventDefault();
-    const at=list.indexOf(document.activeElement);
-    let next;
-    if(at<0){ next=menuOpen()?0:Math.max(0,list.findIndex(b=>b.classList.contains("on"))); }
-    else { next=(at+(e.shiftKey?-1:1)+list.length)%list.length; }
-    list[next].focus();
-    return;
-  }
 
   if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
     if(drawer.classList.contains("open")) return;
@@ -3359,6 +3534,8 @@ function unlock(){
   armIdle();
 }
 function armIdle(){ clearTimeout(idleTimer); idleTimer=setTimeout(()=>lock(),IDLE_MS); }
+/* Ctrl+L is wired in the main keydown handler above, ahead of everything else so it
+   works from inside a text field too. */
 function keyIn(ch){
   if(ch==="del"){ entry=entry.slice(0,-1); drawDots(false); return; }
   if(entry.length>=4) return;
@@ -3381,11 +3558,9 @@ function keyIn(ch){
   },true);
   ["pointerdown","keydown","wheel","touchstart"].forEach(t=>
     addEventListener(t,()=>{ if(!locked) armIdle(); },{passive:true,capture:true}));
-  let pickAt=0;
-  ["fileIn","stmtIn"].forEach(id=>{ const el=document.getElementById(id);
-    if(el){ el.addEventListener("click",()=>pickAt=Date.now());
-            el.addEventListener("change",()=>pickAt=Date.now()); } });
-  const picking=()=>Date.now()-pickAt<90000;
+  /* Leaving the tab does NOT lock — it was tried, and every glance at another
+     window demanded the PIN again. Coming back just restarts the idle clock.
+     The only two ways in are three minutes idle and Ctrl+L. */
   document.addEventListener("visibilitychange",()=>{ if(!locked) armIdle(); });
 })();
 
