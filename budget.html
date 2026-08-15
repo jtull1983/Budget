@@ -28,6 +28,10 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
 button,input,select,a,.row,.ytab,.btn,.mini{touch-action:manipulation}
 html{-webkit-text-size-adjust:100%}
+/* The grid never overflows — the year strip did, and one element wider than the
+   screen lets the whole document be dragged sideways. That's what left a column
+   half off the edge after a swipe: the page had been panned, not the grid. */
+html,body{overflow-x:hidden;overscroll-behavior-x:none;max-width:100%}
 /* iOS zooms any field under 16px on focus — so on touch, don't go under 16px */
 @media(pointer:coarse){
   input,select,textarea{font-size:16px !important}
@@ -46,9 +50,14 @@ button{cursor:pointer;background:none;border:none}
   border-bottom:1px solid var(--line);padding:12px 16px;
   padding-top:calc(16px + env(safe-area-inset-top,0px));
   display:flex;flex-direction:column;gap:11px}
-.toprow{display:flex;align-items:center;gap:12px;flex-wrap:nowrap}
+.toprow{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;min-width:0}
+.toprow .brand{flex:0 1 auto;min-width:0;overflow:hidden}
 .brand h1{margin:0;font-size:13px;letter-spacing:.16em;text-transform:uppercase;font-weight:700;
-  color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  color:var(--txt);white-space:nowrap;display:flex;align-items:center;gap:7px;min-width:0}
+/* the title gives way on a narrow screen; the version badge never does */
+.brand h1 .tt{overflow:hidden;text-overflow:ellipsis;min-width:0}
+@media(max-width:760px){ .brand h1 .tt{overflow:visible} }
+.brand h1 .vtag{flex:none}
 .toprow2{display:flex;gap:8px;align-items:stretch}
 #btnUndo,#btnFit{flex:none;white-space:nowrap}
 .navarr{flex:none;display:none;align-items:center;justify-content:center;
@@ -104,7 +113,11 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .scroller::-webkit-scrollbar-thumb:hover{background:#9df3e6}
 }
 @media(max-width:760px){
-  .top{padding:12px 12px;padding-top:calc(18px + env(safe-area-inset-top,0px))}
+  .top{padding:12px 12px;padding-top:calc(18px + env(safe-area-inset-top,0px));gap:9px}
+  /* one line, as it always was: the title keeps its full width and the year strip
+     takes what's left and scrolls inside itself. What changed in v35 is only that
+     the overflow now lives in the strip instead of stretching the whole page. */
+  .toprow .brand{flex:0 0 auto;overflow:visible}
   .brand h1{font-size:12px}
   .stats{gap:14px}
   .stats .v{font-size:17px}
@@ -114,7 +127,10 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 }
 .statuspill .ok{color:var(--teal)} .statuspill .busy{color:var(--cyan)}
 .statuspill .err{color:var(--red)} .statuspill .warn{color:var(--amber)}
-.years{display:flex;gap:5px;align-items:stretch}
+.years{display:flex;gap:5px;align-items:stretch;min-width:0;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.years::-webkit-scrollbar{display:none}
+.ytab{flex:0 0 auto}
 .ytab{border:1px solid var(--line2);background:var(--panel);color:var(--dim);
   padding:8px 15px;border-radius:4px;font-size:13.5px;font-weight:700;letter-spacing:.1em;transition:.14s}
 .ytab:hover{color:var(--txt);border-color:#47757a}
@@ -547,7 +563,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v32";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v39";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1485,7 +1501,7 @@ function render(anim,popTab){
   const thEl=document.getElementById("appTitle");
   if(thEl&&thEl.dataset.t!==appT){
     thEl.dataset.t=appT;
-    thEl.innerHTML=appT+` <span class="vtag">${APP_V}</span>`;
+    thEl.innerHTML=`<span class="tt">${appT}</span><span class="vtag">${APP_V}</span>`;
     document.title=appT+" "+APP_V;
   }
 
@@ -2475,6 +2491,15 @@ silent:[
  "y'all ghosted me. I have no idea what the card's been up to. probably nothing! probably.",
  "flying blind out here. open the app and tell me we're okay. \u{1F648}",
  "no data, no idea, no peace. someone open the app. \u{1F635}\u200D\u{1F4AB}"],
+nodata:[
+ "no card feed tonight so no numbers, but I'm here. hi. \u{1F44B}",
+ "the feed's gone quiet on me. can't tell y'all a thing. open the app and reconnect me?",
+ "showing up on time with absolutely no information. classic Buddy.",
+ "I have no numbers today. just vibes and a strong sense of duty. \u{1FAE1}",
+ "card feed's not talking. I'm still clocking in. that's the whole message.",
+ "nothing from the card today. could be good! could be nothing at all! \u{1F937}",
+ "8pm, reporting for duty, holding zero data. someone check the card connection.",
+ "no feed, no numbers, no clue. but I said I'd text every day so here I am."],
 cycle:[
  "ah yes, a new billing cycle has begun. new possibilities for savings or horrific debt await. it's like a choose your own adventure! \u{1F4D6}",
  "fresh cycle, clean slate, zero dollars spent. this is the best y'all will ever look. cherish it. \u2728",
@@ -2652,9 +2677,19 @@ function buddyTail(b){
     ? " last number I had was "+spent+of+" on this cycle."
     : " we're at "+spent+of+" on the card this cycle.";
 }
+/* Random with a memory. Straight Math.random() repeats a line every few days and
+   it reads like a bug even when it isn't. The last dozen picks are off the table. */
+function pickFresh(arr,key){
+  if(!S.meta.buddySeen||typeof S.meta.buddySeen!=="object") S.meta.buddySeen={};
+  const seen=S.meta.buddySeen[key]||[];
+  let pool=arr.filter(t=>!seen.includes(t));
+  if(!pool.length) pool=arr;                       /* used them all — start over */
+  const out=pool[Math.floor(Math.random()*pool.length)];
+  S.meta.buddySeen[key]=[out].concat(seen).slice(0,Math.min(12,arr.length-1));
+  return out;
+}
 function buddyLine(b){
-  const pick=a=>a[Math.floor(Math.random()*a.length)];
-  return pick(BUDDY_HI)+" "+pick(BUDDY[b])+buddyTail(b);
+  return pickFresh(BUDDY_HI,"hi")+" "+pickFresh(BUDDY[b]||BUDDY.nodata,b)+buddyTail(b);
 }
 const NUDGE_HOUR=20;                       /* everything lands at 8pm local */
 const ymdLocal=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
@@ -2697,16 +2732,20 @@ async function ntfyPending(){
   }).filter(m=>m&&m.event==="message");
 }
 const TAGS={good:"tada",early:"eyes",blown:"fire",close:"crossed_fingers",
-            cycle:"calendar",silent:"see_no_evil"};
+            cycle:"calendar",silent:"see_no_evil",nodata:"grey_question"};
 
 /* What the message would SAY, boiled down. Re-queue only when this changes —
    otherwise the random wording would look like new info every single hour. */
+/* Bump this whenever the WORDING changes shape. Without it, messages already
+   sitting at ntfy keep the old format until the number happens to move — a build
+   that adds something to every message would take a day to actually show up. */
+const NUDGE_FMT="total-1";
 function nudgeSig(d){
   const b=nudgeBucket(d); if(!b) return null;
   const lt=liveTotal();
-  /* to the nearest $50. Every requeue now costs a cancel plus a publish, so the
-     bar for "this is different news" is higher than it was. */
-  return b+"|"+(lt===null?"-":Math.round(Math.abs(lt)/50)*50);
+  /* to the dollar. If what the app knows differs at all from what's queued for
+     tonight, tonight's message gets replaced. */
+  return b+"|"+(lt===null?"-":Math.round(Math.abs(lt)))+"|"+NUDGE_FMT;
 }
 /* every other day, 5th through the 30th. the last-sent date lives in state so it
    syncs — otherwise the phone and the Mac would each fire their own copy. */
@@ -2730,32 +2769,60 @@ async function nudgeSchedule(now){
   const gap=ran?Math.round((new Date(today)-new Date(ran))/86400000):0;
   if(ran&&gap>=2){
     const b=nudgeBucket(d)||"good";
-    try{ await ntfySend("(back at last) "+buddyLine(b),TAGS[b]); touched=true; }
+    try{ await ntfySend("(back at last) "+buddyLine(b),TAGS[b]); touched=true;
+          if(d.getHours()>=NUDGE_HOUR) S.meta.buddyDay=today; }
     catch(e){ failed=String(e.message||e); }
   }
 
-  const sig=nudgeSig(d);
-  if(sig){
-    const slots=[];
-    if(d.getHours()<NUDGE_HOUR) slots.push([0,sig]);   /* tonight, if 8pm hasn't passed */
-    slots.push([1,sig]);                               /* tomorrow, same picture */
-    slots.push([2,"silent"]);                          /* and if we never hear from you */
-    for(const [n,want] of slots){
-      const day=addDays(d,n), id=seqFor(day), have=q[id];
-      if(have&&have.sig===want&&!have.unsure) continue;      /* nothing has changed */
-      if(have&&have.stuck) continue;                         /* a cancel already failed here */
-      /* clear the slot before filling it. if this throws, the old message stays and
-         we leave well alone — one stale nudge beats two fresh ones. */
-      if(have){
-        try{ await ntfyCancel(id); }
-        catch(e){ have.stuck=1; touched=true; failed=String(e.message||e); continue; }
-      }
-      const b=want==="silent"?"silent":want.split("|")[0];
-      /* written down BEFORE the send, so a reply we never see can't turn into a
-         second copy tomorrow — it comes back as unsure and gets cancelled first */
-      q[id]={sig:want,unsure:1}; touched=true;
-      try{ await ntfySend(buddyLine(b),TAGS[b],id,at8pm(day)); delete q[id].unsure; }
-      catch(e){ failed=String(e.message||e); }
+  /* One message a day, at 8pm, no exceptions. If there's nothing to report the
+     mood is "nodata" — showing up empty-handed beats not showing up. */
+  const sig=nudgeSig(d)||("nodata|"+NUDGE_FMT);
+  const todayId=seqFor(d), nowSecs=Math.floor(d.getTime()/1000);
+  const moodOf=w=>w==="silent"?"silent":w.split("|")[0];
+
+  /* fill a slot: clear whatever's there, then put the current picture in it */
+  const fill=async(id,want,when)=>{
+    const have=q[id];
+    if(have){
+      try{ await ntfyCancel(id); }
+      catch(e){ have.stuck=1; touched=true; failed=String(e.message||e); return false; }
+    }
+    q[id]={sig:want,unsure:1}; touched=true;
+    try{
+      /* under a minute of runway is below ntfy's minimum delay — send it now
+         rather than lose the day to a rejected timestamp */
+      const late=when-nowSecs<60;
+      await ntfySend(buddyLine(moodOf(want)),TAGS[moodOf(want)],id,late?0:when);
+      delete q[id].unsure;
+      if(late){ q[id].sentNow=1; S.meta.buddyDay=today; }
+      return true;
+    }catch(e){ failed=String(e.message||e); return false; }
+  };
+
+  const slots=[];
+  if(d.getHours()<NUDGE_HOUR) slots.push([0,sig]);   /* tonight, if 8pm hasn't passed */
+  slots.push([1,sig]);                               /* tomorrow, same picture */
+  slots.push([2,"silent"]);                          /* and if we never hear from you */
+  for(const [n,want] of slots){
+    const day=addDays(d,n), id=seqFor(day), have=q[id];
+    if(have&&have.sig===want&&!have.unsure) continue;   /* already says exactly this */
+    if(have&&have.stuck) continue;                      /* a cancel already failed here */
+    await fill(id,want,at8pm(day));
+  }
+
+  /* THE SAFETY NET. 8pm has been and gone — did today actually get one? A record
+     that was published for tonight has fired by now. Anything else means the day
+     was about to pass in silence, so send it immediately. */
+  if(d.getHours()>=NUDGE_HOUR&&S.meta.buddyDay!==today){
+    const rec=q[todayId];
+    if(rec&&!rec.unsure){ S.meta.buddyDay=today; }
+    else{
+      const b=moodOf(sig);
+      try{
+        await ntfySend(buddyLine(b),TAGS[b]);
+        S.meta.buddyDay=today; touched=true;
+        q[todayId]={sig,sentNow:1};
+      }catch(e){ failed=String(e.message||e); }
     }
   }
 
@@ -2868,9 +2935,10 @@ function syncHTML(){
         <div id="sfPeekBody"></div></div>`;
   }
   h+=`<div class="hr" style="margin:18px 0 12px"></div>`;
-  h+=`<div class="hint">Buddy the Budget lands at 8pm, every day, in whichever mood the
-    card has earned, and always with the running total on the end. Opening the app
-    re-queues tonight and tomorrow with fresh numbers.
+  h+=`<div class="hint">Buddy the Budget lands at 8pm, every day without fail, in
+    whichever mood the card has earned, and always with the running total on the end.
+    Opening the app replaces tonight's queued message with the latest numbers. If 8pm
+    passes with nothing queued, the next time the app opens he sends it straight away.
     Stay away two days and he says so. The ${CYCLE_DAY}th gets its own announcement
     when the billing cycle turns over.</div>`;
   if(!ntfyOn()){
@@ -3229,16 +3297,58 @@ function monthHTML(){
   return h;
 }
 /* every charge in the month, newest first, grouped by the day it landed */
+/* Only the card feed hands over ISO dates. A parsed statement keeps whatever the
+   PDF or CSV said — "07/05", "7/5/26", "Jul 05" — and often no year at all, which
+   is why feeding it straight to `new Date()` printed "Invalid Date" down the whole
+   month. Normalise here rather than at import, so statements already in the gist
+   are fixed too. */
+const MON3=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+function isoDay(raw,spendMonth){
+  if(!raw) return null;
+  const s=String(raw).trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[0];
+  let mm=0,dd=0,yy=null;
+  m=s.match(/^(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?$/);
+  if(m){ mm=+m[1]; dd=+m[2]; if(m[3]) yy=+m[3]; }
+  else{
+    m=s.match(/^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2})(?:,?\s*(\d{4}))?$/);
+    if(m){ mm=MON3.indexOf(m[1].toLowerCase())+1; dd=+m[2]; if(m[3]) yy=+m[3]; }
+  }
+  if(!mm||!dd||mm>12||dd>31) return null;
+  if(yy!==null&&yy<100) yy+=2000;
+  if(yy===null){
+    /* no year on the row. A cycle straddles two months, so try the obvious
+       candidates and keep whichever lands nearest the month being shown. */
+    if(!spendMonth) return null;
+    const {y}=parseYM(spendMonth), mid=new Date(spendMonth+"-15T12:00:00").getTime();
+    let best=null, bestGap=Infinity;
+    [y-1,y,y+1].forEach(cy=>{
+      const gap=Math.abs(new Date(cy,mm-1,dd,12).getTime()-mid);
+      if(gap<bestGap){ bestGap=gap; best=cy; }
+    });
+    yy=best;
+  }
+  return yy+"-"+String(mm).padStart(2,"0")+"-"+String(dd).padStart(2,"0");
+}
 function timelineHTML(tx){
   if(!tx.length) return `<div class="hint">Nothing on the card this month yet.</div>`;
-  const byDay={};
-  tx.forEach(r=>{ const d=r.date||"?"; (byDay[d]=byDay[d]||[]).push(r); });
+  const byDay={}, label={};
+  tx.forEach(r=>{
+    const iso=isoDay(r.date,r.spend);
+    /* anything unreadable keeps its own row under the text the statement gave,
+       and sorts to the bottom rather than pretending to be a date */
+    const d=iso||" "+(String(r.date||"").trim()||"?");
+    label[d]=iso?new Date(iso+"T12:00:00")
+                  .toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"})
+               :(String(r.date||"").trim()||"No date");
+    (byDay[d]=byDay[d]||[]).push(r);
+  });
   let h="";
   Object.keys(byDay).sort().reverse().forEach(d=>{
     const rows=byDay[d], sub=rows.reduce((a,r)=>a+r.amt,0);
     h+=`<div class="card open"><div class="chead">
-      <span class="nm">${d==="?"?"No date":new Date(d+"T12:00:00")
-        .toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"})}</span>
+      <span class="nm">${label[d]}</span>
       <span class="am">${money(sub)} · ${rows.length}</span></div><div class="cbody">`;
     rows.sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt)).forEach(r=>{
       h+=`<button class="txrow" data-move="${r.filed}|${r.idx}">
