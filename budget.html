@@ -31,7 +31,7 @@ html{-webkit-text-size-adjust:100%}
 /* The grid never overflows — the year strip did, and one element wider than the
    screen lets the whole document be dragged sideways. That's what left a column
    half off the edge after a swipe: the page had been panned, not the grid. */
-html,body{overflow-x:hidden;overscroll-behavior-x:none;max-width:100%}
+html,body{overflow-x:hidden;overscroll-behavior-x:none;overscroll-behavior-y:contain;max-width:100%}
 /* iOS zooms any field under 16px on focus — so on touch, don't go under 16px */
 @media(pointer:coarse){
   input,select,textarea{font-size:16px !important}
@@ -88,6 +88,21 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   padding:7px 16px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--dim);opacity:0;pointer-events:none;transition:.28s}
 .statuspill.show{opacity:1;transform:translateX(-50%)}
+/* on a phone it sits in the row next to Menu instead of floating over the header,
+   where it covered the title. display:none while idle so it takes no room. */
+@media(max-width:760px){
+  .statuspill{position:static;transform:none;display:none;align-items:center;flex:0 1 auto;
+    padding:6px 9px;border-radius:6px;font-size:9px;letter-spacing:.06em;
+    max-width:55%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .statuspill.show{display:inline-flex;transform:none}
+}
+/* pull-to-sync tab, dragged down from behind the header */
+.pullbar{position:fixed;left:50%;top:0;z-index:205;pointer-events:none;opacity:0;
+  transform:translate(-50%,-44px);
+  background:#12242a;border:1px solid var(--line2);border-top:0;border-radius:0 0 12px 12px;
+  padding:7px 18px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.pullbar.snap{transition:transform .25s,opacity .25s}
+.pullbar b{color:var(--cyan);font-weight:700}
 .statuspill b{font-weight:700}
 .swipehint{display:none;justify-content:center;gap:10px;align-items:center;
   padding:8px 0 96px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dimmer)}
@@ -454,6 +469,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .anim-spill .mcol{animation:popCol .45s cubic-bezier(.34,1.5,.5,1) both}
 .anim-spill .row{animation:spillIn .42s cubic-bezier(.34,1.25,.5,1) both}
 @media (prefers-reduced-motion:reduce){
+  .pullbar.snap{transition:none}
   .anim-shift .mcol,.anim-spill .mcol,.anim-spill .row,.ytab.pop,.mcol.now.pulse,.mcol.now.pulse::after,
   .row.heat::before,.row.heat::after,.row.heat .amt,.kbfocus,
   .mcol .row.livepulse>.rowflash{animation:none}
@@ -521,6 +537,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn" id="btnUndo" title="Undo">↶ Undo</button>
     <button class="btn navarr" id="btnLeft" title="Back a month">‹</button>
     <button class="btn menubtn" id="btnMenu"><span>Menu</span><i class="car">▾</i></button>
+    <div class="statuspill" id="statusPill"></div>
     <button class="btn navarr" id="btnRight" title="Forward a month">›</button>
     <button class="btn" id="btnFit">See full year</button>
   </div>
@@ -539,7 +556,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
   <input type="file" id="fileIn" accept=".json" class="vh">
   <input type="file" id="stmtIn" multiple accept=".csv,.txt,.tsv,.pdf,application/pdf,text/csv" class="vh">
 </div>
-<div class="statuspill" id="statusPill"></div>
+<div class="pullbar" id="pullBar"><span id="pullTxt"></span></div>
 
 <div class="scroller" id="scroller"><div class="rail" id="rail"></div></div>
 <div class="swipehint" id="swipeHint" hidden></div>
@@ -563,7 +580,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v39";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v40";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2967,7 +2984,8 @@ function syncHTML(){
     if(qk.length) h+=`<div class="flag"><div class="ft">Queued at ntfy</div><div class="fb">${
       qk.map(id=>{ const m=id.slice(9,11),dd=id.slice(11,13);
         const e=q[id], sg=typeof e==="string"?e:(e&&e.sig)||"?";
-        return `${m}/${dd} 8pm \u2014 <b>${sg==="silent"?"the silent one":sg.split("|")[0]}</b>`
+        return `${m}/${dd} ${e&&e.sentNow?"sent":"8pm"} \u2014 <b>${
+                 sg==="silent"?"the silent one":sg.split("|")[0]}</b>`
              + (e&&e.stuck?` <span class="gn">(couldn't be replaced — left as is)</span>`:"")
              + (e&&e.unsure?` <span class="gn">(send unconfirmed)</span>`:"");
       }).join("<br>")}</div></div>`;
@@ -3689,22 +3707,82 @@ menuPanel.querySelectorAll(".btn,label.btn").forEach(b=>b.addEventListener("clic
 (function(){
   const sc=document.getElementById("scroller");
   let x0=null,y0=null,moved=false;
+  let pulling=false, canPull=false, pulled=0;
   sc.addEventListener("touchstart",e=>{
     if(e.touches.length!==1) return;
     x0=e.touches[0].clientX; y0=e.touches[0].clientY; moved=false;
+    pulling=false; pulled=0;
+    canPull=!syncing&&!netBlocked()&&(syncOn()||sfinOn())&&atTop(e.target);
   },{passive:true});
+  /* not passive: a real pull has to stop the page moving underneath it */
   sc.addEventListener("touchmove",e=>{
     if(x0===null) return;
     const dx=e.touches[0].clientX-x0, dy=e.touches[0].clientY-y0;
     if(Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy)*1.4) moved=true;
-  },{passive:true});
+    if(!moved&&canPull&&dy>10&&dy>Math.abs(dx)*1.4){
+      pulling=true;
+      pulled=Math.min(dy*0.55,110);            /* rubber band, so it can't be flung */
+      pullShow(pulled,pulled>=PULL_TRIGGER?"<b>Release to sync</b>":"Pull to sync");
+      if(e.cancelable) e.preventDefault();
+    }
+  },{passive:false});
   sc.addEventListener("touchend",e=>{
+    if(pulling){
+      const go=pulled>=PULL_TRIGGER;
+      if(go){
+        pullShow(PULL_TRIGGER,"<b>Syncing…</b>");
+        fullSync(true).then(()=>setTimeout(pullHide,350));
+      } else pullHide();
+      pulling=false; x0=null; return;
+    }
     if(x0===null||!moved){ x0=null; return; }
     const dx=e.changedTouches[0].clientX-x0;
     if(Math.abs(dx)>45) shiftView(dx<0?1:-1);   /* drag left = go forward */
     x0=null;
   },{passive:true});
 })();
+
+/* ── pull down to sync ───────────────────────────────
+   Everything worth refreshing in one go: the gist, then the card, then Buddy —
+   in that order, because Buddy's message should quote the numbers that just
+   landed. The card check spends one of the 24 daily calls; nothing else does. */
+let syncing=false;
+async function fullSync(manual){
+  if(syncing||netBlocked()) return;
+  syncing=true;
+  try{
+    if(syncOn()) await syncPull(!manual);
+    if(sfinOn()) await sfinPull(!manual);
+    await nudgeSchedule();
+  }catch(e){ }
+  finally{ syncing=false; }
+}
+
+const pullBar=document.getElementById("pullBar"), pullTxt=document.getElementById("pullTxt");
+const PULL_TRIGGER=62;
+function pullShow(d,txt){
+  pullBar.classList.remove("snap");
+  /* it emerges from under the header, not over the title */
+  const sc=document.getElementById("scroller");
+  if(sc) pullBar.style.top=Math.max(0,Math.round(sc.getBoundingClientRect().top))+"px";
+  pullBar.style.transform="translate(-50%,"+Math.min(d-44,22)+"px)";
+  pullBar.style.opacity=Math.min(1,d/38);
+  pullTxt.innerHTML=txt;
+}
+function pullHide(){
+  pullBar.classList.add("snap");
+  pullBar.style.transform="translate(-50%,-44px)";
+  pullBar.style.opacity=0;
+}
+/* the gesture only belongs to us if nothing underneath the finger is scrolled */
+function atTop(el){
+  while(el&&el!==document.body&&el.nodeType===1){
+    const oy=getComputedStyle(el).overflowY;
+    if((oy==="auto"||oy==="scroll")&&el.scrollHeight>el.clientHeight+2) return el.scrollTop<=0;
+    el=el.parentElement;
+  }
+  return (window.scrollY||document.documentElement.scrollTop||0)<=0;
+}
 
 /* rotating the phone changes how many months fit */
 let rzTimer=null, lastPer=perView();
@@ -3778,6 +3856,38 @@ function keyIn(ch){
   document.addEventListener("visibilitychange",()=>{ if(!locked) armIdle(); });
 })();
 
+/* ── three checks a day, whether or not you remember ──
+   A web page can't run while it's closed, so these are catch-ups: the first time
+   the app is open in a stretch of the day, that stretch gets its sync. Slot state
+   is synced, so two devices don't spend the same slot twice. */
+const AUTO_SLOTS=[["morning",5,11],["midday",11,17],["evening",17,23]];
+const SFIN_RESERVE=4;        /* calls held back for whatever you do by hand */
+function autoSlotNow(d){
+  const h=(d||new Date()).getHours();
+  const s=AUTO_SLOTS.find(x=>h>=x[1]&&h<x[2]);
+  return s?s[0]:null;
+}
+async function autoSyncTick(){
+  if(netBlocked()||syncing) return;
+  if(!syncOn()&&!sfinOn()) return;
+  if(syncOn()&&!pulledOK) return;              /* never act on state we haven't verified */
+  const d=new Date(), day=ymdLocal(d), slot=autoSlotNow(d);
+  if(!slot) return;
+  const a=S.meta.autoSync;
+  if(a&&a.day===day&&a.done&&a.done[slot]) return;
+  const done=(a&&a.day===day&&a.done)?Object.assign({},a.done):{};
+  done[slot]=1;
+  S.meta.autoSync={day,done}; save();
+  syncing=true;
+  try{
+    if(syncOn()) await syncPull(true);
+    /* the card only if there's room left under the cap */
+    if(sfinOn()&&sfinLeft()>SFIN_RESERVE) await sfinPull(true);
+    await nudgeSchedule();
+  }catch(e){ }
+  finally{ syncing=false; }
+}
+
 render();
 stampSaved();
 lock("Enter your PIN to open the budget");
@@ -3785,15 +3895,21 @@ if(syncOn()&&!netBlocked()) syncPull(true);
 snapNow();
 /* check for a newer copy every few minutes */
 setInterval(()=>{ if(syncOn()&&!netBlocked()&&document.visibilityState!=="hidden") syncPull(true); },180000);
-/* 90 minutes lands near 16 automatic checks a day, leaving headroom under the
-   24-call cap for manual checks and any other device you have open */
-setInterval(()=>{ if(sfinOn()&&!netBlocked()&&document.visibilityState!=="hidden") sfinPull(true); },5400000);
-setTimeout(()=>{ if(sfinOn()&&!netBlocked()) sfinPull(true); },2500);
+/* morning, midday and night — checked on open, on return, and every ten minutes
+   while you're looking at it. Each slot fires once a day and no more. */
+setTimeout(autoSyncTick,3500);
+setInterval(autoSyncTick,600000);
+/* left open all day? top the card up every three hours, but only while there's
+   plenty of headroom under the cap */
+setInterval(()=>{ if(sfinOn()&&!netBlocked()&&document.visibilityState!=="hidden"
+                     &&sfinLeft()>8) sfinPull(true); },10800000);
 /* after the card has had a chance to land, see if Buddy owes anyone a message */
 setTimeout(()=>nudgeSchedule(),7000);
 setInterval(()=>{ if(document.visibilityState!=="hidden") nudgeSchedule(); },3600000);
 document.addEventListener("visibilitychange",()=>{
-  if(document.visibilityState==="visible"&&syncOn()&&!netBlocked()) syncPull(true);
+  if(document.visibilityState!=="visible"||netBlocked()) return;
+  if(syncOn()) syncPull(true);
+  setTimeout(autoSyncTick,1200);
 });
 if(netBlocked()&&syncOn()) setSync("warn","needs a real web address");
 </script>
