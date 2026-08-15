@@ -533,6 +533,25 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .bgrow .nm{flex:1;font-size:12.5px}
 .bgrow .am{min-width:74px;text-align:right;font-weight:700;font-size:13px}
 .bgrow .mini{padding:2px 10px;font-size:14px;line-height:1.2}
+.acctrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.acctrow .an{flex:1;min-width:0;font-size:12.5px}
+.acctrow .an b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acctrow .an .gn{font-size:10px}
+.acctrow .ar{display:flex;gap:5px;flex:none}
+.dbody .mini.role.on{border-color:var(--cyan);color:var(--cyan);border-style:solid}
+.row.hit .lbl{text-decoration:line-through;opacity:.6}
+.row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
+  color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
+.row .paid:hover{background:#10302c}
+.prop{border:1px solid var(--line2);border-radius:7px;padding:10px 11px;margin-bottom:9px;
+  background:var(--panel2)}
+.prop .ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.prop .ph b{font-size:13px}
+.prop .pa{font-weight:700;font-size:14px}
+.prop .pa.moved{color:var(--amber)}
+.prop .pd{font-size:11px;color:var(--dim);margin:3px 0 8px;line-height:1.5}
+.prop .mini.yes{border-color:var(--teal);color:var(--teal)}
+#btnMatch{border-color:var(--amber);color:var(--amber)}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(70px);z-index:300;
   background:#173a3c;border:1px solid var(--teal);color:var(--teal);padding:9px 18px;border-radius:4px;
   font-size:11px;letter-spacing:.1em;text-transform:uppercase;transition:.25s;opacity:0}
@@ -559,6 +578,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn" id="btnBonus">Add bonus</button>
     <button class="btn" id="btnFeed">Feed me info</button>
     <button class="btn" id="btnCard">Card review</button>
+    <button class="btn" id="btnMatch" hidden>Confirm <span id="matchCount"></span></button>
     <button class="btn" id="btnBudget">Budget adjustment</button>
     <button class="btn" id="btnSync">Sync</button>
     <button class="btn warn" id="btnAdv">Advanced <span id="insCount"></span></button>
@@ -590,7 +610,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v43";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v45";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -848,8 +868,11 @@ function build(){
             ? (dates.length>1?["Paycheck","Paycheck 2","Paycheck 3"][i]:"Paycheck")+" · "+ordinal(day)
             : r.name+" · "+ordinal(day);
         else if(r.manual) label=r.name+" · "+ordinal(day);
+        /* the bank says this onehappened: use what actually left, not the guess */
+        const hit=(S.hits&&S.hits[key]&&!S.hits[key].off)?S.hits[key]:null;
+        if(hit&&typeof hit.amt==="number") amt=hit.amt;
         rows.push({key,ruleId:r.id,rule:r,label,day,amount:amt,ovr,manual:!!r.manual,
-                   off:!!r.offbook,account:r.account||"Main",
+                   hit,off:!!r.offbook,account:r.account||"Main",
                    sort:r.sort,kind:amt>=0?"inc":"exp"});
       });
     }
@@ -867,9 +890,13 @@ function build(){
     if(by&&by.amount&&by.month===parseYM(k).m)
       rows.push({key:"bonus#"+k,bonus:true,label:S.bonus.name,day:by.day||15,
                  amount:Math.abs(by.amount),sort:15,kind:"inc",off:false,account:"Main"});
-    for(const o of S.oneoffs) if(o.ym===k)
-      rows.push({key:"one#"+o.id,oneoff:o,label:o.name,day:o.day||99,amount:o.amount,
+    for(const o of S.oneoffs) if(o.ym===k){
+      const oh=S.hits&&S.hits["one#"+o.id];
+      const ohit=(oh&&!oh.off)?oh:null;
+      rows.push({key:"one#"+o.id,oneoff:o,label:o.name,day:o.day||99,
+                 amount:ohit&&typeof ohit.amt==="number"?ohit.amt:o.amount,hit:ohit,
                  sort:500,kind:o.amount>=0?"inc":"exp",odd:o.odd,off:false,account:"Main"});
+    }
     rows.sort((a,b)=> a.sort-b.sort || a.day-b.day);
     let net=rows.filter(r=>!r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
     const tgt=S.balancers?S.balancers[k]:undefined;
@@ -882,7 +909,15 @@ function build(){
     }
     const offTot=rows.filter(r=>r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
     const infoTot=rows.filter(r=>r.info).reduce((s,r)=>s+r.amount,0);
-    const end=onhand+net;
+    let end=onhand+net;
+    /* Once the bank is connected, today's balance already contains everything that
+       has hit. So this month opens at that balance and only counts what's still to
+       come — otherwise every settled bill would be subtracted twice. */
+    if(k===NOW&&typeof S.meta.liveBalance==="number"&&bankRows().length){
+      onhand=S.meta.liveBalance;
+      net=rows.filter(r=>!r.off&&!r.info&&!r.hit).reduce((a,r)=>a+r.amount,0);
+      end=onhand+net;
+    }
     out.push({k,onhand,rows,net,end,offTot,infoTot,
       noData: S.meta.recordsFrom ? cmpYM(k,S.meta.recordsFrom)<0 : false,
       payCount:rows.filter(r=>r.ruleId==="pay").length,
@@ -1300,6 +1335,9 @@ function fitGrid(){
 }
 function render(anim,popTab){
   MODEL=build();
+  /* the matcher needs the month's rows to compare against. It only ever proposes,
+     so the numbers don't move here and there's nothing to rebuild. */
+  autoMatch(MODEL);
   const ys=yearsAvail();
   clampView();
   if(!YEAR||!ys.includes(YEAR)) YEAR = ys.includes(parseYM(NOW).y)?parseYM(NOW).y:ys[0];
@@ -1370,7 +1408,8 @@ function render(anim,popTab){
       <div class="mfoot">
         <div class="k">Left at end · ${money0(M.net)}</div>
         <div class="v ${cls}">${money(M.end)}</div>
-        ${M.noData?"":`<div class="nowbal">${money(nowBalance())} in there now</div>`}
+        ${M.noData?"":`<div class="nowbal">${money(nowBalance())} in there now${
+            typeof S.meta.liveBalance==="number"?" \u00b7 from your bank":""}</div>`}
         ${M.noData?`<div class="infon">not counted for running total</div>`:""}
       </div>`;
     const box=col.querySelector(".rows");
@@ -1471,6 +1510,18 @@ function render(anim,popTab){
         <span class="amt${r.manual?" man":""}${r.ovr?" ovr":""}">${money(r.amount)}</span>
         <button class="kill">×</button>`;
       if(r.child) el.classList.add("child");
+      /* struck through, with what it actually was, and a tap to put the guess back */
+      if(r.hit){
+        el.classList.add("hit");
+        const chip=document.createElement("span");
+        chip.className="paid";
+        const moved=typeof r.hit.was==="number"&&Math.abs(r.hit.was-r.hit.amt)>=0.5;
+        chip.textContent=moved?("was "+money(r.hit.was)):"paid";
+        chip.title="Matched to \""+(r.hit.desc||"a transaction")+"\" on "+(r.hit.date||"")
+                  +". Tap to go back to the predicted amount.";
+        chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); unmatch(r.key); };
+        el.insertBefore(chip,el.querySelector(".amt"));
+      }
       /* the flash rides on its own element — the heat ramp owns both pseudo-elements */
       if(el.classList.contains("livecc")){
         const fl=document.createElement("i"); fl.className="rowflash"; el.appendChild(fl);
@@ -1540,6 +1591,8 @@ function render(anim,popTab){
   const n=insights().filter(i=>i.tone!=="good").length;
   const ic=document.getElementById("insCount");
   if(ic) ic.textContent=n?("· "+n):"";
+  const pc=propCount(), mb=document.getElementById("btnMatch");
+  if(mb){ mb.hidden=!pc; document.getElementById("matchCount").textContent=pc?("· "+pc):""; }
   if(firstPaint){ firstPaint=false; centerNow(true); setTimeout(centerWide,30); }
 }
 
@@ -1992,19 +2045,215 @@ function wireAdv(){
   });
 }
 
+
+/* ── the bank side of the feed ───────────────────────
+   SimpleFIN hands back every account on one token. Until now everything it
+   returned was treated as card spending; with a current account connected that's
+   wrong, so each account carries a role. Unset means "card", which is what every
+   existing setup already assumed. */
+function acctRole(id){ const m=S.meta.acct||{}; return m[id]||"card"; }
+function setAcctRole(id,role){
+  S.meta.acct=S.meta.acct||{}; S.meta.acct[id]=role; save();
+}
+function bankRows(){ return (S.bank&&Array.isArray(S.bank.rows))?S.bank.rows:[]; }
+
+/* ── matching a real transaction to a line you predicted ──
+   Three signals: does the name look like the line, is the amount in the right
+   neighbourhood, and did it land near the day you said it would. Any one of them
+   alone is a coin flip — a $45 debit could be anything — so a match needs a good
+   name OR a near-exact amount, plus the date to back it up. */
+function normTxt(s){
+  return String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim();
+}
+function nameScore(label,desc){
+  const A=normTxt(label).split(" ").filter(w=>w.length>2);
+  const B=normTxt(desc).split(" ").filter(w=>w.length>2);
+  if(!A.length||!B.length) return 0;
+  let hit=0;
+  A.forEach(w=>{ if(B.some(x=>x.startsWith(w)||w.startsWith(x))) hit++; });
+  return hit/A.length;
+}
+function matchScore(row,tx,k){
+  if((row.amount<0)!==(tx.amt<0)) return 0;             /* money out matches money out */
+  const a=Math.abs(row.amount), b=Math.abs(tx.amt);
+  if(!a||!b) return 0;
+  const off=Math.abs(a-b)/Math.max(a,b);
+  if(off>0.6 && Math.abs(a-b)>150) return 0;            /* nowhere near */
+  const nm=nameScore(row.label,tx.desc);
+  const day=Math.min(28,row.day||15);
+  const txDay=+String(tx.date).slice(8,10);
+  const dd=Math.abs(txDay-day);
+  if(dd>12 && nm<0.5) return 0;                          /* wrong end of the month */
+  if(nm<0.34 && off>0.03) return 0;                      /* no name, no exact amount */
+  /* A bank line rarely reads like the name you gave it — "VCA ANIMAL HOSPITAL" for
+     a vet bill, "DIRECT DEP PAYROLL" for a paycheck. To the cent on the right day
+     is its own kind of proof, so it carries the match on its own. */
+  const exact=off<0.005?0.18:0;
+  return nm*0.55 + (1-Math.min(off,1))*0.35 + (1-Math.min(dd,15)/15)*0.10 + exact;
+}
+/* Fills S.props — proposals, not decisions. Returns true if the list changed. */
+function autoMatch(model){
+  if(!bankRows().length) return false;
+  const m=model.find(x=>x.k===NOW);
+  if(!m) return false;
+  S.hits=S.hits||{}; S.props=S.props||{};
+  const taken={}, changed=[];
+  /* anything already settled, or already waiting to be confirmed, keeps its row */
+  Object.keys(S.hits).forEach(key=>{ const h=S.hits[key]; if(h&&h.sig) taken[h.sig]=1; });
+  Object.keys(S.props).forEach(key=>{ const h=S.props[key]; if(h&&h.sig) taken[h.sig]=1; });
+  m.rows.forEach(row=>{
+    if(row.info||row.off||row.ruleId==="cc") return;      /* the card bill isn't a bank line */
+    if(S.hits[row.key]||S.props[row.key]) return;         /* settled, refused, or already asked */
+    let best=null, bestS=0;
+    bankRows().forEach(tx=>{
+      const sig=tx.date+"|"+tx.amt+"|"+normTxt(tx.desc).slice(0,24);
+      if(taken[sig]) return;
+      if(String(tx.date).slice(0,7)!==NOW) return;
+      const sc=matchScore(row,tx,NOW);
+      if(sc>bestS){ bestS=sc; best={tx,sig}; }
+    });
+    if(best&&bestS>=0.5){
+      S.props[row.key]={amt:best.tx.amt,date:best.tx.date,desc:best.tx.desc,
+                        was:row.amount,sig:best.sig,score:Math.round(bestS*100)};
+      taken[best.sig]=1; changed.push(row.key);
+    }
+  });
+  /* drop anything belonging to a month that has rolled by */
+  [S.hits,S.props].forEach(store=>Object.keys(store).forEach(key=>{
+    const mm=key.split("#")[1];
+    if(mm&&/^\d{4}-\d{2}$/.test(mm)&&cmpYM(mm,NOW)<0){ delete store[key]; changed.push(key); }
+  }));
+  if(changed.length) save();
+  return !!changed.length;
+}
+function unmatch(key){
+  S.hits=S.hits||{};
+  S.hits[key]={off:1};                 /* remembered, so the matcher won't redo it */
+  save(); render(); toast("Back to the predicted amount");
+}
+
+function acctHTML(){
+  const list=(S.meta.acctList||[]);
+  if(!list.length) return `<div class="hint">Check the card once and the accounts on your
+    SimpleFIN token will be listed here.</div>`;
+  return `<div class="sh" style="margin-top:14px">What is each account?</div>
+    <div class="hint" style="margin-bottom:8px">Cards feed the credit-card row. A current
+      or savings account feeds your real balance, and its transactions get matched against
+      the lines you've predicted.</div>
+    ${list.map(a=>`<div class="acctrow" data-id="${a.id}">
+      <div class="an"><b>${a.name||"Account"}</b>
+        <span class="gn">${a.org||""}${typeof a.balance==="number"?" · "+money(a.balance):""}</span></div>
+      <div class="ar">
+        ${[["card","Card"],["bank","Bank"],["off","Ignore"]].map(([k,l])=>
+          `<button class="mini role${acctRole(a.id)===k?" on":""}" data-role="${k}">${l}</button>`).join("")}
+      </div></div>`).join("")}`;
+}
+function wireAcct(){
+  document.querySelectorAll(".acctrow .role").forEach(b=>{
+    b.onclick=()=>{
+      const row=b.closest(".acctrow");
+      setAcctRole(row.dataset.id,b.dataset.role);
+      row.querySelectorAll(".role").forEach(x=>x.classList.toggle("on",x===b));
+      if(b.dataset.role!=="bank"){                 /* stop using a balance we no longer trust */
+        const anyBank=(S.meta.acctList||[]).some(a=>acctRole(a.id)==="bank");
+        if(!anyBank){ delete S.meta.liveBalance; S.bank=null; S.hits={}; }
+      }
+      save(); render();
+      toast(b.dataset.role==="bank"?"Reading balance and transactions from that one"
+           :b.dataset.role==="card"?"Feeding the credit-card row":"Left alone");
+    };
+  });
+}
+
+
+/* ── the review step ─────────────────────────────────
+   A match changes what a month is worth, so nothing is applied on the strength of
+   a guess. Everything the matcher finds lands in S.props and waits to be looked at.
+   Accepting writes it into S.hits; rejecting writes {off:1}, which is remembered so
+   the same wrong pairing isn't proposed again tomorrow. */
+function propCount(){ return Object.keys(S.props||{}).length; }
+function acceptProp(key){
+  const p=(S.props||{})[key]; if(!p) return;
+  S.hits=S.hits||{}; S.hits[key]=p; delete S.props[key];
+  save(); render(); if(propCount()) openDrawer("match"); else { closeDrawer(); toast("All caught up"); }
+}
+function rejectProp(key){
+  const p=(S.props||{})[key]; if(!p) return;
+  S.hits=S.hits||{}; S.hits[key]={off:1};
+  delete S.props[key];
+  save(); render(); if(propCount()) openDrawer("match"); else { closeDrawer(); toast("Left as predicted"); }
+}
+function acceptAll(){
+  S.hits=S.hits||{};
+  Object.keys(S.props||{}).forEach(k=>{ S.hits[k]=S.props[k]; });
+  S.props={}; save(); render(); closeDrawer(); toast("Applied");
+}
+function rejectAll(){
+  S.hits=S.hits||{};
+  Object.keys(S.props||{}).forEach(k=>{ S.hits[k]={off:1}; });
+  S.props={}; save(); render(); closeDrawer(); toast("Left as predicted");
+}
+function matchHTML(){
+  const keys=Object.keys(S.props||{});
+  if(!keys.length) return `<div class="hint">Nothing waiting. When your bank shows a
+    transaction that looks like one of your lines, it'll be proposed here first.</div>`;
+  const m=MODEL.find(x=>x.k===NOW)||{rows:[]};
+  const labelOf=k=>{ const r=m.rows.find(x=>x.key===k); return r?r.label:k; };
+  const rows=keys.map(k=>{
+    const p=S.props[k], moved=Math.abs((p.was||0)-p.amt)>=0.5;
+    return `<div class="prop" data-k="${k}">
+      <div class="ph"><b>${labelOf(k)}</b>
+        <span class="pa ${moved?"moved":""}">${money(p.amt)}</span></div>
+      <div class="pd">${p.desc||"a transaction"} · ${p.date}
+        ${moved?`<span class="gn">you had ${money(p.was)}</span>`:`<span class="gn">exactly what you predicted</span>`}</div>
+      <div class="crow"><button class="mini yes" data-do="yes">That's it</button>
+        <button class="mini" data-do="no">Not this</button></div>
+    </div>`;
+  }).join("");
+  const spare=(bankRows()||[]).filter(t=>String(t.date).slice(0,7)===NOW)
+    .filter(t=>!Object.values(S.props||{}).some(p=>p.date===t.date&&p.amt===t.amt)
+              &&!Object.values(S.hits||{}).some(h=>h&&h.date===t.date&&h.amt===t.amt))
+    .slice(0,8);
+  return `<div class="flag"><div class="ft">Straight from your bank</div><div class="fb">
+      Your bank shows ${keys.length} transaction${keys.length===1?"":"s"} that look like
+      ${keys.length===1?"a line":"lines"} you'd already put in. Say the word and I'll mark
+      ${keys.length===1?"it":"them"} as done and use the real amount${keys.length===1?"":"s"}.
+      Nothing changes until you do.</div></div>
+    <div class="crow" style="margin:10px 0 14px">
+      <button class="mini" id="propAll">Yes to all</button>
+      <button class="mini" id="propNone">No to all</button></div>
+    ${rows}
+    ${spare.length?`<div class="sh" style="margin-top:18px">Didn't look like anything</div>
+      <div class="hint" style="margin-bottom:6px">Also on the account this month, matched to
+        nothing. Add a line for any of these you want counted.</div>
+      ${spare.map(t=>`<div class="dline"><span>${t.desc||"—"} · ${t.date.slice(8)}</span>
+        <span>${money(t.amt)}</span></div>`).join("")}`:""}`;
+}
+function wireMatch(){
+  const a=document.getElementById("propAll"), n=document.getElementById("propNone");
+  if(a) a.onclick=acceptAll;
+  if(n) n.onclick=rejectAll;
+  document.querySelectorAll(".prop [data-do]").forEach(b=>{
+    b.onclick=()=>{ const k=b.closest(".prop").dataset.k;
+                    b.dataset.do==="yes"?acceptProp(k):rejectProp(k); };
+  });
+}
+
 /* ---------- drawer ---------- */
 const drawer=document.getElementById("drawer"),scrim=document.getElementById("scrim");
 function openDrawer(w){
   const titles={rec:"Recurring items",ins:"Check-up",bonus:S.bonus.name,feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
+                match:"Does this look right?",
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
   document.getElementById("dbody").innerHTML=
     w==="rec"?recHTML():w==="bonus"?bonusHTML():w==="feed"?feedHTML():
-    w==="budget"?budgetHTML():w==="adv"?advHTML():
+    w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():
     w==="sync"?syncHTML():w==="card"?(nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
   if(w==="rec") wireRec(); else if(w==="bonus") wireBonus();
   else if(w==="budget") wireBudget(); else if(w==="adv") wireAdv();
+  else if(w==="match") wireMatch();
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
   else if(w==="card") wireCard(); else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
@@ -2035,6 +2284,7 @@ document.getElementById("btnRec").onclick=()=>openDrawer("rec");
 document.getElementById("btnBonus").onclick=()=>openDrawer("bonus");
 document.getElementById("btnSync").onclick=()=>openDrawer("sync");
 document.getElementById("btnBudget").onclick=()=>openDrawer("budget");
+document.getElementById("btnMatch").onclick=()=>openDrawer("match");
 document.getElementById("btnAdv").onclick=()=>openDrawer("adv");
 document.getElementById("btnCard").onclick=()=>{ nav={month:null,cat:null}; openDrawer("card"); };
 document.getElementById("btnFeed").onclick=()=>{ feedDraft=null; openDrawer("feed"); };
@@ -2642,7 +2892,26 @@ async function sfinPull(quiet){
     const endMs=new Date(c.end+"T23:59:59").getTime();
     const startMs=new Date(c.start+"T00:00:00").getTime();
     const rows=[], seen={};
+    /* remember what's on the token so the roles can be set without another call */
+    S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
+      name:a.name||"Account", org:(a.org&&(a.org.name||a.org.domain))||"",
+      balance:Number(a.balance)}));
+    const bankRowsNew=[]; let bankBal=null;
     (j.accounts||[]).forEach(a=>{
+      const role=acctRole(String(a.id||a.name));
+      if(role==="off") return;
+      if(role==="bank"){
+        /* the account the bills actually leave from */
+        if(!isNaN(Number(a.balance))) bankBal=(bankBal||0)+Number(a.balance);
+        (a.transactions||[]).forEach(t=>{
+          const when=Number(t.posted||t.transacted_at||0)*1000;
+          if(!when) return;
+          bankRowsNew.push({date:new Date(when).toISOString().slice(0,10),
+                            amt:Number(t.amount||0),
+                            desc:String(t.description||t.payee||"").trim()});
+        });
+        return;
+      }
       (a.transactions||[]).forEach(t=>{
         /* POSTED date decides which statement a charge lands on — that's how
            Capital One cuts the bill, so it's how we have to cut it too. The
@@ -2660,6 +2929,12 @@ async function sfinPull(quiet){
                    cat:categorize(desc).cat});
       });
     });
+    if(bankBal!==null){
+      S.meta.liveBalance=bankBal; S.meta.liveBalanceAt=Date.now();
+      /* keep two months of history — enough to match this month and see last */
+      const keep=prevMonth(NOW);
+      S.bank={at:Date.now(), rows:bankRowsNew.filter(x=>cmpYM(x.date.slice(0,7),keep)>=0)};
+    }
     /* a filed statement is the real thing — never overwrite one */
     const held=S.stmts[c.bill];
     if(held&&!held.live){ setSync("ok","statement already filed"); return; }
@@ -2671,6 +2946,11 @@ async function sfinPull(quiet){
     save(); render();
     setSync(errs.length?"warn":"ok", errs.length?String(errs[0]).slice(0,40):"card feed updated");
     if(!quiet) toast(rows.length+" charges · "+money(-rows.reduce((a,x)=>a+x.amt,0)));
+    /* asked for by hand? show what the bank turned up straight away */
+    if(propCount()){
+      if(!quiet) setTimeout(()=>openDrawer("match"),400);
+      else toast(propCount()+" to confirm from your bank");
+    }
   }catch(e){
     sfin.lastErr=e.message; saveSfin();
     setSync("err",e.message.slice(0,40));
@@ -3151,6 +3431,7 @@ function syncHTML(){
     if(sfin.lastErr) h+=`<div class="flag bad"><div class="ft">The bridge said</div><div class="fb">${sfin.lastErr}</div></div>`;
     h+=`<div class="hint">${sfinLeft()} of ${SFIN_CAP} card checks left today.
         Most banks only refresh once a day, so this is plenty.</div>`;
+    h+=acctHTML();
     h+=`<div class="crow"><button class="mini" id="sfPull">Check card now</button>
         <button class="mini" id="sfPeek">Who spent it?</button>
         <div style="flex:1"></div><button class="del" id="sfOff">Disconnect card</button></div>
@@ -3328,6 +3609,7 @@ function wireSync(){
     box.style.display=box.style.display==="none"?"":"none";
     document.getElementById("sfPeekBody").innerHTML=sfinPeekHTML();
   };
+  wireAcct();
   const sfp=document.getElementById("sfPull");
   if(sfp) sfp.onclick=()=>sfinPull().then(()=>openDrawer("sync"));
   const sfo=document.getElementById("sfOff");
