@@ -539,6 +539,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .acctrow .an .gn{font-size:10px}
 .acctrow .ar{display:flex;gap:5px;flex:none}
 .dbody .mini.role.on{border-color:var(--cyan);color:var(--cyan);border-style:solid}
+.dbody .mini.role.hint{border-color:var(--amber);color:var(--amber)}
+.acctrow.fresh{background:#241a06;border-radius:6px;padding-left:8px;padding-right:8px}
 .row.hit .lbl{text-decoration:line-through;opacity:.6}
 .row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
   color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
@@ -610,7 +612,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v45";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v46";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2051,7 +2053,30 @@ function wireAdv(){
    returned was treated as card spending; with a current account connected that's
    wrong, so each account carries a role. Unset means "card", which is what every
    existing setup already assumed. */
-function acctRole(id){ const m=S.meta.acct||{}; return m[id]||"card"; }
+/* An account we've never been told about is NOT the credit card. Assuming it was
+   is how a current account's mortgage payments and paycheque deposits ended up
+   filed as card charges. Unknown means unknown: it feeds nothing until it's been
+   named. The one exception is a token with a single account on it — there's
+   nothing to confuse it with. */
+function acctRole(id){
+  const m=S.meta.acct||{};
+  if(m[id]) return m[id];
+  const list=S.meta.acctList||[];
+  if(list.length===1) return "card";
+  return "new";
+}
+/* a first guess, offered but never applied on its own */
+function acctGuess(a){
+  const bal=Number(a.balance);
+  const n=(a.name||"").toLowerCase();
+  if(/credit|card|visa|mastercard|amex|venture|freedom|sapphire/.test(n)) return "card";
+  if(/check|chequ|savings|money market|share draft/.test(n)) return "bank";
+  if(!isNaN(bal)) return bal<0?"card":"bank";
+  return null;
+}
+function newAccts(){
+  return (S.meta.acctList||[]).filter(a=>acctRole(a.id)==="new");
+}
 function setAcctRole(id,role){
   S.meta.acct=S.meta.acct||{}; S.meta.acct[id]=role; save();
 }
@@ -2136,16 +2161,25 @@ function acctHTML(){
   const list=(S.meta.acctList||[]);
   if(!list.length) return `<div class="hint">Check the card once and the accounts on your
     SimpleFIN token will be listed here.</div>`;
-  return `<div class="sh" style="margin-top:14px">What is each account?</div>
+  const fresh=newAccts();
+  return `${fresh.length?`<div class="flag bad"><div class="ft">${
+      fresh.length===1?"A new account showed up":fresh.length+" new accounts showed up"}</div>
+    <div class="fb">Until you say what ${fresh.length===1?"it is":"they are"}, ${
+      fresh.length===1?"it feeds":"they feed"} nothing — no card row, no balance, no matching.
+    That's deliberate: a current account filed as a card turns your mortgage into a
+    credit-card charge.</div></div>`:""}
+    <div class="sh" style="margin-top:14px">What is each account?</div>
     <div class="hint" style="margin-bottom:8px">Cards feed the credit-card row. A current
       or savings account feeds your real balance, and its transactions get matched against
       the lines you've predicted.</div>
-    ${list.map(a=>`<div class="acctrow" data-id="${a.id}">
+    ${list.map(a=>`<div class="acctrow${acctRole(a.id)==="new"?" fresh":""}" data-id="${a.id}">
       <div class="an"><b>${a.name||"Account"}</b>
-        <span class="gn">${a.org||""}${typeof a.balance==="number"?" · "+money(a.balance):""}</span></div>
+        <span class="gn">${a.org||""}${typeof a.balance==="number"?" · "+money(a.balance):""}${
+          acctRole(a.id)==="new"&&acctGuess(a)?" · looks like a "+(acctGuess(a)==="card"?"card":"bank account"):""}</span></div>
       <div class="ar">
         ${[["card","Card"],["bank","Bank"],["off","Ignore"]].map(([k,l])=>
-          `<button class="mini role${acctRole(a.id)===k?" on":""}" data-role="${k}">${l}</button>`).join("")}
+          `<button class="mini role${acctRole(a.id)===k?" on":""}${
+            acctRole(a.id)==="new"&&acctGuess(a)===k?" hint":""}" data-role="${k}">${l}</button>`).join("")}
       </div></div>`).join("")}`;
 }
 function wireAcct(){
@@ -2161,6 +2195,8 @@ function wireAcct(){
       save(); render();
       toast(b.dataset.role==="bank"?"Reading balance and transactions from that one"
            :b.dataset.role==="card"?"Feeding the credit-card row":"Left alone");
+      /* re-file straight away so nothing sits in the wrong place */
+      if(!newAccts().length&&sfinLeft()>0) setTimeout(()=>sfinPull(false),300);
     };
   });
 }
@@ -2899,7 +2935,7 @@ async function sfinPull(quiet){
     const bankRowsNew=[]; let bankBal=null;
     (j.accounts||[]).forEach(a=>{
       const role=acctRole(String(a.id||a.name));
-      if(role==="off") return;
+      if(role==="off"||role==="new") return;      /* nothing until it's been named */
       if(role==="bank"){
         /* the account the bills actually leave from */
         if(!isNaN(Number(a.balance))) bankBal=(bankBal||0)+Number(a.balance);
@@ -2942,10 +2978,19 @@ async function sfinPull(quiet){
     Object.keys(S.stmts).forEach(k=>{ if(k!==c.bill&&S.stmts[k]&&S.stmts[k].live) delete S.stmts[k].live; });
     S.stmts[c.bill]={rows, live:true, source:"feed", cycle:{start:c.start,end:c.end},
                      pulledAt:Date.now()};
+    const fresh=newAccts();
     sfin.lastPull=Date.now(); sfin.lastErr=errs.length?String(errs[0]):""; saveSfin();
     save(); render();
     setSync(errs.length?"warn":"ok", errs.length?String(errs[0]).slice(0,40):"card feed updated");
     if(!quiet) toast(rows.length+" charges · "+money(-rows.reduce((a,x)=>a+x.amt,0)));
+    /* a new account on the token needs naming before it can do anything */
+    if(fresh.length){
+      setSync("warn",fresh.length+" account"+(fresh.length===1?"":"s")+" to sort out");
+      toast(fresh.length===1?"A new account showed up — tell me what it is"
+                            :fresh.length+" new accounts showed up — tell me what they are");
+      setTimeout(()=>openDrawer("sync"),400);
+      return;
+    }
     /* asked for by hand? show what the bank turned up straight away */
     if(propCount()){
       if(!quiet) setTimeout(()=>openDrawer("match"),400);
