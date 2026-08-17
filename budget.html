@@ -519,6 +519,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
   padding:13px 10px;font-size:12px;font-weight:600;text-align:left}
 .pickgrid button.cur{border-color:var(--teal);background:#12262a}
 .pickgrid button.addlab{color:var(--dim);border-style:dashed;font-weight:500}
+.dline.attach{cursor:pointer}
+.dline.attach:active{background:var(--panel3)}
 .pickgrid .xlab{float:right;color:var(--dimmer);font-weight:400;padding:0 2px}
 .pickgrid button:active{background:var(--panel3)}
 .pick .pclose{width:100%;margin-top:12px;padding:12px;border:1px solid var(--line2);
@@ -556,6 +558,9 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
   color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
 .row .paid:hover{background:#10302c}
+.row .late{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #6b4a12;border-radius:3px;
+  color:var(--amber);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
+.row .late:hover{background:#2a1e08}
 .prop{border:1px solid var(--line2);border-radius:7px;padding:10px 11px;margin-bottom:9px;
   background:var(--panel2)}
 .prop .ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -634,7 +639,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v51";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v53";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -709,6 +714,7 @@ function migrate(s){
   s.savLearned=s.savLearned||{};   /* kept apart from S.learned on purpose — see SAVCATS */
   s.meta.myCats=Array.isArray(s.meta.myCats)?s.meta.myCats:[];
   s.meta.mySavCats=Array.isArray(s.meta.mySavCats)?s.meta.mySavCats:[];
+  s.payee=s.payee||{};   /* ruleId -> merchant names you've attached by hand */
   s.learned=s.learned||{};
   s.rules.forEach((r,i)=>{
     r.schedule=r.schedule||[{from:r.start,amount:0}];
@@ -899,8 +905,19 @@ function build(){
         /* the bank says this onehappened: use what actually left, not the guess */
         const hit=(S.hits&&S.hits[key]&&!S.hits[key].off)?S.hits[key]:null;
         if(hit&&typeof hit.amt==="number") amt=hit.amt;
+        /* Due before today, on the current month, and the bank never showed it.
+           Once a bank account is connected the month opens at the live balance and
+           counts only what hasn't hit — so a line like this gets counted a second
+           time on top of money that already moved. The paycheck that landed on the
+           7th is the case that bites: it's inside the balance AND still in the
+           column, and the bottom line reads high by exactly one paycheck.
+           This only flags it. Dropping it from the maths automatically would be
+           worse — a bill due on the 5th that genuinely hasn't been paid still has
+           to come out. */
+        const late=(k===NOW&&!hit&&!r.offbook&&r.id!=="cc"&&day<new Date().getDate()
+                    &&typeof S.meta.liveBalance==="number");
         rows.push({key,ruleId:r.id,rule:r,label,day,amount:amt,ovr,manual:!!r.manual,
-                   hit,off:!!r.offbook,account:r.account||"Main",
+                   hit,late,off:!!r.offbook,account:r.account||"Main",
                    sort:r.sort,kind:amt>=0?"inc":"exp"});
       });
     }
@@ -970,9 +987,10 @@ const CATCOLOR={"Dining":"#ffc873","Delivery apps":"#ff8fb0","Groceries":"#6ff0d
    a transfer, and the card's merchant memory would start suggesting them. Separate
    list, separate learned map, no crossover in either direction. */
 const SAVCATS=["Andrea paycheck","Jacob paycheck","Transfer in","Transfer out","Mortgage",
-               "Electric bill","Water bill","Car","Insurance","Interest","Taxes",
-               "Refund","Fees","Other"];
+               "Electric bill","Water bill","Car","Insurance","Interest","Dividends",
+               "Bonus","Reimbursement","Gift","Medical","Taxes","Refund","Fees","Other"];
 const SAVCOLOR={"Andrea paycheck":"#6ff0dd","Jacob paycheck":"#8fe3f8","Transfer in":"#9ad6a0",
+  "Dividends":"#b6e88f","Bonus":"#ffd166","Reimbursement":"#9ad6a0","Gift":"#ff9ecb","Medical":"#ff9077",
   "Transfer out":"#ffc873","Mortgage":"#ff9077","Electric bill":"#ffd98a","Water bill":"#a0c4ff",
   "Car":"#c8bcff","Insurance":"#d6b3ff","Interest":"#8fd9b6","Taxes":"#ff7a61",
   "Refund":"#8fd9b6","Fees":"#ff8fb0","Other":"#a9c1c9"};
@@ -987,6 +1005,9 @@ const SAVRULES=[
   [/insurance|geico|usaa|state farm|progressive/i,"Insurance"],
   [/\birs\b|treasury|\btax\b/i,"Taxes"],
   [/interest/i,"Interest"],
+  [/dividend|\bdiv\b|schwab|vanguard|fidelity/i,"Dividends"],
+  [/bonus/i,"Bonus"],
+  [/reimburse|expense report|concur/i,"Reimbursement"],
   [/refund|reversal/i,"Refund"],
   [/\bfee\b|service charge|overdraft/i,"Fees"]
 ];
@@ -1509,8 +1530,6 @@ function render(anim,popTab){
         ${M.noData?"":`<div class="nowbal${
             typeof S.meta.liveBalance==="number"?" live":""}">${money(nowBalance())} in there now${
             typeof S.meta.liveBalance==="number"?" \u00b7 from your bank":""}</div>`}
-        ${M.noData||savBalance()===null||M.k!==NOW?"":`<div class="savbal live">${
-            money(savBalance())} of that in savings</div>`}
         ${M.noData?`<div class="infon">not counted for running total</div>`:""}
       </div>`;
     const box=col.querySelector(".rows");
@@ -1612,12 +1631,24 @@ function render(anim,popTab){
         <button class="kill">×</button>`;
       if(r.child) el.classList.add("child");
       /* struck through, with what it actually was, and a tap to put the guess back */
+      if(!r.hit&&r.late){
+        el.classList.add("late");
+        const chip=document.createElement("span");
+        chip.className="late";
+        chip.textContent="not seen";
+        chip.title="Due on the "+ordinal(r.day)+" but nothing on the account matched it."
+                  +" If it did land, attach it in \u201cDoes this look right?\u201d so it"
+                  +" stops being counted twice.";
+        chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); openDrawer("match"); };
+        el.insertBefore(chip,el.querySelector(".amt"));
+      }
       if(r.hit){
         el.classList.add("hit");
         const chip=document.createElement("span");
         chip.className="paid";
-        const moved=typeof r.hit.was==="number"&&Math.abs(r.hit.was-r.hit.amt)>=0.5;
-        chip.textContent=moved?("was "+money(r.hit.was)):"paid";
+        /* it used to read "was -$2,650" when the number moved, which pushed "Mortgage"
+           down to "M…". The real amount is already sitting in the row. */
+        chip.textContent="paid";
         chip.title="Matched to \""+(r.hit.desc||"a transaction")+"\" on "+(r.hit.date||"")
                   +". Tap to go back to the predicted amount.";
         chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); unmatch(r.key); };
@@ -2258,13 +2289,57 @@ function nameScore(label,desc){
   A.forEach(w=>{ if(B.some(x=>x.startsWith(w)||w.startsWith(x))) hit++; });
   return hit/A.length;
 }
+/* the same list matchHTML shows, so an index from one means the same row in the other */
+function spareNow(){
+  return (matchPool()||[]).filter(t=>String(t.date).slice(0,7)===NOW)
+    .filter(t=>!Object.values(S.props||{}).some(p=>p.date===t.date&&p.amt===t.amt)
+              &&!Object.values(S.hits||{}).some(h=>h&&h.date===t.date&&h.amt===t.amt))
+    .slice(0,8);
+}
+/* Attaching by hand is a decision, not a guess, so it writes straight to S.hits
+   rather than going back through the proposal queue the person just came from. */
+function openAttach(tx){
+  if(!tx) return;
+  const m=MODEL.find(x=>x.k===NOW); if(!m) return;
+  const open=m.rows.filter(r=>!r.info&&!r.off&&r.ruleId!=="cc"&&!r.hit);
+  const wrap=document.getElementById("pickWrap");
+  document.getElementById("pick").innerHTML=
+    `<div class="pt">${tx.desc||"That transaction"}</div>
+     <div class="pd">${money(tx.amt)} on ${tx.date} \u00b7 which line is this?</div>
+     ${open.length?`<div class="pickgrid">${open.map((r,i)=>
+       `<button data-att="${i}">${r.label}<span class="sub" style="display:block;
+         font-size:10px;color:var(--dimmer);font-weight:400">${money(r.amount)}</span></button>`
+       ).join("")}</div>`
+      :`<div class="hint">Every line this month is already matched.</div>`}
+     <button class="pclose" id="pickCancel">Cancel</button>`;
+  wrap.classList.add("on");
+  document.getElementById("pickCancel").onclick=closePicker;
+  wrap.onclick=e=>{ if(e.target===wrap) closePicker(); };
+  document.querySelectorAll("[data-att]").forEach(b=>b.onclick=()=>{
+    const r=open[+b.dataset.att];
+    const sig=tx.date+"|"+tx.amt+"|"+normTxt(tx.desc).slice(0,24);
+    S.hits=S.hits||{};
+    S.hits[r.key]={amt:tx.amt,date:tx.date,desc:tx.desc,was:r.amount,sig};
+    S.payee=S.payee||{};
+    const key=normMerchant(tx.desc), list=S.payee[r.ruleId]||[];
+    if(key&&!list.includes(key)){ list.push(key); S.payee[r.ruleId]=list; }
+    save(); render(); closePicker(); openDrawer("match");
+    toast(r.label+" marked paid \u00b7 I'll know that one next month");
+  });
+}
+
 function matchScore(row,tx,k){
   if((row.amount<0)!==(tx.amt<0)) return 0;             /* money out matches money out */
   const a=Math.abs(row.amount), b=Math.abs(tx.amt);
   if(!a||!b) return 0;
   const off=Math.abs(a-b)/Math.max(a,b);
   if(off>0.6 && Math.abs(a-b)>150) return 0;            /* nowhere near */
-  const nm=nameScore(row.label,tx.desc);
+  /* A paycheck is never going to read like "Paycheck · 7th" — it reads "DEPOSIT
+     BECHTEL GLOBAL", and the amount moves every period, so neither half of the usual
+     test can catch it. Once it's been attached by hand the merchant is remembered
+     against that rule, and it lands on its own from then on. */
+  const taught=(S.payee&&S.payee[row.ruleId]||[]).includes(normMerchant(tx.desc));
+  const nm=taught?1:nameScore(row.label,tx.desc);
   const day=Math.min(28,row.day||15);
   const txDay=+String(tx.date).slice(8,10);
   const dd=Math.abs(txDay-day);
@@ -2415,6 +2490,9 @@ function matchHTML(){
         <button class="mini" data-do="no">Not this</button></div>
     </div>`;
   }).join("");
+  const m0=MODEL.find(x=>x.k===NOW);
+  const late=m0?m0.rows.filter(r=>r.late&&!r.hit):[];
+  const lateSum=late.reduce((a,r)=>a+r.amount,0);
   const spare=(matchPool()||[]).filter(t=>String(t.date).slice(0,7)===NOW)
     .filter(t=>!Object.values(S.props||{}).some(p=>p.date===t.date&&p.amt===t.amt)
               &&!Object.values(S.hits||{}).some(h=>h&&h.date===t.date&&h.amt===t.amt))
@@ -2428,13 +2506,24 @@ function matchHTML(){
       <button class="mini" id="propAll">Yes to all</button>
       <button class="mini" id="propNone">No to all</button></div>
     ${rows}
+    ${late.length?`<div class="flag ${lateSum>0?"bad":""}" style="margin-top:18px">
+      <div class="ft">${late.length} line${late.length>1?"s":""} due before today,
+        not seen on the account</div>
+      <div class="fb">${late.map(r=>r.label+" "+money(r.amount)).join(" \u00b7 ")}.
+        This month opens at your real balance and counts everything that hasn't landed,
+        so anything here that <i>has</i> already gone through is being counted twice \u2014
+        the bottom line is off by ${money(lateSum)} until it's attached below.</div></div>`:""}
     ${spare.length?`<div class="sh" style="margin-top:18px">Didn't look like anything</div>
       <div class="hint" style="margin-bottom:6px">Also on the account this month, matched to
-        nothing. Add a line for any of these you want counted.</div>
-      ${spare.map(t=>`<div class="dline"><span>${t.desc||"—"} · ${t.date.slice(8)}</span>
+        nothing. Tap one to say which line it is \u2014 I'll recognise it next month.</div>
+      ${spare.map((t,i)=>`<div class="dline attach" data-attach="${i}"><span>${
+        t.desc||"—"} · ${t.date.slice(8)}</span>
         <span>${money(t.amt)}</span></div>`).join("")}`:""}`;
 }
 function wireMatch(){
+  document.querySelectorAll("[data-attach]").forEach(b=>{
+    b.onclick=()=>openAttach(spareNow()[+b.dataset.attach]);
+  });
   const a=document.getElementById("propAll"), n=document.getElementById("propNone");
   if(a) a.onclick=acceptAll;
   if(n) n.onclick=rejectAll;
