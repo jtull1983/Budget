@@ -639,7 +639,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v53";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v55";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -897,10 +897,11 @@ function build(){
         }
         if(r.payoff){ const pe=payoffMap(r)[key]; if(!pe||!pe.applied) return; amt=pe.amount; }
         let label=r.name;
-        if(r.cadence==="biweekly")
-          label = r.kind==="income"
-            ? (dates.length>1?["Paycheck","Paycheck 2","Paycheck 3"][i]:"Paycheck")+" · "+ordinal(day)
-            : r.name+" · "+ordinal(day);
+        /* Income used to be labelled "Paycheck", "Paycheck 2" regardless of what the
+           rule was called, which is fine with one earner and useless with two — both
+           people's rules rendered identically and there was no way to tell which row
+           to attach a deposit to. The date already separates the runs within a rule. */
+        if(r.cadence==="biweekly") label = r.name+" · "+ordinal(day);
         else if(r.manual) label=r.name+" · "+ordinal(day);
         /* the bank says this onehappened: use what actually left, not the guess */
         const hit=(S.hits&&S.hits[key]&&!S.hits[key].off)?S.hits[key]:null;
@@ -914,8 +915,10 @@ function build(){
            This only flags it. Dropping it from the maths automatically would be
            worse — a bill due on the 5th that genuinely hasn't been paid still has
            to come out. */
+        /* totalNow(), not liveBalance — with only a savings account connected there
+           is no liveBalance, the month still rebases, and the flag never fired. */
         const late=(k===NOW&&!hit&&!r.offbook&&r.id!=="cc"&&day<new Date().getDate()
-                    &&typeof S.meta.liveBalance==="number");
+                    &&totalNow()!==null);
         rows.push({key,ruleId:r.id,rule:r,label,day,amount:amt,ovr,manual:!!r.manual,
                    hit,late,off:!!r.offbook,account:r.account||"Main",
                    sort:r.sort,kind:amt>=0?"inc":"exp"});
@@ -1683,6 +1686,10 @@ function render(anim,popTab){
         const openPane=ev=>{ ev.preventDefault(); ev.stopPropagation(); hideTip();
           nav={month:prevMonth(el.dataset.ccMonth),cat:null};
           cardView="cat"; openDrawer("card"); };
+        /* Wiring only the label and the number left the middle of the row dead, which
+           is most of it — the gap between "Credit card" and the amount is the easiest
+           place on the line to hit with a thumb, and it did nothing. */
+        el.onclick=ev=>{ if(ev.target.closest(".kill,.paid,.frz,.late")) return; openPane(ev); };
         amtEl.onclick=openPane;
         let lpT=null,lpX=0,lpY=0,lpFired=false;
         const cancelLP=()=>{ clearTimeout(lpT); lpT=null; };
@@ -1752,7 +1759,18 @@ function render(anim,popTab){
   const ic=document.getElementById("insCount");
   if(ic) ic.textContent=n?("· "+n):"";
   const pc=propCount(), mb=document.getElementById("btnMatch");
-  if(mb){ mb.hidden=!pc; document.getElementById("matchCount").textContent=pc?("· "+pc):""; }
+  /* This drawer is also the only way to attach something by hand, so gating it on
+     proposals alone meant a paycheck that never matched had no route in at all —
+     and kept being counted on top of money already in the account. */
+  const mNow=MODEL.find(x=>x.k===NOW);
+  const lateN=mNow?mNow.rows.filter(r=>r.late&&!r.hit).length:0;
+  const spareN=spareNow().length;
+  if(mb){
+    mb.hidden=!(pc||lateN||spareN);
+    mb.firstChild.nodeValue=pc?"Confirm ":"Check the account ";
+    document.getElementById("matchCount").textContent=
+      pc?("· "+pc):lateN?("· "+lateN):"";
+  }
   const bb=document.getElementById("btnBank");
   if(bb) bb.hidden=!bankRows().length;
   const sb=document.getElementById("btnSav");
@@ -2475,8 +2493,9 @@ function rejectAll(){
 }
 function matchHTML(){
   const keys=Object.keys(S.props||{});
-  if(!keys.length) return `<div class="hint">Nothing waiting. When your bank shows a
-    transaction that looks like one of your lines, it'll be proposed here first.</div>`;
+  /* This used to return early when there was nothing to confirm, which hid the two
+     things below it — the lines that never landed, and the transactions you can
+     attach by hand. Those matter most precisely when nothing matched itself. */
   const m=MODEL.find(x=>x.k===NOW)||{rows:[]};
   const labelOf=k=>{ const r=m.rows.find(x=>x.key===k); return r?r.label:k; };
   const rows=keys.map(k=>{
@@ -2497,15 +2516,17 @@ function matchHTML(){
     .filter(t=>!Object.values(S.props||{}).some(p=>p.date===t.date&&p.amt===t.amt)
               &&!Object.values(S.hits||{}).some(h=>h&&h.date===t.date&&h.amt===t.amt))
     .slice(0,8);
-  return `<div class="flag"><div class="ft">Straight from your bank</div><div class="fb">
+  return `${keys.length?`<div class="flag"><div class="ft">Straight from your bank</div><div class="fb">
       Your bank shows ${keys.length} transaction${keys.length===1?"":"s"} that look like
       ${keys.length===1?"a line":"lines"} you'd already put in. Say the word and I'll mark
       ${keys.length===1?"it":"them"} as done and use the real amount${keys.length===1?"":"s"}.
       Nothing changes until you do.</div></div>
     <div class="crow" style="margin:10px 0 14px">
       <button class="mini" id="propAll">Yes to all</button>
-      <button class="mini" id="propNone">No to all</button></div>
+      <button class="mini" id="propNone">No to all</button></div>`:""}
     ${rows}
+    ${!keys.length&&!late.length&&!spare.length?`<div class="hint">Nothing waiting, and
+      every line this month is accounted for.</div>`:""}
     ${late.length?`<div class="flag ${lateSum>0?"bad":""}" style="margin-top:18px">
       <div class="ft">${late.length} line${late.length>1?"s":""} due before today,
         not seen on the account</div>
@@ -2811,6 +2832,7 @@ function recHTML(){
           <button class="mini" data-addstep="1">+ amount change</button>
         </div>
         <div class="crow"><button class="mini" data-apply="1">Apply</button>
+          <button class="mini" data-dup="1">Duplicate</button>
           <div style="flex:1"></div><button class="del" data-del="1">Delete item</button></div>
       </div></div>`;
   });
@@ -2831,6 +2853,15 @@ function wireRec(){
       r.schedule.splice(+b.dataset.rm,1); save(); openDrawer("rec");
       document.querySelector(`[data-r="${id}"]`).classList.add("open");
     });
+    card.querySelector("[data-dup]").onclick=()=>{
+      /* a fresh id, and a deep copy of the schedule — sharing the array meant editing
+         one person's amounts moved the other's too */
+      const copy=JSON.parse(JSON.stringify(r));
+      copy.id=uid(); copy.name=r.name+" copy"; copy.sort=r.sort+1;
+      S.rules.push(copy); S.rules.sort((a,b)=>a.sort-b.sort);
+      save(); render(); openDrawer("rec");
+      toast("Copied — rename it and set its own date and amount");
+    };
     card.querySelector("[data-del]").onclick=()=>{
       if(!confirm(`Delete "${r.name}" from every month?`)) return;
       S.rules=S.rules.filter(x=>x.id!==id); save(); render(); openDrawer("rec"); toast("Deleted");
