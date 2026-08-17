@@ -518,6 +518,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .pickgrid button{border:1px solid var(--line2);background:var(--panel2);border-radius:6px;
   padding:13px 10px;font-size:12px;font-weight:600;text-align:left}
 .pickgrid button.cur{border-color:var(--teal);background:#12262a}
+.pickgrid button.addlab{color:var(--dim);border-style:dashed;font-weight:500}
+.pickgrid .xlab{float:right;color:var(--dimmer);font-weight:400;padding:0 2px}
 .pickgrid button:active{background:var(--panel3)}
 .pick .pclose{width:100%;margin-top:12px;padding:12px;border:1px solid var(--line2);
   border-radius:6px;color:var(--dim);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
@@ -632,7 +634,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v49";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v51";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -705,6 +707,8 @@ function migrate(s){
   s.stmts=s.stmts||{};
   s.sav=s.sav||null;
   s.savLearned=s.savLearned||{};   /* kept apart from S.learned on purpose — see SAVCATS */
+  s.meta.myCats=Array.isArray(s.meta.myCats)?s.meta.myCats:[];
+  s.meta.mySavCats=Array.isArray(s.meta.mySavCats)?s.meta.mySavCats:[];
   s.learned=s.learned||{};
   s.rules.forEach((r,i)=>{
     r.schedule=r.schedule||[{from:r.start,amount:0}];
@@ -937,8 +941,8 @@ function build(){
     /* Once the bank is connected, today's balance already contains everything that
        has hit. So this month opens at that balance and only counts what's still to
        come — otherwise every settled bill would be subtracted twice. */
-    if(k===NOW&&typeof S.meta.liveBalance==="number"&&bankRows().length){
-      onhand=S.meta.liveBalance;
+    if(k===NOW&&totalNow()!==null&&matchPool().length){
+      onhand=totalNow();
       net=rows.filter(r=>!r.off&&!r.info&&!r.hit).reduce((a,r)=>a+r.amount,0);
       end=onhand+net;
     }
@@ -986,6 +990,44 @@ const SAVRULES=[
   [/refund|reversal/i,"Refund"],
   [/\bfee\b|service charge|overdraft/i,"Fees"]
 ];
+/* Built-in labels come first and can't be removed; anything added lives in meta and
+   syncs with everything else. A made-up label has no entry in the colour maps, so
+   catColor derives a stable one from the name — same label, same colour on every
+   device, without having to store it. */
+function allCats(){ return CATS.concat(S.meta.myCats||[]); }
+function allSavCats(){ return SAVCATS.concat(S.meta.mySavCats||[]); }
+function hueOf(name){
+  let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))|0;
+  return Math.abs(h)%360;
+}
+function catColor(c){ return CATCOLOR[c]||(c?`hsl(${hueOf(c)},70%,72%)`:"var(--dim)"); }
+function savColor(c){ return SAVCOLOR[c]||(c?`hsl(${hueOf(c)},70%,72%)`:"var(--dim)"); }
+function addLabel(which){
+  const list=which==="sav"?(S.meta.mySavCats||[]):(S.meta.myCats||[]);
+  const built=which==="sav"?SAVCATS:CATS;
+  const raw=prompt("Name the new label");
+  if(raw===null) return null;
+  const name=String(raw).replace(/\s+/g," ").trim().slice(0,24);
+  if(!name){ toast("Needs a name"); return null; }
+  if(built.concat(list).some(c=>c.toLowerCase()===name.toLowerCase())){
+    toast("There's already a label called that"); return null; }
+  list.push(name);
+  if(which==="sav") S.meta.mySavCats=list; else S.meta.myCats=list;
+  save(); return name;
+}
+function dropLabel(which,name){
+  const list=which==="sav"?(S.meta.mySavCats||[]):(S.meta.myCats||[]);
+  const i=list.indexOf(name); if(i<0) return false;
+  if(!confirm(`Delete the label "${name}"? Anything filed under it goes back to Other.`))
+    return false;
+  list.splice(i,1);
+  /* a learned merchant pointing at a label that no longer exists would fall through
+     to the keyword rules and look like the correction never happened */
+  const mem=which==="sav"?(S.savLearned||{}):(S.learned||{});
+  Object.keys(mem).forEach(k=>{ if(mem[k]===name) delete mem[k]; });
+  save(); return true;
+}
+
 function savCategorize(desc){
   const key=normMerchant(desc);
   if(S.savLearned&&S.savLearned[key]) return S.savLearned[key];
@@ -1468,7 +1510,7 @@ function render(anim,popTab){
             typeof S.meta.liveBalance==="number"?" live":""}">${money(nowBalance())} in there now${
             typeof S.meta.liveBalance==="number"?" \u00b7 from your bank":""}</div>`}
         ${M.noData||savBalance()===null||M.k!==NOW?"":`<div class="savbal live">${
-            money(savBalance())} in savings</div>`}
+            money(savBalance())} of that in savings</div>`}
         ${M.noData?`<div class="infon">not counted for running total</div>`:""}
       </div>`;
     const box=col.querySelector(".rows");
@@ -1701,7 +1743,8 @@ function wireNowBal(){
   });
 }
 function nowBalance(){
-  if(typeof S.meta.liveBalance==="number") return S.meta.liveBalance;
+  const t=totalNow();
+  if(t!==null) return t;
   const m=MODEL.find(x=>x.k===NOW);
   return m?m.onhand:(Number(S.meta.opening)||0);
 }
@@ -2184,9 +2227,19 @@ function setAcctRole(id,role){
   S.meta.acct=S.meta.acct||{}; S.meta.acct[id]=role; save();
 }
 function bankRows(){ return (S.bank&&Array.isArray(S.bank.rows))?S.bank.rows:[]; }
-/* Savings is deliberately a dead end: it has rows and a balance and nothing else
-   reads them. Not liveBalance, not the card statement, not autoMatch. */
+/* Savings is a normal account that happens to be a savings account: money goes in,
+   money comes out, bills get paid from it, and all of that matches and strikes through
+   like anything else. The one thing it stays out of is the credit card statement.
+   An earlier version walled it off from matching too, which was a mistake — it meant
+   a mortgage paid from savings could never be marked paid. */
 function savRows(){ return (S.sav&&Array.isArray(S.sav.rows))?S.sav.rows:[]; }
+function matchPool(){ return bankRows().concat(savRows()); }
+function totalNow(){
+  const b=typeof S.meta.liveBalance==="number"?S.meta.liveBalance:null;
+  const v=savBalance();
+  if(b===null&&v===null) return null;
+  return (b||0)+(v||0);
+}
 function savBalance(){ return typeof S.meta.savBalance==="number"?S.meta.savBalance:null; }
 
 /* ── matching a real transaction to a line you predicted ──
@@ -2225,7 +2278,7 @@ function matchScore(row,tx,k){
 }
 /* Fills S.props — proposals, not decisions. Returns true if the list changed. */
 function autoMatch(model){
-  if(!bankRows().length) return false;
+  if(!matchPool().length) return false;
   const m=model.find(x=>x.k===NOW);
   if(!m) return false;
   S.hits=S.hits||{}; S.props=S.props||{};
@@ -2237,7 +2290,7 @@ function autoMatch(model){
     if(row.info||row.off||row.ruleId==="cc") return;      /* the card bill isn't a bank line */
     if(S.hits[row.key]||S.props[row.key]) return;         /* settled, refused, or already asked */
     let best=null, bestS=0;
-    bankRows().forEach(tx=>{
+    matchPool().forEach(tx=>{
       const sig=tx.date+"|"+tx.amt+"|"+normTxt(tx.desc).slice(0,24);
       if(taken[sig]) return;
       if(String(tx.date).slice(0,7)!==NOW) return;
@@ -2279,8 +2332,9 @@ function acctHTML(){
     <div class="sh" style="margin-top:14px">What is each account?</div>
     <div class="hint" style="margin-bottom:8px">Cards feed the credit-card row. A current
       account feeds your real balance, and its transactions get matched against the lines
-      you've predicted. <b>Savings is held apart</b> — its balance never joins your spending
-      money and its transfers are never offered as matches.</div>
+      you've predicted. <b>Savings works the same way</b> — it counts toward what you have and
+      its transactions get matched — it just stays out of the credit-card statement and gets
+      its own set of labels.</div>
     ${list.map(a=>`<div class="acctrow${acctRole(a.id)==="new"?" fresh":""}" data-id="${a.id}">
       <div class="an"><b>${a.name||"Account"}</b>
         <span class="gn">${a.org||""}${typeof a.balance==="number"?" · "+money(a.balance):""}${
@@ -2308,7 +2362,7 @@ function wireAcct(){
       }
       save(); render();
       toast(b.dataset.role==="bank"?"Reading balance and transactions from that one"
-           :b.dataset.role==="savings"?"Tracked on its own, kept out of your spending money"
+           :b.dataset.role==="savings"?"Counted and matched, with its own labels"
            :b.dataset.role==="card"?"Feeding the credit-card row":"Left alone");
       /* re-file straight away so nothing sits in the wrong place */
       if(!newAccts().length&&sfinLeft()>0) setTimeout(()=>sfinPull(false),300);
@@ -2361,7 +2415,7 @@ function matchHTML(){
         <button class="mini" data-do="no">Not this</button></div>
     </div>`;
   }).join("");
-  const spare=(bankRows()||[]).filter(t=>String(t.date).slice(0,7)===NOW)
+  const spare=(matchPool()||[]).filter(t=>String(t.date).slice(0,7)===NOW)
     .filter(t=>!Object.values(S.props||{}).some(p=>p.date===t.date&&p.amt===t.amt)
               &&!Object.values(S.hits||{}).some(h=>h&&h.date===t.date&&h.amt===t.amt))
     .slice(0,8);
@@ -2455,8 +2509,10 @@ function savHTML(){
       <b>${money(bal)}</b> in there now.
       ${money(inn)} in and ${money(out)} out across the last two months
       ${S.meta.savBalanceAt?`\u00b7 checked ${new Date(S.meta.savBalanceAt).toLocaleString()}`:""}
-      <div class="gn" style="margin-top:5px">Kept out of your spending money and out of the
-      credit card entirely${m?` \u2014 ${money(m.end)} plus this is ${money(m.end+bal)}`:""}.</div>
+      <div class="gn" style="margin-top:5px">Counted in what you have, matched against your
+      lines like any other account, and kept out of the credit card entirely. Money moving
+      between here and your current account is neither spending nor income \u2014 it's the same
+      money in a different pocket, so the bottom line doesn't move.</div>
       </div></div>`;
   if(!savView.length) return h+`<div class="hint">No transactions in the last two months.</div>`;
 
@@ -2505,15 +2561,24 @@ function openSavPicker(i){
   const wrap=document.getElementById("pickWrap");
   document.getElementById("pick").innerHTML=
     `<div class="pt">${row.desc}</div>
-     <div class="pd">${money(row.amt)} \u00b7 currently <b style="color:${SAVCOLOR[cur]}">${cur}</b>${
+     <div class="pd">${money(row.amt)} \u00b7 currently <b style="color:${savColor(cur)}">${cur}</b>${
        same.length>1?` \u00b7 ${same.length} like this will move together`:""}</div>
-     <div class="pickgrid">${SAVCATS.map(c=>
+     <div class="pickgrid">${allSavCats().map(c=>
        `<button data-savpick="${c}" class="${c===cur?"cur":""}" style="color:${
-         SAVCOLOR[c]||"var(--dim)"}">${c}</button>`).join("")}</div>
+         savColor(c)}">${c}${(S.meta.mySavCats||[]).includes(c)
+           ?` <span class="xlab" data-savdrop="${c}">\u00d7</span>`:""}</button>`).join("")}
+       <button class="addlab" data-savadd="1">+ New label</button></div>
      <button class="pclose" id="pickCancel">Cancel</button>`;
   wrap.classList.add("on");
   document.getElementById("pickCancel").onclick=closePicker;
   wrap.onclick=e=>{ if(e.target===wrap) closePicker(); };
+  const sadd=document.querySelector("[data-savadd]");
+  if(sadd) sadd.onclick=()=>{ const n=addLabel("sav"); if(n){ S.savLearned[key]=n; save();
+    closePicker(); openDrawer("sav"); toast("Moved to "+n); } };
+  document.querySelectorAll("[data-savdrop]").forEach(x=>x.onclick=ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    if(dropLabel("sav",x.dataset.savdrop)){ closePicker(); openDrawer("sav"); }
+  });
   document.querySelectorAll("[data-savpick]").forEach(b=>b.onclick=()=>{
     S.savLearned=S.savLearned||{};
     S.savLearned[key]=b.dataset.savpick;      /* never S.learned — the card must not see this */
@@ -2811,9 +2876,9 @@ function feedHTML(){
       <div class="cbody">`;
     Object.entries(bd).sort((a,b)=>b[1]-a[1]).forEach(([c,v])=>{
       h+=`<div class="tr" style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;color:var(--dim)">
-        <span style="color:${CATCOLOR[c]}">${c}</span><b style="color:var(--txt)">${money(v)} · ${(v/tot*100).toFixed(0)}%</b></div>
+        <span style="color:${catColor(c)}">${c}</span><b style="color:var(--txt)">${money(v)} · ${(v/tot*100).toFixed(0)}%</b></div>
         <div class="bar" style="height:4px;background:#26343b;border-radius:2px;margin-bottom:6px;overflow:hidden">
-        <i style="display:block;height:100%;width:${(v/tot*100).toFixed(1)}%;background:${CATCOLOR[c]}"></i></div>`;
+        <i style="display:block;height:100%;width:${(v/tot*100).toFixed(1)}%;background:${catColor(c)}"></i></div>`;
     });
     h+=`<div class="crow"><button class="mini" id="fSave">Save to ${MN[parseYM(k).m-1]}</button>
         <button class="mini" id="fUseTotal">Use ${money(up10((st.dates&&st.dates.newBalance)||tot))} as the bill</button>
@@ -2823,8 +2888,8 @@ function feedHTML(){
       h+=`<div class="step" style="gap:6px">
         <span style="flex:1;font-size:10.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.desc}</span>
         <span style="font-size:10.5px;color:var(--txt);font-variant-numeric:tabular-nums">${money(r.amt)}</span>
-        <select data-tx="${i}" style="width:118px;background:#0c1418;border:1px solid var(--line2);border-radius:3px;padding:3px 4px;font-size:10px;color:${CATCOLOR[r.cat]}">
-          ${CATS.map(c=>`<option ${c===r.cat?"selected":""}>${c}</option>`).join("")}
+        <select data-tx="${i}" style="width:118px;background:#0c1418;border:1px solid var(--line2);border-radius:3px;padding:3px 4px;font-size:10px;color:${catColor(r.cat)}">
+          ${allCats().map(c=>`<option ${c===r.cat?"selected":""}>${c}</option>`).join("")}
         </select></div>`;
     });
     h+=`</div></div></div>`;
@@ -2839,8 +2904,8 @@ function feedHTML(){
     h+=`<div class="step" style="gap:6px">
       <input data-rw="${i}" value="${String(r.words||"").replace(/"/g,"&quot;")}" placeholder="beer, burger" style="flex:1">
       <select data-rc="${i}" style="width:118px;background:#0c1418;border:1px solid var(--line2);border-radius:3px;
-        padding:4px 5px;font-size:10.5px;color:${CATCOLOR[r.cat]}">
-        ${CATS.map(c=>`<option ${c===r.cat?"selected":""}>${c}</option>`).join("")}</select>
+        padding:4px 5px;font-size:10.5px;color:${catColor(r.cat)}">
+        ${allCats().map(c=>`<option ${c===r.cat?"selected":""}>${c}</option>`).join("")}</select>
       <button class="x" data-rx="${i}">×</button></div>`;
   });
   h+=`<div class="crow"><button class="mini" id="rAdd">+ add a rule</button>
@@ -4221,22 +4286,32 @@ function openPicker(filed,idx){
   const wrap=document.getElementById("pickWrap");
   document.getElementById("pick").innerHTML=
     `<div class="pt">${row.desc}</div>
-     <div class="pd">${money(row.amt)} · currently <b style="color:${CATCOLOR[row.cat]}">${row.cat}</b>${
+     <div class="pd">${money(row.amt)} · currently <b style="color:${catColor(row.cat)}">${row.cat}</b>${
        same.length>1?` · ${same.length} charges from this merchant will move together`:""}</div>
-     <div class="pickgrid">${CATS.map(c=>
-       `<button data-pick="${c}" class="${c===row.cat?"cur":""}" style="color:${CATCOLOR[c]||"var(--dim)"}">${c}</button>`).join("")}</div>
+     <div class="pickgrid">${allCats().map(c=>
+       `<button data-pick="${c}" class="${c===row.cat?"cur":""}" style="color:${catColor(c)}">${c}${
+         (S.meta.myCats||[]).includes(c)?` <span class="xlab" data-drop="${c}">\u00d7</span>`:""
+       }</button>`).join("")}
+       <button class="addlab" data-add="1">+ New label</button></div>
      <button class="pclose" id="pickCancel">Cancel</button>`;
   wrap.classList.add("on");
   document.getElementById("pickCancel").onclick=closePicker;
   wrap.onclick=e=>{ if(e.target===wrap) closePicker(); };
-  document.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{
-    const cat=b.dataset.pick, key=normMerchant(row.desc);
-    S.learned[key]=cat;
-    Object.values(S.stmts).forEach(st=>st&&st.rows&&st.rows.forEach(o=>{
-      if(normMerchant(o.desc)===key) o.cat=cat; }));
-    save(); render(); closePicker(); openDrawer("card");
-    toast(same.length>1?same.length+" moved to "+cat:"Moved to "+cat);
+  const cadd=document.querySelector("[data-add]");
+  if(cadd) cadd.onclick=()=>{ const n=addLabel("card"); if(n) applyCat(row,same,n); };
+  document.querySelectorAll("[data-drop]").forEach(x=>x.onclick=ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    if(dropLabel("card",x.dataset.drop)){ closePicker(); openDrawer("card"); }
   });
+  document.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>applyCat(row,same,b.dataset.pick));
+}
+function applyCat(row,same,cat){
+  const key=normMerchant(row.desc);
+  S.learned[key]=cat;
+  Object.values(S.stmts).forEach(st=>st&&st.rows&&st.rows.forEach(o=>{
+    if(normMerchant(o.desc)===key) o.cat=cat; }));
+  save(); render(); closePicker(); openDrawer("card");
+  toast(same.length>1?same.length+" moved to "+cat:"Moved to "+cat);
 }
 function closePicker(){ document.getElementById("pickWrap").classList.remove("on"); }
 
