@@ -231,6 +231,12 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mfoot .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;display:block}
 .mfoot .nowbal,.mfoot .savbal{font-size:10px;color:var(--dimmer);letter-spacing:.05em;margin-top:2px}
 .mfoot .savbal{color:var(--teal);opacity:.8}
+.bigpick{display:block;width:100%;text-align:left;background:#0e151b;border:1px solid var(--line);
+  border-radius:10px;padding:16px 14px;margin-bottom:10px;color:var(--txt);font:inherit;
+  font-size:14px;font-weight:600;letter-spacing:.03em;cursor:pointer}
+.bigpick:hover{border-color:var(--cyan);color:var(--cyan)}
+.bigpick .sub{display:block;font-size:11px;font-weight:400;color:var(--dimmer);margin-top:4px;letter-spacing:0}
+.txr .tg.pick{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
 .mfoot .nowbal.live,.mfoot .savbal.live{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;
   text-underline-offset:3px}
 .mfoot .v.ok{color:var(--teal)} .mfoot .v.low{color:var(--amber)} .mfoot .v.neg{color:var(--red)}
@@ -626,7 +632,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v48";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v49";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -698,6 +704,7 @@ function migrate(s){
   if(st.m>1) s.meta.start=ym(st.y,1);
   s.stmts=s.stmts||{};
   s.sav=s.sav||null;
+  s.savLearned=s.savLearned||{};   /* kept apart from S.learned on purpose — see SAVCATS */
   s.learned=s.learned||{};
   s.rules.forEach((r,i)=>{
     r.schedule=r.schedule||[{from:r.start,amount:0}];
@@ -953,6 +960,38 @@ const CATS=["Dining","Delivery apps","Groceries","Gas & auto","Travel","Shopping
 const CATCOLOR={"Dining":"#ffc873","Delivery apps":"#ff8fb0","Groceries":"#6ff0dd","Gas & auto":"#8fe3f8","Travel":"#c8bcff",
   "Shopping":"#ff9077","Bills & utilities":"#9ad6a0","Health":"#f2a3c7","Kids":"#ffd98a",
   "Personal care":"#ff9ecb","Home":"#a0c4ff","Subscriptions":"#d6b3ff","Pets":"#8fd9b6","Fees & interest":"#ff7a61","Other":"#a9c1c9"};
+
+/* The savings account gets its own words. Sharing CATS with the card was never an
+   option: "Dining" is meaningless on an account that sees a paycheck, a mortgage and
+   a transfer, and the card's merchant memory would start suggesting them. Separate
+   list, separate learned map, no crossover in either direction. */
+const SAVCATS=["Andrea paycheck","Jacob paycheck","Transfer in","Transfer out","Mortgage",
+               "Electric bill","Water bill","Car","Insurance","Interest","Taxes",
+               "Refund","Fees","Other"];
+const SAVCOLOR={"Andrea paycheck":"#6ff0dd","Jacob paycheck":"#8fe3f8","Transfer in":"#9ad6a0",
+  "Transfer out":"#ffc873","Mortgage":"#ff9077","Electric bill":"#ffd98a","Water bill":"#a0c4ff",
+  "Car":"#c8bcff","Insurance":"#d6b3ff","Interest":"#8fd9b6","Taxes":"#ff7a61",
+  "Refund":"#8fd9b6","Fees":"#ff8fb0","Other":"#a9c1c9"};
+const SAVRULES=[
+  [/bechtel/i,"Andrea paycheck"],
+  [/payroll|direct ?dep|\bsalary\b|\bdd \b/i,"Jacob paycheck"],
+  [/transfer from|tfr fr|incoming|xfer from|\bdeposit\b/i,"Transfer in"],
+  [/transfer to|tfr to|xfer to|\bwithdrawal\b/i,"Transfer out"],
+  [/mortgage|mortg/i,"Mortgage"],
+  [/pepco|electric/i,"Electric bill"],
+  [/wssc|\bwater\b/i,"Water bill"],
+  [/insurance|geico|usaa|state farm|progressive/i,"Insurance"],
+  [/\birs\b|treasury|\btax\b/i,"Taxes"],
+  [/interest/i,"Interest"],
+  [/refund|reversal/i,"Refund"],
+  [/\bfee\b|service charge|overdraft/i,"Fees"]
+];
+function savCategorize(desc){
+  const key=normMerchant(desc);
+  if(S.savLearned&&S.savLearned[key]) return S.savLearned[key];
+  for(const [re,c] of SAVRULES) if(re.test(desc)) return c;
+  return "Other";
+}
 
 /* keyword -> category. Rough on purpose; corrections below make it yours. */
 const RULES=[
@@ -1423,13 +1462,13 @@ function render(anim,popTab){
       <div class="rows"></div>
       <div class="addrow"><button class="addbtn">${budOpen?"+ add a budget line":"+ add a new line"}</button></div>
       <div class="mfoot">
-        <div class="k">Left at end · ${money0(M.net)}</div>
+        <div class="k">Left at end</div>
         <div class="v ${cls}">${money(M.end)}</div>
         ${M.noData?"":`<div class="nowbal${
             typeof S.meta.liveBalance==="number"?" live":""}">${money(nowBalance())} in there now${
             typeof S.meta.liveBalance==="number"?" \u00b7 from your bank":""}</div>`}
-        ${M.noData||savBalance()===null?"":`<div class="savbal live">${money(savBalance())
-            } in savings \u00b7 ${money(M.end+savBalance())} together</div>`}
+        ${M.noData||savBalance()===null||M.k!==NOW?"":`<div class="savbal live">${
+            money(savBalance())} in savings</div>`}
         ${M.noData?`<div class="infon">not counted for running total</div>`:""}
       </div>`;
     const box=col.querySelector(".rows");
@@ -1562,6 +1601,34 @@ function render(anim,popTab){
       el.querySelector(".kill").onclick=()=>removeRow(r);
       if(el.dataset.ccMonth){
         const lb=el.querySelector(".lbl");
+        const amtEl=el.querySelector(".amt");
+        /* The number used to be the only way in and the label the only way to the
+           pane. Now the whole row opens the pane and the number comes out on a long
+           press, or a double click with a mouse. A double *tap* was asked for and
+           left out on purpose: it forces every single tap to sit for ~250ms waiting
+           to see whether a second one is coming, and opening the pane feels broken. */
+        const openPane=ev=>{ ev.preventDefault(); ev.stopPropagation(); hideTip();
+          nav={month:prevMonth(el.dataset.ccMonth),cat:null};
+          cardView="cat"; openDrawer("card"); };
+        amtEl.onclick=openPane;
+        let lpT=null,lpX=0,lpY=0,lpFired=false;
+        const cancelLP=()=>{ clearTimeout(lpT); lpT=null; };
+        el.addEventListener("pointerdown",ev=>{
+          if(ev.pointerType==="mouse") return;              /* mouse gets dblclick instead */
+          if(ev.target.closest(".kill,.paid,.frz")) return;  /* those have their own jobs */
+          lpFired=false; lpX=ev.clientX; lpY=ev.clientY; cancelLP();
+          lpT=setTimeout(()=>{ lpFired=true;
+            if(navigator.vibrate) try{ navigator.vibrate(12); }catch(e){}
+            editAmt(amtEl,r,M.k); },500);
+        });
+        /* a swipe across the grid must not count as a press */
+        el.addEventListener("pointermove",ev=>{
+          if(Math.abs(ev.clientX-lpX)>10||Math.abs(ev.clientY-lpY)>10) cancelLP(); });
+        ["pointerup","pointercancel","pointerleave"].forEach(t=>el.addEventListener(t,cancelLP));
+        /* and the lift at the end of a long press must not then open the pane */
+        el.addEventListener("click",ev=>{
+          if(lpFired){ ev.preventDefault(); ev.stopPropagation(); lpFired=false; } },true);
+        el.ondblclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); editAmt(amtEl,r,M.k); };
         if(lb){ lb.style.cursor="pointer";
           /* plain click is right here — the reason it failed on iOS was the
              hover handler above eating the first tap, and cc rows no longer
@@ -2380,32 +2447,89 @@ function savHTML(){
   const bal=savBalance();
   if(bal===null) return `<div class="hint">Nothing here yet. Mark an account as
     <b>Savings</b> in the Sync drawer and check it once.</div>`;
-  const rows=savRows().slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const inn=rows.filter(r=>r.amt>0).reduce((a,r)=>a+r.amt,0);
-  const out=rows.filter(r=>r.amt<0).reduce((a,r)=>a+r.amt,0);
+  savView=savRows().slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const inn=savView.filter(r=>r.amt>0).reduce((a,r)=>a+r.amt,0);
+  const out=savView.filter(r=>r.amt<0).reduce((a,r)=>a+r.amt,0);
   const m=MODEL.find(x=>x.k===NOW);
   let h=`<div class="flag"><div class="ft">The savings account</div><div class="fb">
       <b>${money(bal)}</b> in there now.
       ${money(inn)} in and ${money(out)} out across the last two months
-      ${S.meta.savBalanceAt?`· checked ${new Date(S.meta.savBalanceAt).toLocaleString()}`:""}
-      <div class="gn" style="margin-top:5px">This never joins your spending money and never
-      touches the credit-card row. Moving money in still leaves your current account, so the
-      month drops — but the two figures together${m?" ("+money(m.end+bal)+")":""} stay level,
-      which is the point.</div></div></div>`;
-  if(!rows.length) return h+`<div class="hint">No transactions in the last two months.</div>`;
+      ${S.meta.savBalanceAt?`\u00b7 checked ${new Date(S.meta.savBalanceAt).toLocaleString()}`:""}
+      <div class="gn" style="margin-top:5px">Kept out of your spending money and out of the
+      credit card entirely${m?` \u2014 ${money(m.end)} plus this is ${money(m.end+bal)}`:""}.</div>
+      </div></div>`;
+  if(!savView.length) return h+`<div class="hint">No transactions in the last two months.</div>`;
+
+  /* totals first, but only the labels that actually turned up — a grid of empty
+     rows on an account with six transactions a month reads as a broken screen */
+  const tot={};
+  savView.forEach(r=>{ const c=savCategorize(r.desc); tot[c]=(tot[c]||0)+r.amt; });
+  const cats=Object.keys(tot).sort((a,b)=>Math.abs(tot[b])-Math.abs(tot[a]));
+  h+=`<div class="card open"><div class="chead"><span class="nm">What it was</span>
+      <span class="cad">last two months</span></div><div class="cbody">`;
+  cats.forEach(c=>{
+    h+=`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0">
+      <span style="color:${SAVCOLOR[c]||"var(--dim)"};font-weight:600">${c}</span>
+      <b style="color:var(--txt)">${money(tot[c])}</b></div>`;
+  });
+  h+=`</div></div>`;
+
   const byDay={};
-  rows.forEach(r=>{ (byDay[r.date]=byDay[r.date]||[]).push(r); });
+  savView.forEach((r,i)=>{ (byDay[r.date]=byDay[r.date]||[]).push(i); });
   Object.keys(byDay).sort().reverse().forEach(d=>{
-    const list=byDay[d], sub=list.reduce((a,r)=>a+r.amt,0);
+    const list=byDay[d], sub=list.reduce((a,i)=>a+savView[i].amt,0);
     h+=`<div class="card open"><div class="chead">
       <span class="nm">${new Date(d+"T12:00:00")
         .toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"})}</span>
-      <span class="ct">${money(sub)} · ${list.length}</span></div>
-      ${list.map(t=>`<div class="txr"><span class="td">${t.desc||"—"}</span>
-        <span class="tv ${t.amt>=0?"inc":""}">${money(t.amt)}</span>
-        <span class="tg none">${t.amt>=0?"paid in":"taken out"}</span></div>`).join("")}</div>`;
+      <span class="ct">${money(sub)} \u00b7 ${list.length}</span></div>
+      ${list.map(i=>{ const t=savView[i], c=savCategorize(t.desc);
+        return `<div class="txr"><span class="td">${t.desc||"\u2014"}</span>
+          <span class="tv ${t.amt>=0?"inc":""}">${money(t.amt)}</span>
+          <span class="tg none pick" data-savmove="${i}"
+            style="color:${SAVCOLOR[c]||"var(--dim)"}">${c}</span></div>`;
+      }).join("")}</div>`;
   });
   return h;
+}
+let savView=[];
+function wireSav(){
+  document.querySelectorAll("[data-savmove]").forEach(b=>{
+    b.onclick=e=>{ e.preventDefault(); openSavPicker(+b.dataset.savmove); };
+  });
+}
+/* same picker chrome as the card, deliberately fed a different list */
+function openSavPicker(i){
+  const row=savView[i]; if(!row) return;
+  const cur=savCategorize(row.desc), key=normMerchant(row.desc);
+  const same=savView.filter(o=>normMerchant(o.desc)===key);
+  const wrap=document.getElementById("pickWrap");
+  document.getElementById("pick").innerHTML=
+    `<div class="pt">${row.desc}</div>
+     <div class="pd">${money(row.amt)} \u00b7 currently <b style="color:${SAVCOLOR[cur]}">${cur}</b>${
+       same.length>1?` \u00b7 ${same.length} like this will move together`:""}</div>
+     <div class="pickgrid">${SAVCATS.map(c=>
+       `<button data-savpick="${c}" class="${c===cur?"cur":""}" style="color:${
+         SAVCOLOR[c]||"var(--dim)"}">${c}</button>`).join("")}</div>
+     <button class="pclose" id="pickCancel">Cancel</button>`;
+  wrap.classList.add("on");
+  document.getElementById("pickCancel").onclick=closePicker;
+  wrap.onclick=e=>{ if(e.target===wrap) closePicker(); };
+  document.querySelectorAll("[data-savpick]").forEach(b=>b.onclick=()=>{
+    S.savLearned=S.savLearned||{};
+    S.savLearned[key]=b.dataset.savpick;      /* never S.learned — the card must not see this */
+    save(); closePicker(); openDrawer("sav");
+    toast(same.length>1?same.length+" moved to "+b.dataset.savpick:"Moved to "+b.dataset.savpick);
+  });
+}
+
+/* the drawer opens on a fork, not on the card. Two accounts, two stories. */
+function pickTwoHTML(){
+  const bal=savBalance();
+  return `<div class="hint">Which account do you want to look at?</div>
+  <button class="bigpick" id="pickCC">Credit card spending
+    <span class="sub">charges, categories, month by month</span></button>
+  <button class="bigpick" id="pickSav">Savings account activity
+    <span class="sub">${bal===null?"nothing connected yet":money(bal)+" in there now"}</span></button>`;
 }
 
 /* ---------- drawer ---------- */
@@ -2413,19 +2537,20 @@ const drawer=document.getElementById("drawer"),scrim=document.getElementById("sc
 function openDrawer(w){
   const titles={rec:"Recurring items",ins:"Check-up",bonus:S.bonus.name,feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
-                match:"Does this look right?",bank:"Account activity",sav:"Savings",
+                match:"Does this look right?",bank:"Account activity",sav:"Savings activity",
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
   document.getElementById("dbody").innerHTML=
     w==="rec"?recHTML():w==="bonus"?bonusHTML():w==="feed"?feedHTML():
     w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():w==="bank"?bankHTML():
     w==="sav"?savHTML():
-    w==="sync"?syncHTML():w==="card"?(nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
+    w==="sync"?syncHTML():w==="card"?(nav.pick?pickTwoHTML():
+      nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
   if(w==="rec") wireRec(); else if(w==="bonus") wireBonus();
   else if(w==="budget") wireBudget(); else if(w==="adv") wireAdv();
   else if(w==="match") wireMatch();
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
-  else if(w==="card") wireCard(); else if(w==="sav"){/* nothing to wire */} else wireIns();
+  else if(w==="card") wireCard(); else if(w==="sav") wireSav(); else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
   tabifyDrawer();
   /* park focus at the top of the panel so the first Tab lands on the first control
@@ -2458,7 +2583,7 @@ document.getElementById("btnMatch").onclick=()=>openDrawer("match");
 document.getElementById("btnBank").onclick=()=>openDrawer("bank");
 document.getElementById("btnSav").onclick=()=>openDrawer("sav");
 document.getElementById("btnAdv").onclick=()=>openDrawer("adv");
-document.getElementById("btnCard").onclick=()=>{ nav={month:null,cat:null}; openDrawer("card"); };
+document.getElementById("btnCard").onclick=()=>{ nav={month:null,cat:null,pick:true}; openDrawer("card"); };
 document.getElementById("btnFeed").onclick=()=>{ feedDraft=null; openDrawer("feed"); };
 document.getElementById("stmtIn").addEventListener("change",async e=>{
   const files=e.target.files;
@@ -3883,9 +4008,9 @@ function trimPlan(){
 }
 function cardBtnState(){
   const y=YEAR, d=cardYear(y);
-  if(d.keys.length<2) return {label:"Card spending so far", mode:"waiting", d};
+  if(d.keys.length<2) return {label:"Spending so far", mode:"waiting", d};
   if(d.complete)      return {label:y+" card review",     mode:"review",  d};
-  return {label:"Card spending so far", mode:"partial", d};
+  return {label:"Spending so far", mode:"partial", d};
 }
 function cardHTML(){
   const st=cardBtnState(), d=st.d, y=d.y;
@@ -4116,6 +4241,13 @@ function openPicker(filed,idx){
 function closePicker(){ document.getElementById("pickWrap").classList.remove("on"); }
 
 function wireCard(){
+  /* the fork is the whole panel when it's up — nothing below exists yet */
+  const pcc=document.getElementById("pickCC"), psv=document.getElementById("pickSav");
+  if(pcc||psv){
+    if(pcc) pcc.onclick=()=>{ nav={month:null,cat:null}; openDrawer("card"); };
+    if(psv) psv.onclick=()=>openDrawer("sav");
+    return;
+  }
   const cvc=document.getElementById("cvCat"), cvt=document.getElementById("cvTime");
   if(cvc) cvc.onclick=()=>{ cardView="cat"; openDrawer("card"); };
   if(cvt) cvt.onclick=()=>{ cardView="time"; openDrawer("card"); };
