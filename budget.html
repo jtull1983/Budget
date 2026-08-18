@@ -190,7 +190,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mhead{box-shadow:0 6px 12px -8px rgba(0,0,0,.85)}
 .mfoot{box-shadow:0 -8px 14px -8px rgba(0,0,0,.9)}
 .mcol .addrow{flex:none}
-.row{display:flex;align-items:center;gap:6px;padding:5px 11px;min-height:27px;position:relative}
+.row{display:flex;align-items:center;gap:6px;padding:8px 11px;min-height:36px;position:relative}
 .row .lbl{flex:1;font-size:13px;font-weight:600;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row.inc .lbl{color:#e2f2f4}
 .row .amt{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:text;
@@ -206,7 +206,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row .dot{width:4px;height:4px;border-radius:50%;flex:none;background:#3e545e}
 .row.oneoff .dot{background:var(--violet)}
 .row.manual .dot{background:var(--amber)}
-.row.cc{border-top:1px solid var(--line);margin-top:3px;padding-top:5px}
+.row.cc{border-top:1px solid var(--line);margin-top:3px;padding-top:8px}
 /* Hover belongs to a mouse. On iOS a :hover rule makes the first tap paint the
    hover state and swallow the click — the second tap is the one that opens
    anything. That is the whole reason the credit card line needed tapping twice.
@@ -222,10 +222,14 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .row .late:hover{background:#2a1e08}
 }
 /* swipe a row left and the delete box comes out from under its right edge */
-.row .swx{position:absolute;right:-58px;top:0;bottom:0;width:58px;
+.row .swx{position:absolute !important;right:-58px;top:0;bottom:0;width:58px;
+  z-index:3;                       /* over the heat gradient (1) and its children (2) */
   display:flex;align-items:center;justify-content:center;
-  background:#c0392b;color:#fff;font-size:15px;font-weight:700;line-height:1}
+  background:#c0392b;color:#fff;font-size:16px;font-weight:700;line-height:1}
 .row.swopen{background:#1b2a31}
+/* the heat rows clip themselves to keep their gradient inside a rounded corner.
+   That also clips the delete box, so the clip lifts only while it is out. */
+.row.heat.swiping,.row.heat.swopen{overflow:visible}
 .amtin{width:84px;font-weight:700;background:#0c1418;border:1px solid var(--teal);border-radius:2px;
   padding:1px 3px;font-size:11.5px;text-align:right;outline:none;font-variant-numeric:tabular-nums}
 
@@ -653,7 +657,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v58";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v59";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -786,6 +790,32 @@ function monthList(){
   let y=a.y,m=a.m;
   while(y<b.y||(y===b.y&&m<=b.m)){ out.push(ym(y,m)); m++; if(m>12){m=1;y++;} }
   return out;
+}
+/* The first amount step is the amount the rule opens on, so it belongs on the
+   start month. A step dated before the rule begins describes a change that never
+   happened — which is why the editor sat there showing January 2026 under a start
+   of Aug 7, 2026.
+
+   Everything earlier than the start collapses into one: the LAST of them, because
+   that is the amount in force when the rule finally begins. Dropping the rest
+   matters — amountAt() takes the last step at or before the month asked for, so
+   leaving a stale one behind the moved one would have it win instead. Steps on or
+   after the start are real changes and are left alone. */
+function syncFirstStep(r){
+  if(!r.start||!Array.isArray(r.schedule)||!r.schedule.length) return;
+  r.schedule.sort((a,b)=>cmpYM(a.from,b.from));
+  const sm=r.start.slice(0,7);
+  const before=r.schedule.filter(x=>cmpYM(x.from,sm)<0);
+  if(!before.length) return;
+  const keep=before[before.length-1];
+  r.schedule=r.schedule.filter(x=>x===keep||cmpYM(x.from,sm)>=0);
+  keep.from=sm;
+  /* if a step was already dated exactly on the start month, that one is explicit
+     and wins — two steps on the same month is ambiguous, and the moved one is
+     only there by inference. */
+  const dup=r.schedule.filter(x=>x.from===sm);
+  if(dup.length>1) r.schedule=r.schedule.filter(x=>x.from!==sm||x===dup[dup.length-1]);
+  r.schedule.sort((a,b)=>cmpYM(a.from,b.from));
 }
 function amountAt(rule,k){ let v=0; for(const s of rule.schedule) if(cmpYM(s.from,k)<=0) v=s.amount; return v; }
 function inWindow(rule,k){
@@ -1952,7 +1982,7 @@ function editAmt(span,r,k){
 var SW_W=58, swOpenEl=null;
 function swClose(el){
   if(!el) return;
-  el.classList.remove("swopen");
+  el.classList.remove("swopen","swiping");
   el.style.transition="transform .18s ease"; el.style.transform="";
   if(swOpenEl===el) swOpenEl=null;
 }
@@ -1978,6 +2008,7 @@ function wireSwipe(el,r){
     if(!live) return;
     ev.stopPropagation();                            /* the month grid must not see this */
     if(ev.cancelable) ev.preventDefault();
+    el.classList.add("swiping");                     /* lifts the heat row's own clip */
     put(Math.max(-SW_W,Math.min(0,(open?-SW_W:0)+dx)),false);
   },{passive:false});
   const settle=ev=>{
@@ -1986,6 +2017,7 @@ function wireSwipe(el,r){
     const dx=(ev.changedTouches&&ev.changedTouches[0]?ev.changedTouches[0].clientX:x0)-x0;
     open=((open?-SW_W:0)+dx) < -SW_W/2;              /* past halfway, it stays out */
     put(open?-SW_W:0,true);
+    el.classList.remove("swiping");
     el.classList.toggle("swopen",open);
     if(open) swOpenEl=el; else if(swOpenEl===el) swOpenEl=null;
     live=false;
@@ -3037,6 +3069,7 @@ function wireRec(){
       card.querySelectorAll('[data-s="amount"]').forEach(i=>{
         const v=signed(i.value,r.kind==="income"?1:-1); r.schedule[+i.dataset.i].amount=v===null?0:v;});
       r.schedule.sort((a,b)=>cmpYM(a.from,b.from));
+      syncFirstStep(r);          /* the opening amount follows the start date */
       save(); render(); openDrawer("rec");
       document.querySelector(`[data-r="${id}"]`).classList.add("open"); toast("Updated");
     };
@@ -3044,8 +3077,11 @@ function wireRec(){
   document.getElementById("addRule").onclick=()=>{
     const n=prompt("Name it"); if(!n) return;
     const mx=Math.max(...S.rules.filter(x=>x.sort<9000).map(x=>x.sort));
-    S.rules.push({id:uid(),name:n,kind:"expense",cadence:"monthly",day:1,start:S.meta.start,end:null,
-                  sort:mx+10,schedule:[{from:S.meta.start,amount:-100}]});
+    /* a brand new rule starts where the records do, not where the plan's first
+       column sits — those differ now that there's a wall */
+    const st0=S.meta.recordsFrom||S.meta.start;
+    S.rules.push({id:uid(),name:n,kind:"expense",cadence:"monthly",day:1,start:st0,end:null,
+                  sort:mx+10,schedule:[{from:st0,amount:-100}]});
     S.rules.sort((a,b)=>a.sort-b.sort);
     save(); render(); openDrawer("rec"); toast("Added — set the amount");
   };
