@@ -674,7 +674,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v62";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v63";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2641,6 +2641,26 @@ function matchScore(row,tx,k){
   const day=Math.min(28,row.day||15);
   const txDay=+String(tx.date).slice(8,10);
   const dd=Math.abs(txDay-day);
+  /* ── payday ────────────────────────────────────────────────────────────
+     A paycheque is recognised by WHEN it lands, not by what it says or how much
+     it is. A fortnightly income line has a computed payday; the deposit turns up
+     on it, sometimes a day early for a weekend, and a few days late after a
+     holiday. The bank calls it whatever it likes — "Transfer from Checking",
+     "DEPOSIT BECHTEL GLOBAL" — and the amount moves every period, so neither the
+     name test nor the to-the-cent test below can ever carry it.
+     Money in, on a fortnightly line, on its payday is signal enough on its own.
+     This produces a PROPOSAL the owner confirms in "Does this look right?", not a
+     decision, which is what makes a looser rule safe here.
+     The window is asymmetric because payroll moves early for a weekend and late
+     for a holiday. The magnitude guard keeps a small deposit that happens to land
+     on payday — a dividend, a refund — from being read as the paycheque. */
+  if(row.rule&&row.rule.cadence==="biweekly"&&row.amount>0&&tx.amt>0&&off<0.45){
+    const drift=txDay-day;                    /* signed: negative is early */
+    if(drift>=-2&&drift<=4){
+      const near=1-Math.min(Math.abs(drift),5)/5;
+      return 0.55 + near*0.25 + (1-Math.min(off,1))*0.15;
+    }
+  }
   if(dd>12 && nm<0.5) return 0;                          /* wrong end of the month */
   if(nm<0.34 && off>0.03) return 0;                      /* no name, no exact amount */
   /* A bank line rarely reads like the name you gave it — "VCA ANIMAL HOSPITAL" for
