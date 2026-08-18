@@ -181,9 +181,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .onhand .k{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer)}
 .onhand .v{font-size:17px;font-weight:700;color:var(--cyan)}
 .mcol.now .onhand .v{color:#ffd98a}
-.mcol.now .row:hover{background:#33290f}
 
-.rows{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+.rows{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
   -webkit-overflow-scrolling:touch;padding:4px 0 2px;scrollbar-width:thin}
 .rows::-webkit-scrollbar{width:6px}
 .rows::-webkit-scrollbar-thumb{background:#3d545e;border-radius:3px}
@@ -192,12 +191,10 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mfoot{box-shadow:0 -8px 14px -8px rgba(0,0,0,.9)}
 .mcol .addrow{flex:none}
 .row{display:flex;align-items:center;gap:6px;padding:5px 11px;min-height:27px;position:relative}
-.row:hover{background:#1b2a31}
 .row .lbl{flex:1;font-size:13px;font-weight:600;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row.inc .lbl{color:#e2f2f4}
 .row .amt{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:text;
   padding:1px 3px;border-radius:2px;border:1px solid transparent}
-.row .amt:hover{border-color:var(--line2);background:#0e171c}
 .row.inc .amt{color:var(--teal)}
 .row.exp .amt{color:#ffb8a4}
 .row .amt.man{color:var(--amber)}
@@ -205,14 +202,30 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* sits outside .lbl — inside it, the label's ellipsis swallowed it on a phone */
 .row .frz{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #7a6320;border-radius:3px;
   color:var(--amber);font-size:9.5px;font-weight:700;cursor:pointer;white-space:nowrap}
-.row .frz:hover{background:#3a2f0e}
 .row .kill{position:absolute;right:1px;top:50%;transform:translateY(-50%);opacity:0;color:var(--dimmer);font-size:13px;line-height:1;padding:0 2px;border-radius:2px;background:var(--panel2)}
-.row:hover .kill{opacity:1}
-.row .kill:hover{color:var(--red)}
 .row .dot{width:4px;height:4px;border-radius:50%;flex:none;background:#3e545e}
 .row.oneoff .dot{background:var(--violet)}
 .row.manual .dot{background:var(--amber)}
 .row.cc{border-top:1px solid var(--line);margin-top:3px;padding-top:5px}
+/* Hover belongs to a mouse. On iOS a :hover rule makes the first tap paint the
+   hover state and swallow the click — the second tap is the one that opens
+   anything. That is the whole reason the credit card line needed tapping twice.
+   Behind (hover:hover) these never load on a phone and one tap works. */
+@media (hover:hover) and (pointer:fine){
+  .row:hover{background:#1b2a31}
+  .mcol.now .row:hover{background:#33290f}
+  .row .amt:hover{border-color:var(--line2);background:#0e171c}
+  .row .frz:hover{background:#3a2f0e}
+  .row:hover .kill{opacity:1}
+  .row .kill:hover{color:var(--red)}
+  .row .paid:hover{background:#10302c}
+  .row .late:hover{background:#2a1e08}
+}
+/* swipe a row left and the delete box comes out from under its right edge */
+.row .swx{position:absolute;right:-58px;top:0;bottom:0;width:58px;
+  display:flex;align-items:center;justify-content:center;
+  background:#c0392b;color:#fff;font-size:15px;font-weight:700;line-height:1}
+.row.swopen{background:#1b2a31}
 .amtin{width:84px;font-weight:700;background:#0c1418;border:1px solid var(--teal);border-radius:2px;
   padding:1px 3px;font-size:11.5px;text-align:right;outline:none;font-variant-numeric:tabular-nums}
 
@@ -560,10 +573,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .row.hit .lbl{text-decoration:line-through;opacity:.6}
 .row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
   color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
-.row .paid:hover{background:#10302c}
 .row .late{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #6b4a12;border-radius:3px;
   color:var(--amber);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
-.row .late:hover{background:#2a1e08}
 .prop{border:1px solid var(--line2);border-radius:7px;padding:10px 11px;margin-bottom:9px;
   background:var(--panel2)}
 .prop .ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -642,7 +653,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v57";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v58";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -778,11 +789,33 @@ function monthList(){
 }
 function amountAt(rule,k){ let v=0; for(const s of rule.schedule) if(cmpYM(s.from,k)<=0) v=s.amount; return v; }
 function inWindow(rule,k){
-  if(rule.start&&cmpYM(k,rule.start)<0) return false;
-  if(rule.end&&cmpYM(k,rule.end)>0) return false;
+  /* start and end may carry a day now. Compare months here and let occDates()
+     handle the day — slicing matters: "2026-08" < "2026-08-07" as raw strings,
+     so an exact start date used to exclude its own month entirely. */
+  if(rule.start&&cmpYM(k,rule.start.slice(0,7))<0) return false;
+  if(rule.end&&cmpYM(k,rule.end.slice(0,7))>0) return false;
   return true;
 }
-function occDates(rule,k){
+/* Trim the occurrences that fall outside an exact start or end date. Only the
+   boundary month is ever affected. A plain YYYY-MM start has no day and trims
+   nothing, so every rule written before this still behaves identically. */
+function windowDays(rule,k,days){
+  const sd=(rule.start&&rule.start.length>7&&rule.start.slice(0,7)===k)?+rule.start.slice(8,10):null;
+  const ed=(rule.end  &&rule.end.length>7  &&rule.end.slice(0,7)===k  )?+rule.end.slice(8,10)  :null;
+  if(sd===null&&ed===null) return days;
+  return days.filter(d=>(sd===null||d>=sd)&&(ed===null||d<=ed));
+}
+function occDates(rule,k){ return windowDays(rule,k,occDatesRaw(rule,k)); }
+/* A date input will not accept "2026-01". Fill the day in for it: the first of
+   the month for a start, the last for an end — which is what those two already
+   meant when they carried no day. */
+function dateVal(v,which){
+  if(!v) return "";
+  if(v.length>7) return v;
+  const {y,m}=parseYM(v);
+  return which==="last" ? v+"-"+String(new Date(y,m,0).getDate()).padStart(2,"0") : v+"-01";
+}
+function occDatesRaw(rule,k){
   const {y,m}=parseYM(k), last=new Date(y,m,0).getDate();
   if(rule.cadence==="biweekly"){
     const out=[]; const d=new Date(rule.anchor+"T12:00:00"); if(isNaN(d)) return [];
@@ -1536,6 +1569,7 @@ function render(anim,popTab){
   if(fb) fb.textContent=fitMode?"Expanded view":"See full year";
   const rail=document.getElementById("rail");
   rail.className="rail"+(anim?" "+anim:"");
+  swOpenEl=null;                 /* the row it pointed at is about to stop existing */
   rail.innerHTML="";
 
   const wide=perView()>=12;
@@ -1665,8 +1699,9 @@ function render(anim,popTab){
       if(anim==="anim-spill") el.style.animationDelay=(0.06+ri*0.022)+"s";
       el.innerHTML=`<span class="dot"></span><span class="lbl">${r.label}</span>
         <span class="amt${r.manual?" man":""}${r.ovr?" ovr":""}">${money(r.amount)}</span>
-        <button class="kill">×</button>`;
+        <button class="kill">×</button><span class="swx">✕</span>`;
       if(r.child) el.classList.add("child");
+      wireSwipe(el,r);   /* before every other handler — see the note there */
       /* struck through, with what it actually was, and a tap to put the guess back */
       if(!r.hit&&r.late){
         el.classList.add("late");
@@ -1900,6 +1935,73 @@ function editAmt(span,r,k){
   };
   inp.onblur=()=>done(true);
   inp.onkeydown=e=>{ if(e.key==="Enter"){inp.onblur=null;done(true);} if(e.key==="Escape"){inp.onblur=null;done(false);} };
+}
+/* ── swipe a row left to delete ──────────────────────
+   The grid also swipes sideways to change month, so a sideways drag on a row has
+   to claim the gesture outright: once it is moving, touchmove and touchend stop
+   at the row and never reach the scroller, which then sees no movement and stays
+   on the month it was on. A drag that is more vertical than horizontal is handed
+   straight back so the list still scrolls normally.
+
+   This is also the only way to delete a line on a phone now. The × has always
+   been opacity:0 until :hover, and hover no longer exists on touch.
+
+   Wired before el.onclick and before the credit card gestures on purpose. When
+   the row itself is the click target, listeners run in registration order, so
+   being first is what lets the open-state guard below swallow the tap. */
+var SW_W=58, swOpenEl=null;
+function swClose(el){
+  if(!el) return;
+  el.classList.remove("swopen");
+  el.style.transition="transform .18s ease"; el.style.transform="";
+  if(swOpenEl===el) swOpenEl=null;
+}
+function wireSwipe(el,r){
+  if(r.info||r.bonus) return;         /* reference rows have nothing to remove */
+  let x0=0,y0=0,live=false,open=false,decided=false;
+  const put=(px,anim)=>{ el.style.transition=anim?"transform .18s ease":"none";
+                         el.style.transform=px?"translateX("+px+"px)":""; };
+  el.addEventListener("touchstart",ev=>{
+    if(ev.touches.length!==1) return;
+    x0=ev.touches[0].clientX; y0=ev.touches[0].clientY;
+    live=false; decided=false; open=el.classList.contains("swopen");
+    if(swOpenEl&&swOpenEl!==el) swClose(swOpenEl);
+  },{passive:true});
+  el.addEventListener("touchmove",ev=>{
+    const dx=ev.touches[0].clientX-x0, dy=ev.touches[0].clientY-y0;
+    if(!decided){
+      if(Math.abs(dx)<10&&Math.abs(dy)<10) return;   /* too small to mean anything yet */
+      decided=true;
+      live=Math.abs(dx)>Math.abs(dy)*1.3&&(dx<0||open);
+      if(!live) return;                              /* vertical, or a right-drag on a shut row */
+    }
+    if(!live) return;
+    ev.stopPropagation();                            /* the month grid must not see this */
+    if(ev.cancelable) ev.preventDefault();
+    put(Math.max(-SW_W,Math.min(0,(open?-SW_W:0)+dx)),false);
+  },{passive:false});
+  const settle=ev=>{
+    if(!live) return;
+    ev.stopPropagation();
+    const dx=(ev.changedTouches&&ev.changedTouches[0]?ev.changedTouches[0].clientX:x0)-x0;
+    open=((open?-SW_W:0)+dx) < -SW_W/2;              /* past halfway, it stays out */
+    put(open?-SW_W:0,true);
+    el.classList.toggle("swopen",open);
+    if(open) swOpenEl=el; else if(swOpenEl===el) swOpenEl=null;
+    live=false;
+  };
+  el.addEventListener("touchend",settle,{passive:false});
+  el.addEventListener("touchcancel",settle,{passive:false});
+  el.addEventListener("click",ev=>{
+    if(ev.target.closest(".swx")){
+      ev.preventDefault(); ev.stopImmediatePropagation();
+      swClose(el); removeRow(r); return;
+    }
+    /* while it is open the row is a close button, not a link into a drawer */
+    if(el.classList.contains("swopen")){
+      ev.preventDefault(); ev.stopImmediatePropagation(); swClose(el);
+    }
+  },true);
 }
 function removeRow(r){
   if(r.info){ toast("Reference only — remove it in Feed me info"); return; }
@@ -2850,8 +2952,8 @@ function recHTML(){
             ? `<div class="f"><label>Months</label><input data-f="months" value="${(r.months||[1,4,7,10]).join(",")}"></div>`:""}
         </div>
         <div class="fg">
-          <div class="f"><label>Starts</label><input type="month" data-f="start" value="${r.start||""}" placeholder="2026-04"></div>
-          <div class="f"><label>Ends</label><input type="month" data-f="end" value="${r.end||""}" placeholder="—" ${r.end?"":"disabled"}></div>
+          <div class="f"><label>Starts</label><input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>
+          <div class="f"><label>Ends</label><input type="date" data-f="end" value="${dateVal(r.end,"last")}" ${r.end?"":"disabled"}></div>
         </div>
         <div class="fg"><div class="f"><label>Paid from</label><select data-f="account">
           ${acctList().map(a=>`<option value="${a[0]}" ${a[0]===(r.account||"Main")?"selected":""}>${a[1]}</option>`).join("")}
