@@ -552,6 +552,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
   padding:13px 10px;font-size:12px;font-weight:600;text-align:left}
 .pickgrid button.cur{border-color:var(--teal);background:#12262a}
 .pickgrid button.addlab{color:var(--dim);border-style:dashed;font-weight:500}
+.pickgrid button.labchip{cursor:default}
 .dline.attach{cursor:pointer}
 .dline.attach:active{background:var(--panel3)}
 .pickgrid .xlab{float:right;color:var(--dimmer);font-weight:400;padding:0 2px}
@@ -674,7 +675,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v65";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v66";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1162,9 +1163,26 @@ function allCats(){ return CATS.concat(S.meta.myCats||[]); }
    that list, and unhiding puts one back without touching anything else.
    "Other" cannot go; it is where everything unlabelled lands. */
 function hidSav(){ return S.meta.hidSavCats||[]; }
+/* Every recurring line is already a savings label waiting to happen — a mortgage
+   paid out of savings is the same Mortgage that sits in the column, not a second
+   idea that happens to share a name. Offering the rule names directly means the
+   vocabulary keeps itself up to date: rename a line and the label follows, add one
+   and it is there to file against, and there is no parallel list to maintain.
+   The built-ins stay as a fallback for things with no line behind them — interest,
+   dividends, a refund — and either kind can be hidden. Deduped case-insensitively
+   so a rule called "Mortgage" doesn't sit beside the built-in of the same name. */
+function ruleLabels(){
+  return (S.rules||[]).filter(r=>r.id!=="cc"&&r.name).map(r=>String(r.name).trim());
+}
 function allSavCats(){
-  const hid=hidSav();
-  return SAVCATS.filter(c=>c==="Other"||!hid.includes(c)).concat(S.meta.mySavCats||[]);
+  const hid=hidSav().map(c=>c.toLowerCase()), out=[], seen={};
+  ruleLabels().concat(SAVCATS,S.meta.mySavCats||[]).forEach(c=>{
+    const k=c.toLowerCase();
+    if(seen[k]) return;
+    if(k!=="other"&&hid.includes(k)) return;
+    seen[k]=1; out.push(c);
+  });
+  return out;
 }
 function hueOf(name){
   let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))|0;
@@ -1188,7 +1206,10 @@ function addLabel(which){
 function dropLabel(which,name){
   const list=which==="sav"?(S.meta.mySavCats||[]):(S.meta.myCats||[]);
   const i=list.indexOf(name);
-  const built=which==="sav"&&SAVCATS.includes(name)&&name!=="Other";
+  /* a savings label can come from three places: the custom list, the built-ins, or
+     a recurring line. Only the first is ours to delete — the other two are hidden. */
+  const built=which==="sav"&&name!=="Other"&&
+              (SAVCATS.includes(name)||ruleLabels().some(n=>n.toLowerCase()===name.toLowerCase()));
   if(i<0&&!built) return false;
   if(!confirm(`Delete the label "${name}"? Anything filed under it goes back to Other.`))
     return false;
@@ -2488,6 +2509,25 @@ function wireBudget(){
   };
 }
 
+function labelBlock(which,title){
+  const cats=which==="sav"?allSavCats():allCats();
+  const col=which==="sav"?savColor:catColor;
+  const own=which==="sav"?(S.meta.mySavCats||[]):(S.meta.myCats||[]);
+  /* Only the savings side can hide a built-in. The card's list drives the spending
+     breakdown and its keyword rules, and nothing has asked for that to be editable. */
+  const canDrop=c=>c!=="Other"&&(which==="sav"||own.includes(c));
+  const hid=which==="sav"?hidSav():[];
+  return `<div style="margin-top:8px"><div class="sh" style="opacity:.75">${title}</div>
+    <div class="pickgrid">${cats.map(c=>
+      `<button class="labchip" style="color:${col(c)}" data-labname="${c.replace(/"/g,"&quot;")}">${c}${
+        canDrop(c)?` <span class="xlab" data-labdrop="${which}|${c.replace(/"/g,"&quot;")}">\u00d7</span>`:""
+      }</button>`).join("")}
+      <button class="addlab" data-labadd="${which}">+ New label</button></div>
+    ${hid.length?`<div class="hint" style="margin-top:6px">Hidden: ${
+      hid.map(c=>`<button class="mini" data-labshow="${c.replace(/"/g,"&quot;")}"
+        style="padding:2px 6px;margin:0 4px 4px 0">${c} \u21ba</button>`).join("")}</div>`:""}
+  </div>`;
+}
 function advHTML(){
   const n=insights().filter(i=>i.tone!=="good").length;
   return `<div class="hint">The bits you'll want once in a while rather than every day.</div>
@@ -2496,6 +2536,13 @@ function advHTML(){
     <div class="crow"><button class="mini" id="advIns">Check-up${n?" · "+n:""}</button></div>
     <div class="hint">Reads your months back to you and flags anything odd — a month that
       dips below your buffer, a bill that jumped, a category creeping up.</div>
+
+    <div class="sh" style="margin-top:16px">Labels</div>
+    <div class="hint">What savings activity and card charges get filed under. The savings
+      list is your recurring lines plus a few extras — rename a line and its label follows.
+      Tap \u00d7 to take one out of circulation; anything filed under it goes back to Other.</div>
+    ${labelBlock("sav","Savings")}
+    ${labelBlock("card","Card")}
 
     <div class="sh" style="margin-top:16px">More room</div>
     <div class="crow"><button class="mini" id="advYear">+ Add a year</button></div>
@@ -2514,6 +2561,18 @@ function advHTML(){
 function wireAdv(){
   const go=(id,fn)=>{ const b=document.getElementById(id); if(b) b.onclick=fn; };
   go("advIns",()=>openDrawer("ins"));
+  document.querySelectorAll("[data-labdrop]").forEach(b=>b.onclick=ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    const [which,...rest]=b.dataset.labdrop.split("|");
+    if(dropLabel(which,rest.join("|"))) openDrawer("adv");
+  });
+  document.querySelectorAll("[data-labadd]").forEach(b=>b.onclick=()=>{
+    if(addLabel(b.dataset.labadd)) openDrawer("adv");
+  });
+  document.querySelectorAll("[data-labshow]").forEach(b=>b.onclick=()=>{
+    S.meta.hidSavCats=hidSav().filter(c=>c!==b.dataset.labshow);
+    save(); openDrawer("adv"); toast(b.dataset.labshow+" is back");
+  });
   go("advYear",()=>{ const e=parseYM(S.meta.end); S.meta.end=ym(e.y+1,12);
                      save(); render(); toast("Added "+(e.y+1)); openDrawer("adv"); });
   go("advSave",()=>deliver(JSON.stringify(S,null,2),"budget-"+stamp()+".json","application/json"));
