@@ -674,7 +674,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v63";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v65";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -765,6 +765,8 @@ function migrate(s){
   s.savLearned=s.savLearned||{};   /* kept apart from S.learned on purpose — see SAVCATS */
   s.meta.myCats=Array.isArray(s.meta.myCats)?s.meta.myCats:[];
   s.meta.mySavCats=Array.isArray(s.meta.mySavCats)?s.meta.mySavCats:[];
+  s.savOne=s.savOne&&typeof s.savOne==="object"?s.savOne:{};   /* one-off transfer labels */
+  s.meta.hidSavCats=Array.isArray(s.meta.hidSavCats)?s.meta.hidSavCats:[];
   s.payee=s.payee||{};   /* ruleId -> merchant names you've attached by hand */
   s.learned=s.learned||{};
   /* v60 — biweekly rules used to carry an anchor date ("any payday you know")
@@ -1153,7 +1155,17 @@ const SAVRULES=[
    catColor derives a stable one from the name — same label, same colour on every
    device, without having to store it. */
 function allCats(){ return CATS.concat(S.meta.myCats||[]); }
-function allSavCats(){ return SAVCATS.concat(S.meta.mySavCats||[]); }
+/* The built-in list is a starting point, not a fixture. "Andrea paycheck" and
+   "Jacob paycheck" shipped hardcoded and could not be removed, which is wrong —
+   the vocabulary should be whatever this household actually uses. Hidden rather
+   than deleted, because the names live in a const: hiding survives an update to
+   that list, and unhiding puts one back without touching anything else.
+   "Other" cannot go; it is where everything unlabelled lands. */
+function hidSav(){ return S.meta.hidSavCats||[]; }
+function allSavCats(){
+  const hid=hidSav();
+  return SAVCATS.filter(c=>c==="Other"||!hid.includes(c)).concat(S.meta.mySavCats||[]);
+}
 function hueOf(name){
   let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))|0;
   return Math.abs(h)%360;
@@ -1175,10 +1187,18 @@ function addLabel(which){
 }
 function dropLabel(which,name){
   const list=which==="sav"?(S.meta.mySavCats||[]):(S.meta.myCats||[]);
-  const i=list.indexOf(name); if(i<0) return false;
+  const i=list.indexOf(name);
+  const built=which==="sav"&&SAVCATS.includes(name)&&name!=="Other";
+  if(i<0&&!built) return false;
   if(!confirm(`Delete the label "${name}"? Anything filed under it goes back to Other.`))
     return false;
-  list.splice(i,1);
+  if(i>=0) list.splice(i,1);
+  else { const hid=S.meta.hidSavCats||[]; if(!hid.includes(name)) hid.push(name);
+         S.meta.hidSavCats=hid; }
+  /* a transfer labelled by hand points at the name directly and would go on showing
+     a label that is no longer offered anywhere */
+  if(which==="sav"&&S.savOne)
+    Object.keys(S.savOne).forEach(k=>{ if(S.savOne[k]===name) delete S.savOne[k]; });
   /* a learned merchant pointing at a label that no longer exists would fall through
      to the keyword rules and look like the correction never happened */
   const mem=which==="sav"?(S.savLearned||{}):(S.learned||{});
@@ -1186,7 +1206,11 @@ function dropLabel(which,name){
   save(); return true;
 }
 
-function savCategorize(desc){
+function savSig(r){ return r?r.date+"|"+r.amt+"|"+normTxt(r.desc).slice(0,24):""; }
+function savCategorize(desc,row){
+  /* a hand-labelled transfer is remembered as ITSELF — one date, one amount, one
+     description — and teaches nothing about the next one */
+  if(row&&S.savOne&&S.savOne[savSig(row)]) return S.savOne[savSig(row)];
   const key=normMerchant(desc);
   if(S.savLearned&&S.savLearned[key]) return S.savLearned[key];
   for(const [re,c] of SAVRULES) if(re.test(desc)) return c;
@@ -1228,6 +1252,16 @@ function normalizeSigns(rows){
 function fmtDate(iso){
   const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||""));
   return m?`${m[3]}/${m[2]}/${m[1]}`:String(iso||"");
+}
+/* A transfer between your own accounts is not a merchant. Both earners' pay lands
+   in savings reading "Transfer from Checking", and the mortgage leaves the same way,
+   so the string identifies nothing — learning against it would make every future
+   transfer claim to be whichever thing was taught last. Anything caught here is
+   labelled by hand, every time, on purpose. Matching still works: a fortnightly
+   paycheque is carried by its payday, which needs no name at all. */
+function isTransfer(desc){
+  return /\btransfer\b|\bxfer\b|\bto savings\b|\bfrom savings\b|\bfrom checking\b|\bto checking\b/i
+         .test(String(desc||""));
 }
 function normMerchant(desc){
   return String(desc).toLowerCase()
@@ -2599,7 +2633,7 @@ function openAttach(tx){
     S.hits[r.key]={amt:tx.amt,date:tx.date,desc:tx.desc,was:r.amount,sig};
     if(useReal) S.over[r.key]=tx.amt;      /* the bank is the authority for this one */
     S.payee=S.payee||{};
-    const key=normMerchant(tx.desc), list=S.payee[r.ruleId]||[];
+    const key=isTransfer(tx.desc)?"":normMerchant(tx.desc), list=S.payee[r.ruleId]||[];
     if(key&&!list.includes(key)){ list.push(key); S.payee[r.ruleId]=list; }
     save(); render(); closePicker(); openDrawer("match");
     toast(r.label+" marked paid \u00b7 I'll know that one next month");
@@ -2929,7 +2963,7 @@ function savHTML(){
   /* totals first, but only the labels that actually turned up — a grid of empty
      rows on an account with six transactions a month reads as a broken screen */
   const tot={};
-  savView.forEach(r=>{ const c=savCategorize(r.desc); tot[c]=(tot[c]||0)+r.amt; });
+  savView.forEach(r=>{ const c=savCategorize(r.desc,r); tot[c]=(tot[c]||0)+r.amt; });
   const cats=Object.keys(tot).sort((a,b)=>Math.abs(tot[b])-Math.abs(tot[a]));
   h+=`<div class="card open"><div class="chead"><span class="nm">What it was</span>
       <span class="cad">last two months</span></div><div class="cbody">`;
@@ -2948,7 +2982,7 @@ function savHTML(){
       <span class="nm">${new Date(d+"T12:00:00")
         .toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"})}</span>
       <span class="ct">${money(sub)} \u00b7 ${list.length}</span></div>
-      ${list.map(i=>{ const t=savView[i], c=savCategorize(t.desc);
+      ${list.map(i=>{ const t=savView[i], c=savCategorize(t.desc,t);
         return `<div class="txr"><span class="td">${t.desc||"\u2014"}</span>
           <span class="tv ${t.amt>=0?"inc":""}">${money(t.amt)}</span>
           <span class="tg none pick" data-savmove="${i}"
@@ -2966,7 +3000,7 @@ function wireSav(){
 /* same picker chrome as the card, deliberately fed a different list */
 function openSavPicker(i){
   const row=savView[i]; if(!row) return;
-  const cur=savCategorize(row.desc), key=normMerchant(row.desc);
+  const cur=savCategorize(row.desc,row), key=normMerchant(row.desc);
   const same=savView.filter(o=>normMerchant(o.desc)===key);
   const wrap=document.getElementById("pickWrap");
   document.getElementById("pick").innerHTML=
@@ -2975,7 +3009,7 @@ function openSavPicker(i){
        same.length>1?` \u00b7 ${same.length} like this will move together`:""}</div>
      <div class="pickgrid">${allSavCats().map(c=>
        `<button data-savpick="${c}" class="${c===cur?"cur":""}" style="color:${
-         savColor(c)}">${c}${(S.meta.mySavCats||[]).includes(c)
+         savColor(c)}">${c}${c!=="Other"
            ?` <span class="xlab" data-savdrop="${c}">\u00d7</span>`:""}</button>`).join("")}
        <button class="addlab" data-savadd="1">+ New label</button></div>
      <button class="pclose" id="pickCancel">Cancel</button>`;
@@ -2991,9 +3025,18 @@ function openSavPicker(i){
   });
   document.querySelectorAll("[data-savpick]").forEach(b=>b.onclick=()=>{
     S.savLearned=S.savLearned||{};
-    S.savLearned[key]=b.dataset.savpick;      /* never S.learned — the card must not see this */
+    /* A transfer gets this one row and nothing more. Writing the rule would relabel
+       every other transfer in the list, including the ones that are a different
+       thing entirely. */
+    if(isTransfer(row.desc)){
+      S.savOne=S.savOne||{};
+      S.savOne[row.date+"|"+row.amt+"|"+normTxt(row.desc).slice(0,24)]=b.dataset.savpick;
+    } else {
+      S.savLearned[key]=b.dataset.savpick;    /* never S.learned — the card must not see this */
+    }
     save(); closePicker(); openDrawer("sav");
-    toast(same.length>1?same.length+" moved to "+b.dataset.savpick:"Moved to "+b.dataset.savpick);
+    toast(isTransfer(row.desc)?"Labelled this one \u00b7 transfers stay manual"
+          :(same.length>1?same.length+" moved to "+b.dataset.savpick:"Moved to "+b.dataset.savpick));
   });
 }
 
