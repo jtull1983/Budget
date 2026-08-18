@@ -272,6 +272,16 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   #tip .tt{font-size:12px}
 }
 #tip.show{opacity:1;transform:none}
+#linepane .tt,#linepane .td,#linepane .tr,#linepane .note,#linepane .hr,#linepane .bar{}
+#linepane .tt{font-size:13px;letter-spacing:.09em;text-transform:uppercase;color:var(--txt);margin-bottom:2px}
+#linepane .td{font-size:11px;color:var(--dimmer);margin-bottom:10px}
+#linepane .tr{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;padding:4px 0;color:var(--dim)}
+#linepane .tr b{color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
+#linepane .bar{height:5px;background:#26343b;border-radius:3px;margin:8px 0 4px;overflow:hidden}
+#linepane .bar i{display:block;height:100%;background:var(--teal)}
+#linepane .bar i.over{background:var(--red)}
+#linepane .note{font-size:11px;color:var(--amber);margin-top:9px;line-height:1.5}
+#linepane .hr{height:1px;background:var(--line);margin:10px 0}
 #tip .tt{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--txt);margin-bottom:2px}
 #tip .td{font-size:10px;color:var(--dimmer);margin-bottom:8px}
 #tip .tr{display:flex;justify-content:space-between;gap:14px;font-size:11px;padding:2px 0;color:var(--dim)}
@@ -552,6 +562,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .txrow{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
   padding:9px 6px;border:none;background:none;border-bottom:1px solid var(--line)}
 .txrow:active{background:var(--panel2)}
+.txrow .dt{flex:none;width:46px;font-size:10px;color:var(--dimmer);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
 .txrow .d{flex:1;font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .txrow .a{font-size:12px;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums}
 .txrow .c{font-size:9.5px;font-weight:700;padding:3px 7px;border-radius:11px;white-space:nowrap;
@@ -662,7 +674,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v60";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v62";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -951,6 +963,21 @@ function liveStmt(){
   return (st&&st.live&&st.rows)?st:null;
 }
 /* 0 = not the live line, 1..3 = yellow / orange / red */
+/* Reading order down a column: what comes IN first, then what goes out, then the
+   purple off-book lines that are shown but never counted, and the credit card with
+   its budget last, because those summarise everything above them.
+   Within a band the order set in Recurring items still decides — sort, then day —
+   so this regroups the column without reshuffling what you arranged. */
+function rowBand(r){
+  if(r.ruleId==="cc"||r.cc||r.budget) return 3;   /* card and its budget, at the foot */
+  if(r.off) return 2;                             /* purple: shown, never counted */
+  return r.kind==="inc" ? 0 : 1;
+}
+function sortRows(rows){
+  rows.forEach((r,i)=>{ if(r._i===undefined) r._i=i; });
+  rows.sort((a,b)=> rowBand(a)-rowBand(b) || a.sort-b.sort || a.day-b.day || a._i-b._i);
+  return rows;
+}
 function heatLevel(k){
   if(k!==liveCycle().bill) return 0;
   const lt=liveTotal(); if(lt===null) return 0;
@@ -1046,7 +1073,7 @@ function build(){
                  amount:ohit&&typeof ohit.amt==="number"?ohit.amt:o.amount,hit:ohit,
                  sort:500,kind:o.amount>=0?"inc":"exp",odd:o.odd,off:false,account:"Main"});
     }
-    rows.sort((a,b)=> a.sort-b.sort || a.day-b.day);
+    sortRows(rows);
     let net=rows.filter(r=>!r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
     /* a balancer plugs a month to a target END figure. Behind the wall the month
        has no end figure to plug, so it would emit a nonsense row. */
@@ -1055,7 +1082,7 @@ function build(){
       const amt=tgt-(onhand+net);
       rows.push({key:"bal#"+k,balancer:true,target:tgt,label:"Balancer",day:98,sort:600,
                  amount:amt,kind:amt>=0?"inc":"exp",off:false,account:"Main"});
-      rows.sort((a,b)=> a.sort-b.sort || a.day-b.day);
+      sortRows(rows);
       net+=amt;
     }
     const offTot=rows.filter(r=>r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
@@ -1657,7 +1684,12 @@ function render(anim,popTab){
       nd.innerHTML=`<div>No records</div><div class="nd2">before the budget started</div>`;
       box.appendChild(nd);
     }
-    /* several hits from one rule in a month fold into a single line */
+    /* Several hits from one rule fold into one line — but only when the month is
+       actually crowded. Folding two paycheques behind a ▾ hides the thing you opened
+       the app to look at, and every tap to unfold is one the month didn't need.
+       Past the threshold the column stops being readable and the fold earns itself. */
+    const FOLD_AT=16;
+    const crowded=M.rows.length>FOLD_AT;
     const groups=[]; const seen={};
     M.rows.forEach(r=>{
       const gid=r.ruleId&&!r.info?r.ruleId:null;
@@ -1668,6 +1700,7 @@ function render(anim,popTab){
     const shown=[];
     groups.forEach(g=>{
       if(g.length<2){ shown.push(g[0]); return; }
+      if(!crowded){ g.forEach(x=>shown.push(x)); return; }  /* room enough — show them all */
       const key=M.k+"|"+g[0].ruleId;
       const open=expanded.has(key);
       shown.push({group:true,key,rows:g,label:g[0].rule?g[0].rule.name:g[0].label,
@@ -1840,6 +1873,15 @@ function render(anim,popTab){
       }
       if(r.oneoff) el.querySelector(".lbl").ondblclick=()=>{
         const n=prompt("Rename line",r.oneoff.name); if(n){r.oneoff.name=n;save();render();}
+      };
+      /* Tap opens the same card the desktop shows on hover, parked in a pane where
+         it can be read and scrolled rather than floating over the column. Only rows
+         that don't already own their tap: a group toggles, the card opens spending,
+         and an open swipe is a close instruction, not a request to drill in. */
+      if(!el.onclick&&!r.info) el.onclick=ev=>{
+        if(ev.target.closest(".amt,.kill,.swx,.tri,.frz,.paid,.late")) return;
+        if(el.classList.contains("swopen")) return;
+        openLinePane(r,M.k);
       };
       if(!el.dataset.ccMonth) el.onmouseenter=e=>showTip(e,r,M.k);
       el.onmousemove=ev=>{ if(innerWidth>=760) moveTip(ev); };
@@ -2202,8 +2244,32 @@ function reallyShowTip(e,r,k){
   }
   if(r.manual&&!stmtBreakdown(k)) h+=`<div class="note">Manual entry — click the number to set the real bill. Feed me the statement and this turns into a spending breakdown.</div>`;
   if(r.odd) h+=`<div class="note">This one sits off the quarterly water cycle. See Check-up.</div>`;
-  tipOwner=e.currentTarget||null; tipShownAt=Date.now();
-  tip.innerHTML=h; tip.classList.add("show"); moveTip(e);
+  emitTip(h,e);
+}
+/* One place decides where a tip's HTML lands. With tipSink set, the same content
+   renders into a panel instead of the floating card — which is how tapping a row
+   opens it as a side pane. There is only one builder, so the pane and the hover
+   card can never drift apart. */
+let tipSink=null;
+function emitTip(html,e){
+  if(tipSink){ tipSink.innerHTML=html; return; }
+  tip.innerHTML=html; tip.classList.add("show");
+  tipOwner=(e&&e.currentTarget)||null; tipShownAt=Date.now(); moveTip(e);
+}
+let lineCtx=null;
+function openLinePane(r,k){ lineCtx={r,k}; openDrawer("line"); }
+function lineHTML(){
+  if(!lineCtx) return `<div class="hint">Nothing selected.</div>`;
+  const box=document.createElement("div");
+  tipSink=box;
+  try{ reallyShowTip({currentTarget:null},lineCtx.r,lineCtx.k); }
+  finally{ tipSink=null; }
+  return `<div id="linepane">${box.innerHTML}</div>`;
+}
+function lineTitle(){
+  const r=lineCtx&&lineCtx.r; if(!r) return "Line";
+  return r.balancer?"Balancer":r.bonus?S.bonus.name:r.oneoff?r.oneoff.name
+       :(r.rule?r.rule.name:String(r.label||"Line").split(" \u00b7 ")[0]);
 }
 function moveTip(e){
   const pad=8, vw=innerWidth, vh=innerHeight;
@@ -2522,16 +2588,41 @@ function openAttach(tx){
   wrap.classList.add("on");
   document.getElementById("pickCancel").onclick=closePicker;
   wrap.onclick=e=>{ if(e.target===wrap) closePicker(); };
-  document.querySelectorAll("[data-att]").forEach(b=>b.onclick=()=>{
-    const r=open[+b.dataset.att];
+  /* Marking a line paid and deciding what it's WORTH are two questions. A paycheck
+     is planned at a round number and lands a few dollars off; a bill is planned at
+     the real figure. Attaching used to answer only the first, leaving the column
+     showing the guess next to a transaction that says otherwise. Ask, don't assume —
+     and only ask when the two actually disagree. */
+  const commit=(r,useReal)=>{
     const sig=tx.date+"|"+tx.amt+"|"+normTxt(tx.desc).slice(0,24);
     S.hits=S.hits||{};
     S.hits[r.key]={amt:tx.amt,date:tx.date,desc:tx.desc,was:r.amount,sig};
+    if(useReal) S.over[r.key]=tx.amt;      /* the bank is the authority for this one */
     S.payee=S.payee||{};
     const key=normMerchant(tx.desc), list=S.payee[r.ruleId]||[];
     if(key&&!list.includes(key)){ list.push(key); S.payee[r.ruleId]=list; }
     save(); render(); closePicker(); openDrawer("match");
     toast(r.label+" marked paid \u00b7 I'll know that one next month");
+  };
+  const askAmt=r=>{
+    document.getElementById("pick").innerHTML=
+      `<div class="pt">${r.label}</div>
+       <div class="pd">The line says ${money(r.amount)}. The bank says ${money(tx.amt)}.
+         Which one should this month show?</div>
+       <div class="pickgrid">
+         <button id="attReal">${money(tx.amt)}<span class="sub" style="display:block;
+           font-size:10px;color:var(--dimmer);font-weight:400">what actually landed</span></button>
+         <button id="attPlan">${money(r.amount)}<span class="sub" style="display:block;
+           font-size:10px;color:var(--dimmer);font-weight:400">leave the plan alone</span></button>
+       </div>
+       <button class="pclose" id="pickCancel">Cancel</button>`;
+    document.getElementById("attReal").onclick=()=>commit(r,true);
+    document.getElementById("attPlan").onclick=()=>commit(r,false);
+    document.getElementById("pickCancel").onclick=closePicker;
+  };
+  document.querySelectorAll("[data-att]").forEach(b=>b.onclick=()=>{
+    const r=open[+b.dataset.att];
+    if(Math.abs(tx.amt-r.amount)>0.005) askAmt(r); else commit(r,false);
   });
 }
 
@@ -2902,19 +2993,22 @@ function openDrawer(w){
   const titles={rec:"Recurring items",ins:"Check-up",bonus:S.bonus.name,feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
                 match:"Does this look right?",bank:"Account activity",sav:"Savings activity",
+                line:lineTitle(),
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
   document.getElementById("dbody").innerHTML=
     w==="rec"?recHTML():w==="bonus"?bonusHTML():w==="feed"?feedHTML():
     w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():w==="bank"?bankHTML():
-    w==="sav"?savHTML():
+    w==="sav"?savHTML():w==="line"?lineHTML():
     w==="sync"?syncHTML():w==="card"?(nav.pick?pickTwoHTML():
       nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
   if(w==="rec") wireRec(); else if(w==="bonus") wireBonus();
   else if(w==="budget") wireBudget(); else if(w==="adv") wireAdv();
   else if(w==="match") wireMatch();
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
-  else if(w==="card") wireCard(); else if(w==="sav") wireSav(); else wireIns();
+  else if(w==="card") wireCard(); else if(w==="sav") wireSav();
+  else if(w==="line"){}    /* read-only: nothing in the line pane is clickable yet */
+  else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
   tabifyDrawer();
   /* park focus at the top of the panel so the first Tab lands on the first control
@@ -4609,6 +4703,14 @@ function timelineHTML(tx){
   });
   return h;
 }
+/* "Aug 7" for a charge. isoDay() already does the hard part — working out which
+   month a statement's bare day belongs to. Anything it can't read keeps the raw
+   text the statement gave rather than showing a guess. */
+function shortDay(d,spend){
+  const iso=isoDay(d,spend);
+  if(!iso) return (String(d||"").trim()||"\u2014").slice(0,6);
+  return new Date(iso+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
+}
 function catHTML(){
   const y=YEAR, c=nav.cat, tx=cardTx(y,c,nav.month);
   const tot=tx.reduce((a,r)=>a+r.amt,0);
@@ -4623,6 +4725,7 @@ function catHTML(){
       <span class="am">${money(sub)} · ${rows.length}</span></div><div class="cbody">`;
     rows.forEach(r=>{
       h+=`<button class="txrow" data-move="${r.filed}|${r.idx}">
+        <span class="dt">${shortDay(r.date,r.spend)}</span>
         <span class="d">${r.desc}</span>
         <span class="a" style="color:${r.amt<0?"var(--teal)":"var(--txt)"}">${money(r.amt)}</span>
         <span class="c" style="color:${CATCOLOR[r.cat]||"var(--dim)"}">${r.cat}</span></button>`;
