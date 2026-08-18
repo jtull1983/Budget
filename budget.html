@@ -218,6 +218,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 
 .addrow{padding:5px 7px 8px}
 .mcol.blank{opacity:.55}
+.mcol.refonly{opacity:.62}
 .nodata{padding:26px 12px;text-align:center;color:var(--dimmer);
   font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;line-height:1.7}
 .nodata .nd2{font-size:9.5px;letter-spacing:.06em;opacity:.75;text-transform:none}
@@ -551,6 +552,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .acctrow .an b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acctrow .an .gn{font-size:10px}
 .acctrow .ar{display:flex;gap:5px;flex:none;flex-wrap:wrap;justify-content:flex-end;max-width:60%}
+.dbody input[type="date"],.dbody input[type="month"]{min-height:34px}
+.dbody input[type="date"]::-webkit-date-and-time-value{text-align:left}
 .dbody .mini.role.on{border-color:var(--cyan);color:var(--cyan);border-style:solid}
 .dbody .mini.role.hint{border-color:var(--amber);color:var(--amber)}
 .acctrow.fresh{background:#241a06;border-radius:6px;padding-left:8px;padding-right:8px}
@@ -639,7 +642,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v55";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v57";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -707,6 +710,22 @@ function migrate(s){
   s.meta.title=s.meta.title||"Household Budget";
   /* show the whole calendar year, but remember which months predate any records */
   if(!s.meta.recordsFrom) s.meta.recordsFrom=s.meta.start;
+  /* v57 — the wall. Months before recordsFrom still draw their rows, greyed, for
+     reference, but they contribute nothing to the running total and hand nothing
+     forward. The chain holds at meta.opening until it reaches recordsFrom, so that
+     month opens at exactly the figure typed in settings.
+     Set once here; the month is editable in settings afterwards.
+     The balancer sitting on the month before the wall was doing this job by hand —
+     forcing that month to END at a chosen figure so the next one OPENED there. Inside
+     the frozen zone it would compute against a total that no longer moves, so its
+     target becomes meta.opening and the row goes. */
+  if(!s.meta.wallSet){
+    s.meta.recordsFrom="2026-08";
+    const before=prevMonth(s.meta.recordsFrom);
+    const tgt=s.balancers&&s.balancers[before];
+    if(typeof tgt==="number"){ s.meta.opening=tgt; delete s.balancers[before]; }
+    s.meta.wallSet=1;
+  }
   const st=parseYM(s.meta.start);
   if(st.m>1) s.meta.start=ym(st.y,1);
   s.stmts=s.stmts||{};
@@ -874,6 +893,8 @@ function build(){
   _pstamp++; _pcache={};
   const out=[]; let onhand=S.meta.opening;
   for(const k of monthList()){
+    /* before the wall: reference only */
+    const pre=!!(S.meta.recordsFrom&&cmpYM(k,S.meta.recordsFrom)<0);
     const rows=[];
     for(const r of S.rules){
       if(!inWindow(r,k)) continue;
@@ -947,7 +968,9 @@ function build(){
     }
     rows.sort((a,b)=> a.sort-b.sort || a.day-b.day);
     let net=rows.filter(r=>!r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
-    const tgt=S.balancers?S.balancers[k]:undefined;
+    /* a balancer plugs a month to a target END figure. Behind the wall the month
+       has no end figure to plug, so it would emit a nonsense row. */
+    const tgt=pre?undefined:(S.balancers?S.balancers[k]:undefined);
     if(tgt!==undefined){
       const amt=tgt-(onhand+net);
       rows.push({key:"bal#"+k,balancer:true,target:tgt,label:"Balancer",day:98,sort:600,
@@ -966,8 +989,12 @@ function build(){
       net=rows.filter(r=>!r.off&&!r.info&&!r.hit).reduce((a,r)=>a+r.amount,0);
       end=onhand+net;
     }
+    /* The wall itself. Rows above were built and stay built — they render, they
+       just stop counting. end===onhand means the chain passes over this month
+       untouched and the records-start month opens at meta.opening exactly. */
+    if(pre) end=onhand;
     out.push({k,onhand,rows,net,end,offTot,infoTot,
-      noData: S.meta.recordsFrom ? cmpYM(k,S.meta.recordsFrom)<0 : false,
+      noData: pre,
       payCount:rows.filter(r=>r.ruleId==="pay").length,
       cleanCount:rows.filter(r=>r.ruleId==="cleaner").length});
     onhand=end;
@@ -1088,6 +1115,12 @@ function normalizeSigns(rows){
   const negs=real.filter(r=>r.amt<0).length;
   if(negs>real.length/2) rows.forEach(r=>r.amt=-r.amt);
   return rows;
+}
+/* Dates the app prints are day/month/year. The pickers above are native controls,
+   so those follow whatever the phone's region is set to — that part isn't ours. */
+function fmtDate(iso){
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||""));
+  return m?`${m[3]}/${m[2]}/${m[1]}`:String(iso||"");
 }
 function normMerchant(desc){
   return String(desc).toLowerCase()
@@ -1512,7 +1545,8 @@ function render(anim,popTab){
     const {y,m}=parseYM(M.k);
     const past=cmpYM(M.k,NOW)<0, now=M.k===NOW;
     const col=document.createElement("div");
-    col.className="mcol"+(past?" past":"")+(now?" now":"")+(M.noData&&!M.rows.length?" blank":"");
+    col.className="mcol"+(past?" past":"")+(now?" now":"")
+                +(M.noData?(M.rows.length?" refonly":" blank"):"");
     if(anim) col.style.animationDelay=(ci*0.035)+"s";
     const tags=(M.payCount>2?'<span class="tag three">3 checks</span>':"")
              + (M.cleanCount>2?'<span class="tag clean">3 cleans</span>':"")
@@ -1523,13 +1557,13 @@ function render(anim,popTab){
     col.innerHTML=`
       <div class="mhead">
         <div class="mname">${MFULL[m-1].slice(0,perView()>3?3:9)} ${perView()<=3?"’"+String(y).slice(2):""} ${tags}</div>
-        <div class="onhand"><span class="k">On hand</span><span class="v">${money(M.onhand)}</span></div>
+        <div class="onhand"><span class="k">On hand</span><span class="v">${M.noData?"\u2014":money(M.onhand)}</span></div>
       </div>
       <div class="rows"></div>
       <div class="addrow"><button class="addbtn">${budOpen?"+ add a budget line":"+ add a new line"}</button></div>
       <div class="mfoot">
         <div class="k">Left at end</div>
-        <div class="v ${cls}">${money(M.end)}</div>
+        <div class="v ${M.noData?"":cls}">${M.noData?"\u2014":money(M.end)}</div>
         ${M.noData?"":`<div class="nowbal${
             typeof S.meta.liveBalance==="number"?" live":""}">${money(nowBalance())} in there now${
             typeof S.meta.liveBalance==="number"?" \u00b7 from your bank":""}</div>`}
@@ -1652,7 +1686,7 @@ function render(anim,popTab){
         /* it used to read "was -$2,650" when the number moved, which pushed "Mortgage"
            down to "M…". The real amount is already sitting in the row. */
         chip.textContent="paid";
-        chip.title="Matched to \""+(r.hit.desc||"a transaction")+"\" on "+(r.hit.date||"")
+        chip.title="Matched to \""+(r.hit.desc||"a transaction")+"\" on "+fmtDate(r.hit.date)
                   +". Tap to go back to the predicted amount.";
         chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); unmatch(r.key); };
         el.insertBefore(chip,el.querySelector(".amt"));
@@ -1898,7 +1932,11 @@ function addOneoff(k){
 }
 
 function drawStats(){
-  const yr=MODEL.filter(m=>parseYM(m.k).y===YEAR);
+  /* walled-off months all carry the same frozen figure — they are not the tightest
+     month in any meaningful sense. Fall back if a whole year sits behind the wall,
+     otherwise Math.min of nothing is Infinity and the lookup below throws. */
+  let yr=MODEL.filter(m=>parseYM(m.k).y===YEAR&&!m.noData);
+  if(!yr.length) yr=MODEL.filter(m=>parseYM(m.k).y===YEAR);
   const ends=yr.map(m=>m.end), low=Math.min(...ends), lowM=yr[ends.indexOf(low)].k;
   const cur=MODEL.find(m=>m.k===NOW)||MODEL[0];
   const three=yr.filter(m=>m.payCount>2).length;
@@ -2323,7 +2361,7 @@ function openAttach(tx){
   const wrap=document.getElementById("pickWrap");
   document.getElementById("pick").innerHTML=
     `<div class="pt">${tx.desc||"That transaction"}</div>
-     <div class="pd">${money(tx.amt)} on ${tx.date} \u00b7 which line is this?</div>
+     <div class="pd">${money(tx.amt)} on ${fmtDate(tx.date)} \u00b7 which line is this?</div>
      ${open.length?`<div class="pickgrid">${open.map((r,i)=>
        `<button data-att="${i}">${r.label}<span class="sub" style="display:block;
          font-size:10px;color:var(--dimmer);font-weight:400">${money(r.amount)}</span></button>`
@@ -2503,7 +2541,7 @@ function matchHTML(){
     return `<div class="prop" data-k="${k}">
       <div class="ph"><b>${labelOf(k)}</b>
         <span class="pa ${moved?"moved":""}">${money(p.amt)}</span></div>
-      <div class="pd">${p.desc||"a transaction"} · ${p.date}
+      <div class="pd">${p.desc||"a transaction"} · ${fmtDate(p.date)}
         ${moved?`<span class="gn">you had ${money(p.was)}</span>`:`<span class="gn">exactly what you predicted</span>`}</div>
       <div class="crow"><button class="mini yes" data-do="yes">That's it</button>
         <button class="mini" data-do="no">Not this</button></div>
@@ -2538,7 +2576,7 @@ function matchHTML(){
       <div class="hint" style="margin-bottom:6px">Also on the account this month, matched to
         nothing. Tap one to say which line it is \u2014 I'll recognise it next month.</div>
       ${spare.map((t,i)=>`<div class="dline attach" data-attach="${i}"><span>${
-        t.desc||"—"} · ${t.date.slice(8)}</span>
+        t.desc||"—"} · ${fmtDate(t.date)}</span>
         <span>${money(t.amt)}</span></div>`).join("")}`:""}`;
 }
 function wireMatch(){
@@ -2782,10 +2820,11 @@ function recHTML(){
       `<div class="f"><label>${ACCT_FALLBACK[k]}</label><input data-acct="${k}" value="${(S.accountNames[k]||"").replace(/"/g,"&quot;")}" placeholder="name it"></div>`).join("")}
   </div>
   <div class="fg" style="margin-bottom:14px">
-    <div class="f"><label>Starting cash</label><input id="mOpen" value="${S.meta.opening}"></div>
+    <div class="f"><label>Cash at records start</label><input id="mOpen" value="${S.meta.opening}"></div>
+    <div class="f"><label>Records start</label><input type="month" id="mRF" value="${S.meta.recordsFrom||""}"></div>
     <div class="f"><label>Low-balance alert</label><input id="mBuf" value="${S.meta.buffer}"></div>
     <div class="f"><label>CC budget target</label><input id="mCC" value="${S.meta.ccTarget}"></div>
-    <div class="f"><label>Plan ends</label><input id="mEnd" value="${S.meta.end}"></div>
+    <div class="f"><label>Plan ends</label><input type="month" id="mEnd" value="${S.meta.end}"></div>
   </div>`;
   S.rules.forEach(r=>{
     const cur=amountAt(r,S.meta.end);
@@ -2805,14 +2844,14 @@ function recHTML(){
             ${["monthly","biweekly","semimonthly","quarterly","annual"].map(c=>`<option ${c===r.cadence?"selected":""}>${c}</option>`).join("")}
           </select></div>
           ${r.cadence==="biweekly"
-            ? `<div class="f"><label>A known date</label><input data-f="anchor" value="${r.anchor||""}" placeholder="2026-08-04"></div>`
-            : `<div class="f"><label>Day of month</label><input data-f="day" value="${r.day||1}"></div>`}
+            ? `<div class="f"><label>Any payday you know</label><input type="date" data-f="anchor" value="${r.anchor||""}"></div>`
+            : `<div class="f"><label>Day of month</label><input type="number" min="1" max="31" data-f="day" value="${r.day||1}"></div>`}
           ${(r.cadence==="quarterly"||r.cadence==="annual")
             ? `<div class="f"><label>Months</label><input data-f="months" value="${(r.months||[1,4,7,10]).join(",")}"></div>`:""}
         </div>
         <div class="fg">
-          <div class="f"><label>Starts</label><input data-f="start" value="${r.start||""}" placeholder="2026-04"></div>
-          <div class="f"><label>Ends</label><input data-f="end" value="${r.end||""}" placeholder="—" ${r.end?"":"disabled"}></div>
+          <div class="f"><label>Starts</label><input type="month" data-f="start" value="${r.start||""}" placeholder="2026-04"></div>
+          <div class="f"><label>Ends</label><input type="month" data-f="end" value="${r.end||""}" placeholder="—" ${r.end?"":"disabled"}></div>
         </div>
         <div class="fg"><div class="f"><label>Paid from</label><select data-f="account">
           ${acctList().map(a=>`<option value="${a[0]}" ${a[0]===(r.account||"Main")?"selected":""}>${a[1]}</option>`).join("")}
@@ -2826,7 +2865,7 @@ function recHTML(){
         </div>
         <div class="steps"><div class="sh">Amount — add a row when it changes</div>
           ${r.schedule.map((s,i)=>`<div class="step">
-            <input data-s="from" data-i="${i}" value="${s.from}" style="width:88px">
+            <input type="month" data-s="from" data-i="${i}" value="${s.from}" style="width:104px">
             <input data-s="amount" data-i="${i}" value="${s.amount}" style="width:96px">
             ${i?`<button class="x" data-rm="${i}">×</button>`:""}</div>`).join("")}
           <button class="mini" data-addstep="1">+ amount change</button>
@@ -2845,6 +2884,18 @@ function wireRec(){
     card.querySelector(".chead").onclick=()=>card.classList.toggle("open");
     const g=f=>card.querySelector(`[data-f="${f}"]`);
     g("indef").onchange=e=>{const ee=g("end");ee.disabled=e.target.checked;if(e.target.checked)ee.value="";};
+    /* Which field sits beside "Every" is decided when the card is drawn: a day of the
+       month for monthly, an exact date for biweekly. Cadence was only read on Apply,
+       so switching a new rule to biweekly left "Day of month" on screen and there was
+       nowhere to put the date — Apply then found no anchor field and saved nothing.
+       Redraw on change, carrying the two fields most likely to be half-typed. */
+    g("cadence").onchange=()=>{
+      r.name=g("name").value.trim()||r.name;
+      r.kind=g("kind").value;
+      r.cadence=g("cadence").value;
+      save(); openDrawer("rec");
+      const c=document.querySelector(`[data-r="${id}"]`); if(c) c.classList.add("open");
+    };
     card.querySelector("[data-addstep]").onclick=()=>{
       r.schedule.push({from:S.meta.end,amount:amountAt(r,S.meta.end)});
       save(); openDrawer("rec"); document.querySelector(`[data-r="${id}"]`).classList.add("open");
@@ -2904,6 +2955,7 @@ function wireRec(){
       save(); render(); openDrawer("rec"); };
   });
   bind(document.getElementById("mOpen"),v=>S.meta.opening=parseFloat(v)||0);
+  bind(document.getElementById("mRF"),v=>{if(/^\d{4}-\d{2}$/.test(v))S.meta.recordsFrom=v;});
   bind(document.getElementById("mBuf"),v=>S.meta.buffer=parseFloat(v)||0);
   bind(document.getElementById("mCC"), v=>S.meta.ccTarget=parseFloat(v)||5000);
   bind(document.getElementById("mEnd"),v=>{if(/^\d{4}-\d{2}$/.test(v))S.meta.end=v;});
@@ -4476,10 +4528,10 @@ function wireCard(){
 
 function insights(){
   const out=[];
-  const neg=MODEL.filter(m=>m.end<0);
+  const neg=MODEL.filter(m=>!m.noData&&m.end<0);
   if(neg.length) out.push({tone:"bad",t:"Months that go below zero",
     b:neg.map(m=>MN[parseYM(m.k).m-1]+" "+parseYM(m.k).y+" ends at "+money(m.end)).join(" · ")});
-  const low=MODEL.filter(m=>m.end>=0&&m.end<S.meta.buffer);
+  const low=MODEL.filter(m=>!m.noData&&m.end>=0&&m.end<S.meta.buffer);
   if(low.length) out.push({tone:"warn",t:"Months under "+money(S.meta.buffer),
     b:low.map(m=>MN[parseYM(m.k).m-1]+" "+String(parseYM(m.k).y).slice(2)+" ("+money(m.end)+")").join(", ")});
 
