@@ -607,6 +607,11 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .dbody .mini.role.hint{border-color:var(--amber);color:var(--amber)}
 .acctrow.fresh{background:#241a06;border-radius:6px;padding-left:8px;padding-right:8px}
 .row.hit .lbl{text-decoration:line-through;opacity:.6}
+/* A transaction off the account is not a prediction waiting to come true — it has
+   already left. Struck through says so at a glance, and separates the settled half
+   of a month from the half still to come. The amount is left alone: it is the one
+   figure on the row that has to stay readable. */
+.row.tx .lbl{text-decoration:line-through;text-decoration-thickness:1px;opacity:.72}
 .row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
   color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
 .row .late{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #6b4a12;border-radius:3px;
@@ -686,7 +691,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v70";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v72";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1033,7 +1038,17 @@ function rowBand(r){
 }
 function sortRows(rows){
   rows.forEach((r,i)=>{ if(r._i===undefined) r._i=i; });
-  rows.sort((a,b)=> rowBand(a)-rowBand(b) || a.sort-b.sort || a.day-b.day || a._i-b._i);
+  /* v71 — date before rule. The Recurring-items order used to win inside a band,
+     which stacked all of one rule's occurrences together: three of Andrea's
+     paychecks in a row, then Jake's, when in life they alternate. A month is read
+     top to bottom as time passing, so within income and within expenses the day is
+     what decides. The rule's own order survives as the tiebreak on a shared day,
+     which keeps a transaction sitting just under the line it answers (rules run
+     10–500, transactions 400, one-offs 500) and keeps a day with no dates at all
+     stable. Rows with no day carry 99 and fall to the bottom of their band, which
+     is where a line with no date belongs.
+     Bands are untouched: income, then expenses, then off-book, then the card. */
+  rows.sort((a,b)=> rowBand(a)-rowBand(b) || a.day-b.day || a.sort-b.sort || a._i-b._i);
   return rows;
 }
 function heatLevel(k){
@@ -1857,18 +1872,11 @@ function render(anim,popTab){
           el.insertBefore(chip,el.querySelector(".amt"));
         }
       }
-      /* struck through, with what it actually was, and a tap to put the guess back */
-      if(!r.hit&&r.late){
-        el.classList.add("late");
-        const chip=document.createElement("span");
-        chip.className="late";
-        chip.textContent="not seen";
-        chip.title="Due on the "+ordinal(r.day)+" but nothing on the account matched it."
-                  +" If it did land, attach it in \u201cDoes this look right?\u201d so it"
-                  +" stops being counted twice.";
-        chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation(); openDrawer("match"); };
-        el.insertBefore(chip,el.querySelector(".amt"));
-      }
+      /* v70.1 — the "not seen" chip is gone. It was written for a column that only
+         held predictions, where a line past its day and unmatched was the only
+         evidence something had happened. The transactions are all sitting right
+         there now, struck through, so the chip was asking a question the column
+         had already answered. `r.late` is still computed; nothing renders it. */
       if(r.hit){
         el.classList.add("hit");
         const chip=document.createElement("span");
@@ -2003,7 +2011,7 @@ function render(anim,popTab){
   const mNow=MODEL.find(x=>x.k===NOW);
   const lateN=mNow?mNow.rows.filter(r=>r.late&&!r.hit).length:0;
   if(mb){
-    mb.hidden=!lateN;
+    mb.hidden=true;              /* with it, the drawer behind it — see above */
     mb.firstChild.nodeValue="Not seen yet ";
     document.getElementById("matchCount").textContent=
       pc?("· "+pc):lateN?("· "+lateN):"";
@@ -2213,7 +2221,15 @@ function drawStats(){
 /* ---------- tooltip ---------- */
 const tip=document.getElementById("tip");
 let tipOwner=null, tipShownAt=0, tipTimer=null;
+/* Safari synthesises mouseenter on a tap, so on a phone the hover card fired on
+   the way into the pane and then sat on top of it. The CSS already keeps :hover
+   rules behind this same query for the same reason — one tap on iOS should do one
+   thing. Gated in the one place every caller goes through rather than at each of
+   the three wiring sites, so a fourth can't reintroduce it. */
+const FINE=(()=>{ try{ return matchMedia("(hover:hover) and (pointer:fine)").matches; }
+                  catch(e){ return false; } })();
 function showTip(e,r,k){
+  if(!FINE) return;
   clearTimeout(tipTimer);
   const ev={clientX:e.clientX,clientY:e.clientY,currentTarget:e.currentTarget};
   tipTimer=setTimeout(()=>reallyShowTip(ev,r,k),360);   /* let the pointer settle first */
@@ -2346,7 +2362,7 @@ function emitTip(html,e){
   tipOwner=(e&&e.currentTarget)||null; tipShownAt=Date.now(); moveTip(e);
 }
 let lineCtx=null;
-function openLinePane(r,k){ lineCtx={r,k}; openDrawer("line"); }
+function openLinePane(r,k){ hideTip(); lineCtx={r,k}; openDrawer("line"); }
 function lineHTML(){
   if(!lineCtx) return `<div class="hint">Nothing selected.</div>`;
   const box=document.createElement("div");
@@ -3152,6 +3168,7 @@ function bankHTML(){
 let txCtx=null;
 function openTxPane(r,k){
   const sig=r.sig||(r.tx?TXSIG(r.tx):null); if(!sig) return;
+  hideTip();                       /* belt and braces — see the note on FINE */
   txCtx={sig,k}; openDrawer("tx");
 }
 function txPaneTitle(){
