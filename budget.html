@@ -206,6 +206,20 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row .dot{width:4px;height:4px;border-radius:50%;flex:none;background:#3e545e}
 .row.oneoff .dot{background:var(--violet)}
 .row.manual .dot{background:var(--amber)}
+/* A real transaction off the account. It gets a cyan dot so a glance separates
+   what happened from what is only predicted. The card payment sits at half
+   strength: in the column because you asked to see everything move, out of the
+   arithmetic because the credit card row already carried that money out. */
+.row.tx .dot{background:var(--cyan)}
+.row.tx.exp .dot{background:#a8756a}
+.row.ccpay{opacity:.55}
+/* a month that has closed counts what happened, so the things it predicted sit
+   there faded rather than pretending to still be owed */
+.row.stale{opacity:.38}
+.row .tq{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #7a6320;border-radius:3px;
+  color:var(--amber);font-size:9.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.row .tk{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #2f6b60;border-radius:3px;
+  color:var(--teal);font-size:9.5px;font-weight:700;white-space:nowrap}
 .row.cc{border-top:1px solid var(--line);margin-top:3px;padding-top:8px}
 /* Hover belongs to a mouse. On iOS a :hover rule makes the first tap paint the
    hover state and swallow the click — the second tap is the one that opens
@@ -219,6 +233,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .row:hover .kill{opacity:1}
   .row .kill:hover{color:var(--red)}
   .row .paid:hover{background:#10302c}
+  .row .tq:hover{background:#3a2f0e}
   .row .late:hover{background:#2a1e08}
 }
 /* swipe a row left and the delete box comes out from under its right edge */
@@ -671,7 +686,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v69";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v70";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -789,6 +804,25 @@ function migrate(s){
     s.meta.planReset=1;
   }
   delete s.balancers;
+  /* ── v70 — the cash account is back, and it is the only one. Everything it does
+     from meta.txFrom on shows in the column as its own line. Four stores carry the
+     decisions, and they are deliberately separate:
+       s.tag    sig -> {label,transfer,ccpay}  one transaction, decided by hand
+       s.merch  merchant -> label              sticks: next month arrives named
+       s.tmerch merchant -> 1                  a known transfer, never auto-names
+       s.assign rowKey -> sig                  a placeholder answered by a real one
+     A transfer is kept OUT of s.merch on purpose. The owner reads those every time
+     because the same merchant is a different intention each month, and a label that
+     stuck would quietly pre-answer a question that has to be asked. */
+  s.tag=s.tag||{}; s.merch=s.merch||{}; s.tmerch=s.tmerch||{};
+  s.assign=s.assign||{}; s.ccpay=s.ccpay||{};
+  s.meta.txFrom=s.meta.txFrom||"2026-08-01";
+  /* The proposal queue and its hits are the old way round — the app guessing which
+     line a transaction was, for confirmation. Transactions carry themselves now and
+     the owner assigns them by hand, so the queue is emptied once and never refilled.
+     Left in the file rather than torn out: nothing writes to it, and every read is a
+     lookup that now misses. */
+  if(!s.meta.txReset){ s.hits={}; s.props={}; s.meta.txReset=1; }
   s.payee=s.payee||{};   /* ruleId -> merchant names you've attached by hand */
   s.learned=s.learned||{};
   /* v60 — biweekly rules used to carry an anchor date ("any payday you know")
@@ -1022,6 +1056,10 @@ function liveTotal(){
 }
 function build(){
   _pstamp++; _pcache={};
+  /* Computed once. A placeholder is only answered for as long as the transaction
+     that answered it is still in the pool — if a re-pull drops it, the line comes
+     back rather than staying silently gone. */
+  const LIVE=liveSigs();
   const out=[]; let onhand=S.meta.opening;
   for(const k of monthList()){
     /* before the wall: reference only */
@@ -1033,6 +1071,10 @@ function build(){
       dates.forEach((day,i)=>{
         const key=r.id+"#"+k+"#"+i;
         if(S.skip[key]) return;
+        /* answered by a real transaction: the transaction's own line is carrying
+           this month, so the placeholder steps out of the way. This month only —
+           the rule keeps drawing one in every month after it. */
+        if(S.assign&&S.assign[key]&&LIVE[S.assign[key]]) return;
         /* A hand-typed number wins — except on the cycle that's still filling in,
            where it stays dormant until the 4th. Between the 1st and the 3rd the old
            cycle is still closing out, so the feed is the honest number there. */
@@ -1088,14 +1130,45 @@ function build(){
       }
     }
     for(const o of S.oneoffs) if(o.ym===k){
+      if(S.assign&&S.assign["one#"+o.id]&&LIVE[S.assign["one#"+o.id]]) continue;
       const oh=S.hits&&S.hits["one#"+o.id];
       const ohit=(oh&&!oh.off)?oh:null;
       rows.push({key:"one#"+o.id,oneoff:o,label:o.name,day:o.day||99,
                  amount:ohit&&typeof ohit.amt==="number"?ohit.amt:o.amount,hit:ohit,
                  sort:500,kind:o.amount>=0?"inc":"exp",odd:o.odd,off:false,account:"Main"});
     }
+    /* ── what actually moved ───────────────────────────────────────────────
+       Every transaction on the account gets its own line, from the records start
+       on. Credit card spending never appears here: those charges live inside the
+       card row and its budget, and that stream stays separate. The only card line
+       that CAN show up is the payment itself, and it is marked off so the month
+       doesn't subtract the same money twice. */
+    if(!pre) txFor(k).forEach(t=>{
+      const sig=TXSIG(t), card=txIsCard(t);
+      rows.push({key:"tx#"+sig, tx:t, sig, label:txLabel(t),
+                 day:+String(t.date).slice(8,10)||1, amount:Number(t.amt)||0,
+                 real:true, ccpay:card, off:card, sort:400,
+                 transfer:txIsTransfer(t), assignedKey:assignedTo(sig),
+                 kind:(Number(t.amt)||0)>=0?"inc":"exp", account:"Main"});
+    });
     sortRows(rows);
     let net=rows.filter(r=>!r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
+    /* ── a month that has closed ───────────────────────────────────────────
+       Once a month is behind you and the account has rows on it, there is
+       nothing left to predict: what moved is on the list. Counting the
+       placeholders as well would subtract every settled bill twice — the same
+       trap the current month sidesteps by opening at the live balance. So a
+       closed month counts its transactions plus the card bill, and the
+       placeholders stay on screen as reading only.
+       Guarded on rows actually being there: a month with no transactions is a
+       month that was never pulled, not a month where nothing happened, and
+       zeroing it would put a hole in the running total. */
+    const settled=!pre&&cmpYM(k,NOW)<0&&rows.some(r=>r.real);
+    if(settled){
+      net=rows.filter(r=>!r.off&&!r.info&&(r.real||r.ruleId==="cc"))
+              .reduce((a,r)=>a+r.amount,0);
+      rows.forEach(r=>{ if(!r.real&&!r.info&&r.ruleId!=="cc"&&!r.off) r.stale=true; });
+    }
     const offTot=rows.filter(r=>r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
     const infoTot=rows.filter(r=>r.info).reduce((s,r)=>s+r.amount,0);
     let end=onhand+net;
@@ -1104,14 +1177,18 @@ function build(){
        come — otherwise every settled bill would be subtracted twice. */
     if(k===NOW&&totalNow()!==null&&matchPool().length){
       onhand=totalNow();
-      net=rows.filter(r=>!r.off&&!r.info&&!r.hit).reduce((a,r)=>a+r.amount,0);
+      /* !r.real is the whole point of the rebase now: today's balance already
+         contains every transaction on the list above, so counting them again
+         would subtract this month's spending twice. Only what is still to come —
+         the placeholders nothing has answered yet — is added on top. */
+      net=rows.filter(r=>!r.off&&!r.info&&!r.hit&&!r.real).reduce((a,r)=>a+r.amount,0);
       end=onhand+net;
     }
     /* The wall itself. Rows above were built and stay built — they render, they
        just stop counting. end===onhand means the chain passes over this month
        untouched and the records-start month opens at meta.opening exactly. */
     if(pre) end=onhand;
-    out.push({k,onhand,rows,net,end,offTot,infoTot,
+    out.push({k,onhand,rows,net,end,offTot,infoTot,settled,
       noData: pre,
       payCount:rows.filter(r=>r.ruleId==="pay").length,
       cleanCount:rows.filter(r=>r.ruleId==="cleaner").length});
@@ -1748,7 +1825,8 @@ function render(anim,popTab){
       }
       const el=document.createElement("div");
       el.className="row "+r.kind+(r.oneoff?" oneoff":"")+(r.manual?" manual":"")
-                 +(r.ruleId==="cc"?" cc":"")+(r.off?" off":"")+(r.info?" info":"");
+                 +(r.ruleId==="cc"?" cc":"")+(r.off?" off":"")+(r.info?" info":"")
+                 +(r.real?" tx":"")+(r.ccpay?" ccpay":"")+(r.stale?" stale":"");
       if(r.ruleId==="cc"&&!r.info){
         const hv=heatLevel(M.k); if(hv) el.classList.add("heat","heat"+hv);
         el.dataset.ccMonth=M.k;      /* the label opens the pane; the amount still edits */
@@ -1760,6 +1838,25 @@ function render(anim,popTab){
         <button class="kill">×</button><span class="swx">✕</span>`;
       if(r.child) el.classList.add("child");
       wireSwipe(el,r);   /* before every other handler — see the note there */
+      /* One chip per transaction, and only while there is something to answer.
+         An unnamed row says so, a transfer says it still needs a line to sit
+         against, and the card payment says why it isn't in the total. Once all
+         three are settled the row goes quiet, which is the point. */
+      if(r.real){
+        const g=txTag(r.tx);
+        const known=!!(g.label||(!r.transfer&&S.merch&&S.merch[normMerchant(r.tx.desc)]));
+        const txt=r.ccpay?"card payment"
+                 :(r.transfer&&!r.assignedKey)?"assign"
+                 :(!known?"name it":null);
+        if(txt){
+          const chip=document.createElement("span");
+          chip.className=r.ccpay?"tk":"tq";
+          chip.textContent=txt;
+          if(!r.ccpay) chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation();
+                                          openTxPane(r,M.k); };
+          el.insertBefore(chip,el.querySelector(".amt"));
+        }
+      }
       /* struck through, with what it actually was, and a tap to put the guess back */
       if(!r.hit&&r.late){
         el.classList.add("late");
@@ -1800,7 +1897,12 @@ function render(anim,popTab){
           el.insertBefore(chip,el.querySelector(".amt"));
         }
       }
-      el.querySelector(".amt").onclick=e=>editAmt(e.target,r,M.k);
+      el.querySelector(".amt").onclick=e=>{
+        /* what the bank says it was. There is nothing here to edit, so the tap
+           does the useful thing instead and opens the row. */
+        if(r.real){ openTxPane(r,M.k); return; }
+        editAmt(e.target,r,M.k);
+      };
       el.querySelector(".kill").onclick=()=>removeRow(r);
       if(el.dataset.ccMonth){
         const lb=el.querySelector(".lbl");
@@ -1857,9 +1959,9 @@ function render(anim,popTab){
          that don't already own their tap: a group toggles, the card opens spending,
          and an open swipe is a close instruction, not a request to drill in. */
       if(!el.onclick&&!r.info) el.onclick=ev=>{
-        if(ev.target.closest(".amt,.kill,.swx,.tri,.frz,.paid,.late")) return;
+        if(ev.target.closest(".amt,.kill,.swx,.tri,.frz,.paid,.late,.tq,.tk")) return;
         if(el.classList.contains("swopen")) return;
-        openLinePane(r,M.k);
+        r.real?openTxPane(r,M.k):openLinePane(r,M.k);
       };
       if(!el.dataset.ccMonth) el.onmouseenter=e=>showTip(e,r,M.k);
       el.onmousemove=ev=>{ if(innerWidth>=760) moveTip(ev); };
@@ -1900,10 +2002,9 @@ function render(anim,popTab){
      and kept being counted on top of money already in the account. */
   const mNow=MODEL.find(x=>x.k===NOW);
   const lateN=mNow?mNow.rows.filter(r=>r.late&&!r.hit).length:0;
-  const spareN=spareNow().length;
   if(mb){
-    mb.hidden=!(pc||lateN||spareN);
-    mb.firstChild.nodeValue=pc?"Confirm ":"Check the account ";
+    mb.hidden=!lateN;
+    mb.firstChild.nodeValue="Not seen yet ";
     document.getElementById("matchCount").textContent=
       pc?("· "+pc):lateN?("· "+lateN):"";
   }
@@ -2061,6 +2162,9 @@ function wireSwipe(el,r){
   },true);
 }
 function removeRow(r){
+  /* It happened. Hiding it would put the column and the balance out of step with
+     each other, and the balance is the one that can't be argued with. */
+  if(r.real){ toast("That came off the account — it can't be deleted"); return; }
   if(r.info){ toast("Reference only — remove it in Feed me info"); return; }
   if(r.oneoff) S.oneoffs=S.oneoffs.filter(o=>o.id!==r.oneoff.id); else S.skip[r.key]=1; save(); render(); }
 /* A budget line is a purchase you'll put on the card in THIS month. It raises this
@@ -2115,6 +2219,28 @@ function showTip(e,r,k){
   tipTimer=setTimeout(()=>reallyShowTip(ev,r,k),360);   /* let the pointer settle first */
 }
 function reallyShowTip(e,r,k){
+  /* A transaction has no rule and no schedule, so none of the year-to-date
+     arithmetic below means anything for it — and worse, the loop that gathers it
+     matches rows on ruleId, which is undefined on all of these and would fold
+     every transaction in the month into one. Its own card, and out. */
+  if(r.real){
+    const t=r.tx;
+    let h=`<div class="tt">${txLabel(t)}</div>
+      <div class="td">${fmtDate(t.date)} \u00b7 off the account</div>
+      <div class="tr"><span>Amount</span><b>${money(t.amt)}</b></div>
+      <div class="tr"><span>The bank called it</span><b>${String(t.desc||"—").slice(0,32)}</b></div>`;
+    if(r.ccpay) h+=`<div class="note">Your credit card payment. It shows here and is
+      left out of the month's total — the card row already takes that money out.</div>`;
+    else if(r.transfer) h+=`<div class="note">A transfer. It won't remember this name;
+      you'll be asked again next time.</div>`;
+    if(r.assignedKey) h+=`<div class="note">Standing in for a line you planned, so that
+      line has stepped out of this month.</div>`;
+    if(k===NOW) h+=`<div class="note">Already inside the balance at the top of the
+      column, so it isn't subtracted a second time.</div>`;
+    h+=`<div class="note">Tap it to name it, make it repeat, or sit it against a
+      planned line.</div>`;
+    emitTip(h,e); return;
+  }
   const {y}=parseYM(k);
   const name=r.oneoff?r.oneoff.name
              :(r.rule?r.rule.name:(String(r.label||"").split(" · ")[0]||"—"));
@@ -2227,7 +2353,47 @@ function lineHTML(){
   tipSink=box;
   try{ reallyShowTip({currentTarget:null},lineCtx.r,lineCtx.k); }
   finally{ tipSink=null; }
-  return `<div id="linepane">${box.innerHTML}</div>`;
+  return `<div id="linepane">${box.innerHTML}</div>`+lineExtra();
+}
+/* A line you typed in by hand is a placeholder for something you know is coming.
+   This is where it earns the rest of the year: give it a cadence and it stops
+   being a single month's guess and becomes a line every month, waiting for the
+   real transaction to be sat against it. */
+function lineExtra(){
+  const r=lineCtx&&lineCtx.r;
+  if(!r||!r.oneoff) return "";
+  return `<div class="steps"><div class="sh">Does it happen again?</div>
+    <div class="fg" style="margin-top:0">
+      <div class="f"><label>How often</label><select id="lnRep">
+        ${CADENCES.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join("")}
+      </select></div>
+      <div class="f"><label>Stops after</label><input type="month" id="lnEnd" value=""></div>
+    </div>
+    <div class="hint" style="margin-top:6px">Right now this only exists in
+      ${prettySpend(lineCtx.k)}. Give it a cadence and it appears in every month from
+      here on.</div>
+    <div class="crow"><button class="mini on" id="lnGo">Make it repeat</button></div>
+  </div>`;
+}
+function wireLine(){
+  const go=document.getElementById("lnGo"); if(!go) return;
+  go.onclick=()=>{
+    const r=lineCtx&&lineCtx.r; if(!r||!r.oneoff) return;
+    const cad=(document.getElementById("lnRep")||{}).value||"";
+    if(!cad){ toast("Pick how often first"); return; }
+    const endM=(document.getElementById("lnEnd")||{}).value||"";
+    const o=r.oneoff, k=lineCtx.k, day=(o.day&&o.day<99)?o.day:1;
+    /* ruleFromTx wants a transaction's shape, and a one-off has all of it —
+       an amount, a day and a month. Feed it one rather than writing a second
+       rule builder that can drift away from the first. */
+    const t={date:k+"-"+String(day).padStart(2,"0"), amt:o.amount, desc:o.name};
+    ruleFromTx(t,cad,endM,o.name);
+    /* it auto-assigned this month to a signature no bank row will ever carry */
+    clearAssign(TXSIG(t));
+    S.oneoffs=(S.oneoffs||[]).filter(x=>x.id!==o.id);
+    save(); render(); closeDrawer();
+    toast(o.name+" \u00b7 repeating from "+prettySpend(k));
+  };
 }
 function lineTitle(){
   const r=lineCtx&&lineCtx.r; if(!r) return "Line";
@@ -2518,10 +2684,10 @@ function acctGuess(a){
   const bal=Number(a.balance);
   const n=(a.name||"").toLowerCase();
   if(/credit|card|visa|mastercard|amex|venture|freedom|sapphire/.test(n)) return "card";
-  /* A savings account has no role of its own any more, so it is left for the owner
-     to place rather than guessed into "bank" — which would sum it into the spending
-     balance and tip every transfer into the matcher. */
-  if(/saving|money market|\bmma\b|high.?yield|\bhysa\b|certificate|\bcd\b/.test(n)) return null;
+  /* v70 — savings IS the cash account. There is no separate checking to confuse it
+     with, so guessing it into "bank" is right rather than dangerous. It is still only
+     a guess, offered and never applied on its own. */
+  if(/saving|money market|\bmma\b|high.?yield|\bhysa\b|certificate|\bcd\b/.test(n)) return "bank";
   if(/check|chequ|share draft/.test(n)) return "bank";
   if(!isNaN(bal)) return bal<0?"card":"bank";
   return null;
@@ -2543,6 +2709,69 @@ function matchPool(){ return bankRows(); }
 function totalNow(){
   return typeof S.meta.liveBalance==="number"?S.meta.liveBalance:null;
 }
+
+/* ── the account's own transactions ──────────────────────────────────────────
+   Everything the cash account actually did, from meta.txFrom on, kept for good
+   rather than trimmed to a rolling window: a past month has no live balance to
+   lean on, so its transactions ARE the month, and trimming them would empty the
+   column behind you as you walked forward. Deduped on the same signature the
+   tags are keyed by, because the bridge sends no stable ids. */
+const TXSIG=t=>String(t.date)+"|"+Number(t.amt).toFixed(2)+"|"+normTxt(t.desc).slice(0,24);
+function txFromDay(){ return (S.meta&&S.meta.txFrom)||"2026-08-01"; }
+function txRows(){
+  const out=[], seen={};
+  bankRows().forEach(t=>{
+    if(!t||!t.date||String(t.date)<txFromDay()) return;
+    const g=TXSIG(t); if(seen[g]) return; seen[g]=1; out.push(t);
+  });
+  return out.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+}
+function txFor(k){ return txRows().filter(t=>String(t.date).slice(0,7)===k); }
+function txTag(t){ return (S.tag&&S.tag[TXSIG(t)])||{}; }
+/* A transfer is read every time. The tag on this one transaction wins; failing
+   that, a merchant you have already called a transfer keeps its successors out
+   of the merchant-name store rather than answering for them. */
+function txIsTransfer(t){
+  const g=txTag(t);
+  if(g.transfer!==undefined) return !!g.transfer;
+  return !!(S.tmerch&&S.tmerch[normMerchant(t.desc)]);
+}
+/* The one payment that must not land twice. The credit card row already carries
+   that money out of the month; this is the same money leaving the account. It is
+   shown — everything in and out is shown — and left out of the arithmetic. */
+function txIsCard(t){
+  const g=txTag(t);
+  if(g.ccpay!==undefined) return !!g.ccpay;
+  return !!(S.ccpay&&S.ccpay[normMerchant(t.desc)]);
+}
+/* A tag beats a remembered merchant; a remembered merchant beats the bank's own
+   wording; a transfer never reads the merchant store at all. */
+/* A first guess only, and it changes nothing until it is saved. The same word
+   list the card feed already uses to spot a payment, run against money leaving
+   the account. Deliberately not wired into txIsCard(): a false positive there
+   would quietly drop a real expense out of the month's total, and a wrong guess
+   in a checkbox is one tap to fix. */
+function txCardGuess(t){
+  if(Number(t.amt)>=0) return false;
+  return SFIN_PAYMENT.test(String(t.desc||""));
+}
+function txLabel(t){
+  const g=txTag(t);
+  if(g.label) return g.label;
+  if(!txIsTransfer(t)){
+    const m=normMerchant(t.desc);
+    if(S.merch&&S.merch[m]) return S.merch[m];
+  }
+  return String(t.desc||"").trim()||"Transaction";
+}
+function liveSigs(){ const o={}; txRows().forEach(t=>o[TXSIG(t)]=1); return o; }
+/* which placeholder, if any, this transaction was assigned to */
+function assignedTo(sig){
+  const a=S.assign||{};
+  for(const k in a) if(a[k]===sig) return k;
+  return null;
+}
+function txFind(sig){ return txRows().find(t=>TXSIG(t)===sig)||null; }
 
 /* ── matching a real transaction to a line you predicted ──
    Three signals: does the name look like the line, is the amount in the right
@@ -2669,6 +2898,14 @@ function matchScore(row,tx,k){
 }
 /* Fills S.props — proposals, not decisions. Returns true if the list changed. */
 function autoMatch(model){
+  /* v70 — off. This ran the relationship the other way round: the app guessing
+     which planned line a transaction belonged to, and asking to have the guess
+     confirmed. Transactions carry themselves now, and the owner assigns them by
+     hand in the transaction pane, so a queue of guesses beside that is a second
+     opinion nobody asked for. Left standing rather than torn out: it is called
+     from one place, it returns false, and nothing downstream notices. */
+  return false;
+  /* eslint-disable no-unreachable */
   if(!matchPool().length) return false;
   const m=model.find(x=>x.k===NOW);
   if(!m) return false;
@@ -2803,10 +3040,12 @@ function matchHTML(){
   const m0=MODEL.find(x=>x.k===NOW);
   const late=m0?m0.rows.filter(r=>r.late&&!r.hit):[];
   const lateSum=late.reduce((a,r)=>a+r.amount,0);
-  const spare=(matchPool()||[]).filter(t=>String(t.date).slice(0,7)===NOW)
-    .filter(t=>!Object.values(S.props||{}).some(p=>p.date===t.date&&p.amt===t.amt)
-              &&!Object.values(S.hits||{}).some(h=>h&&h.date===t.date&&h.amt===t.amt))
-    .slice(0,8);
+  /* v70 — the "didn't look like anything" list is gone. Every transaction is a
+     line in the column now, with its own pane, so a second list of the same rows
+     in a drawer is two doors into one room. What is left here is the one thing
+     the column can't say on its own: which planned lines are past their day with
+     nothing sat against them. */
+  const spare=[];
   return `${keys.length?`<div class="flag"><div class="ft">Straight from your bank</div><div class="fb">
       Your bank shows ${keys.length} transaction${keys.length===1?"":"s"} that look like
       ${keys.length===1?"a line":"lines"} you'd already put in. Say the word and I'll mark
@@ -2816,15 +3055,16 @@ function matchHTML(){
       <button class="mini" id="propAll">Yes to all</button>
       <button class="mini" id="propNone">No to all</button></div>`:""}
     ${rows}
-    ${!keys.length&&!late.length&&!spare.length?`<div class="hint">Nothing waiting, and
-      every line this month is accounted for.</div>`:""}
+    ${!keys.length&&!late.length?`<div class="hint">Every line due so far this month has
+      something sitting against it.</div>`:""}
     ${late.length?`<div class="flag ${lateSum>0?"bad":""}" style="margin-top:18px">
       <div class="ft">${late.length} line${late.length>1?"s":""} due before today,
         not seen on the account</div>
       <div class="fb">${late.map(r=>r.label+" "+money(r.amount)).join(" \u00b7 ")}.
         This month opens at your real balance and counts everything that hasn't landed,
         so anything here that <i>has</i> already gone through is being counted twice \u2014
-        the bottom line is off by ${money(lateSum)} until it's attached below.</div></div>`:""}
+        the bottom line is off by ${money(lateSum)} until it's dealt with. Find the real
+        transaction in the column, open it, and sit it against the line.</div></div>`:""}
     ${spare.length?`<div class="sh" style="margin-top:18px">Didn't look like anything</div>
       <div class="hint" style="margin-bottom:6px">Also on the account this month, matched to
         nothing. Tap one to say which line it is \u2014 I'll recognise it next month.</div>
@@ -2873,10 +3113,10 @@ function bankHTML(){
   const days=Object.keys(byDay).sort().reverse();
   let h=`<div class="flag"><div class="ft">The account itself</div><div class="fb">
       <b>${money(S.meta.liveBalance||0)}</b> in there now.
-      ${money(inn)} in and ${money(out)} out across the last two months
+      ${money(inn)} in and ${money(out)} out since ${prettyDate(txFromDay())}
       ${S.meta.liveBalanceAt?`· checked ${new Date(S.meta.liveBalanceAt).toLocaleString()}`:""}
-      <div class="gn" style="margin-top:5px">Anything tagged with a line is already inside
-      that balance, so the month doesn't count it twice.</div></div></div>`;
+      <div class="gn" style="margin-top:5px">Every one of these is a line in the column
+      too. This is the flat list; the column is where they get named.</div></div></div>`;
   days.forEach(d=>{
     const list=byDay[d], sub=list.reduce((a,r)=>a+r.amt,0);
     h+=`<div class="card open"><div class="chead">
@@ -2901,19 +3141,229 @@ function bankHTML(){
 /* the drawer opens on a fork, not on the card. Two accounts, two stories. */
 
 
+
+/* ── one transaction, answered ───────────────────────────────────────────────
+   Four questions and nothing answers itself: what is it, is it a transfer, does
+   it happen again, and is it the payment on the card. The name sticks to the
+   merchant so next month's arrives already named — except on a transfer, which
+   is read every time, because the same merchant carries a different intention
+   each month and a remembered name would quietly pre-answer that.
+   Nothing in here turns into a recurring rule unless it is told to. */
+let txCtx=null;
+function openTxPane(r,k){
+  const sig=r.sig||(r.tx?TXSIG(r.tx):null); if(!sig) return;
+  txCtx={sig,k}; openDrawer("tx");
+}
+function txPaneTitle(){
+  const t=txCtx&&txFind(txCtx.sig);
+  return t?txLabel(t):"Transaction";
+}
+/* every line in that month a transaction could be sitting against: the things
+   you predicted, minus the card — that is its own stream and always has been —
+   and minus the transactions themselves. */
+function openLines(k){
+  const M=MODEL.find(x=>x.k===k); if(!M) return [];
+  return M.rows.filter(r=>!r.real&&!r.info&&!r.group&&!r.budget&&r.ruleId!=="cc");
+}
+const CADENCES=[["","Doesn't repeat"],["monthly","Every month"],["biweekly","Every 2 weeks"],
+  ["semimonthly","Twice a month"],["quarterly","Every 3 months"],["annual","Once a year"]];
+function esc(v){ return String(v==null?"":v)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;"); }
+/* Born out of a transaction, so its shape is taken from that transaction: the
+   amount, the day, and the month it landed in. */
+function ruleFromTx(t,cadence,endYM,name){
+  const k=String(t.date).slice(0,7), day=+String(t.date).slice(8,10)||1;
+  const amt=Number(t.amt)||0, mo=parseYM(k).m;
+  const nums=(S.rules||[]).filter(x=>(x.sort||0)<9000).map(x=>x.sort||0);
+  const r={id:uid(), name:name||"New line", kind:amt>=0?"income":"expense",
+    cadence, day, account:"Main", offbook:false,
+    sort:(nums.length?Math.max.apply(null,nums):0)+10,
+    start:cadence==="biweekly"?String(t.date):k,
+    end:endYM||null, schedule:[{from:k,amount:amt}]};
+  if(cadence==="biweekly") r.anchor=String(t.date);
+  if(cadence==="annual") r.months=[mo];
+  if(cadence==="quarterly"){ const b=((mo-1)%3)+1; r.months=[b,b+3,b+6,b+9]; }
+  S.rules.push(r);
+  /* The month it was born in already holds the real thing. Hand that month's
+     occurrence straight to it, or the column shows the transaction beside a
+     prediction of the very same transaction. */
+  const i=Math.max(0,occDates(r,k).indexOf(day));
+  S.assign=S.assign||{}; S.assign[r.id+"#"+k+"#"+i]=TXSIG(t);
+  return r;
+}
+function clearAssign(sig){
+  S.assign=S.assign||{};
+  Object.keys(S.assign).forEach(key=>{ if(S.assign[key]===sig) delete S.assign[key]; });
+}
+function txHTML(){
+  if(!txCtx) return `<div class="hint">Nothing selected.</div>`;
+  const t=txFind(txCtx.sig);
+  if(!t) return `<div class="hint">That one isn't on the account any more.</div>`;
+  const g=txTag(t), k=txCtx.k;
+  const transfer=txIsTransfer(t), card=txIsCard(t);
+  /* untouched and it looks like a payment: tick the box, say nothing else */
+  const cardBox=(g.ccpay!==undefined)?card:(card||txCardGuess(t));
+  const rule=g.rule?(S.rules||[]).find(x=>x.id===g.rule):null;
+  const assigned=assignedTo(TXSIG(t));
+  const open=openLines(k);
+  return `
+  <div class="flag${card?"":" good"}"><div class="ft">${esc(t.desc||"—")}</div>
+    <div class="fb"><b>${money(t.amt)}</b> \u00b7 ${fmtDate(t.date)}
+      ${card?`<div class="gn" style="margin-top:5px">Left out of the month's total on
+        purpose. The credit card line already takes this money out — counting it here
+        as well is what would be wrong.</div>`:""}
+      ${assigned?`<div class="gn" style="margin-top:5px">Standing in for a line you'd
+        already planned, so that line has stepped out of this month. It's back next
+        month.</div>`:""}</div></div>
+
+  <div class="fg" style="margin-bottom:0">
+    <div class="f" style="flex:2"><label>What is this?</label>
+      <input id="txName" value="${esc(g.label||txLabel(t))}"
+        placeholder="Rent, groceries, mum"></div>
+  </div>
+  <div class="hint" style="margin-top:6px">${transfer
+    ? "A transfer doesn't remember its name. You'll be asked again next time this one turns up."
+    : "This name gets used for anything from this merchant from now on."}</div>
+
+  <label class="chk"><input type="checkbox" id="txTr" ${transfer?"checked":""}>
+    It's a transfer \u2014 ask me every time</label>
+  <label class="chk"><input type="checkbox" id="txCC" ${cardBox?"checked":""}>
+    It's the payment on my credit card</label>
+
+  <div class="steps"><div class="sh">Sits against a line you planned</div>
+    <div class="fg" style="margin-top:0"><div class="f"><select id="txAssign">
+      <option value="">\u2014 nothing \u2014</option>
+      ${assigned&&!open.some(r=>r.key===assigned)
+        ? `<option value="${esc(assigned)}" selected>the line it's on now</option>`:""}
+      ${open.map(r=>`<option value="${esc(r.key)}"${r.key===assigned?" selected":""}>${
+        esc(r.label)} \u00b7 ${money(r.amount)}</option>`).join("")}
+    </select></div></div>
+    <div class="hint" style="margin-top:6px">Pick one and it drops out of this month \u2014
+      this transaction takes its place and its name.</div>
+  </div>
+
+  <div class="steps"><div class="sh">Does it happen again?</div>
+    <div class="fg" style="margin-top:0">
+      <div class="f"><label>How often</label><select id="txRep">
+        ${CADENCES.map(c=>`<option value="${c[0]}"${
+          (rule?rule.cadence:"")===c[0]?" selected":""}>${c[1]}</option>`).join("")}
+      </select></div>
+      <div class="f"><label>Stops after</label>
+        <input type="month" id="txEnd" value="${rule&&rule.end?esc(String(rule.end).slice(0,7)):""}">
+      </div>
+    </div>
+    <div class="hint" style="margin-top:6px">${rule
+      ? "Already repeating. Change it here, or set it back to \u201cdoesn't repeat\u201d to stop."
+      : "Say how often and a line appears in every month from here on, waiting for the real one."}</div>
+  </div>
+
+  <div class="crow">
+    <button class="mini on" id="txSave">Save</button>
+    <button class="mini" id="txForget">Start over</button>
+  </div>`;
+}
+/* Every decision the pane can make, in one place and with no DOM in it, so it
+   can be run against synthetic data in Node. The handler below only reads the
+   fields and hands them over. */
+function applyTx(t,a){
+  const sig=TXSIG(t), k=a.k, mer=normMerchant(t.desc);
+  const name=String(a.name||"").trim();
+  S.tag=S.tag||{}; S.merch=S.merch||{}; S.tmerch=S.tmerch||{};
+  S.ccpay=S.ccpay||{}; S.assign=S.assign||{};
+  const tag=S.tag[sig]||{};
+  tag.transfer=!!a.transfer; tag.ccpay=!!a.card;
+  if(name) tag.label=name; else delete tag.label;
+  /* A transfer's name is deliberately kept out of the merchant store rather than
+     written there and then ignored — so turning the switch off later leaves
+     nothing behind still quietly answering for it. */
+  if(a.transfer){ S.tmerch[mer]=1; delete S.merch[mer]; }
+  else { delete S.tmerch[mer]; if(name) S.merch[mer]=name; }
+  if(a.card) S.ccpay[mer]=1; else delete S.ccpay[mer];
+
+  /* Recurring first: making a rule hands itself this month's occurrence, and a
+     hand-picked line has to be able to beat that. */
+  clearAssign(sig);
+  let rule=tag.rule?(S.rules||[]).find(x=>x.id===tag.rule):null;
+  let born=null;               /* set only when this call is what made the rule */
+  const cad=a.cad||"";
+  if(!cad){
+    if(rule){ S.rules=S.rules.filter(x=>x.id!==rule.id); delete tag.rule; rule=null; }
+  } else if(rule){
+    rule.cadence=cad; rule.end=a.endM||null;
+    if(name) rule.name=name;
+    if(cad==="biweekly"){ rule.anchor=String(t.date); rule.start=String(t.date); }
+    syncFirstStep(rule);
+  } else {
+    rule=ruleFromTx(t,cad,a.endM,name||txLabel(t));
+    tag.rule=rule.id;
+    born=rule;
+  }
+  if(a.pick){
+    clearAssign(sig);
+    S.assign[a.pick]=sig;
+    /* it takes the planned line's name — that is the whole point of assigning it */
+    const row=openLines(k).find(r=>r.key===a.pick);
+    if(row&&!name) tag.label=row.label;
+    /* Both at once: sit this against a line you'd typed AND make it repeat. The
+       new rule handed itself this month a moment ago and the pick has just taken
+       that back, which would leave its own placeholder standing beside the
+       transaction it was made from — the same thing twice. One transaction can
+       only answer one line, so the rule's own occurrence is skipped for this
+       month instead. Every month after it is untouched. */
+    if(born){
+      const day=+String(t.date).slice(8,10)||1;
+      const i=Math.max(0,occDates(born,k).indexOf(day));
+      S.skip=S.skip||{}; S.skip[born.id+"#"+k+"#"+i]=1;
+    }
+  }
+  S.tag[sig]=tag;
+  return {tag,rule};
+}
+function wireTx(){
+  const t=txCtx&&txFind(txCtx.sig); if(!t) return;
+  const el=id=>document.getElementById(id);
+  const btn=el("txSave");
+  if(btn) btn.onclick=()=>{
+    const out=applyTx(t,{
+      k:txCtx.k,
+      name:(el("txName")||{}).value||"",
+      transfer:!!(el("txTr")||{}).checked,
+      card:!!(el("txCC")||{}).checked,
+      cad:(el("txRep")||{}).value||"",
+      endM:(el("txEnd")||{}).value||"",
+      pick:(el("txAssign")||{}).value||""
+    });
+    save(); render(); closeDrawer();
+    toast(out.rule?(out.tag.label||"That one")+" \u00b7 repeating from here on"
+                  :(out.tag.label||"Saved"));
+  };
+  const fg=el("txForget");
+  if(fg) fg.onclick=()=>{
+    const sig=TXSIG(t), mer=normMerchant(t.desc);
+    const tag=(S.tag||{})[sig]||{};
+    if(tag.rule) S.rules=(S.rules||[]).filter(x=>x.id!==tag.rule);
+    clearAssign(sig);
+    if(S.tag) delete S.tag[sig];
+    if(S.merch) delete S.merch[mer];
+    if(S.tmerch) delete S.tmerch[mer];
+    if(S.ccpay) delete S.ccpay[mer];
+    save(); render(); closeDrawer(); toast("Back to how the bank sent it");
+  };
+}
+
 /* ---------- drawer ---------- */
 const drawer=document.getElementById("drawer"),scrim=document.getElementById("scrim");
 function openDrawer(w){
   const titles={rec:"Recurring items",ins:"Check-up",feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
-                match:"Does this look right?",bank:"Account activity",
-                line:lineTitle(),
+                match:"Not seen on the account",bank:"Account activity",
+                line:lineTitle(), tx:txPaneTitle(),
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
   document.getElementById("dbody").innerHTML=
     w==="rec"?recHTML():w==="feed"?feedHTML():
     w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():w==="bank"?bankHTML():
-    w==="line"?lineHTML():
+    w==="line"?lineHTML():w==="tx"?txHTML():
     w==="sync"?syncHTML():w==="card"?(
       nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
   if(w==="rec") wireRec();
@@ -2921,7 +3371,8 @@ function openDrawer(w){
   else if(w==="match") wireMatch();
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
   else if(w==="card") wireCard();
-  else if(w==="line"){}    /* read-only: nothing in the line pane is clickable yet */
+  else if(w==="tx") wireTx();
+  else if(w==="line") wireLine();
   else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
   tabifyDrawer();
@@ -3579,7 +4030,15 @@ async function sfinPull(quiet){
   const SFIN_OVERLAP_DAYS=5;
   const fromD=new Date(c.start+"T00:00:00");
   fromD.setDate(fromD.getDate()-SFIN_OVERLAP_DAYS);
-  const from=Math.floor(fromD.getTime()/1000);
+  /* One call feeds two streams with different appetites. The card only needs the
+     open cycle. The account needs everything back to the records start on a first
+     pull, and a generous overlap after that — rows accumulate and dedupe, so a
+     window wider than the gap since the last pull costs nothing but bytes and a
+     narrow one silently loses days. Whichever reaches further back wins. */
+  const backD=new Date(); backD.setDate(backD.getDate()-90);
+  const floorD=new Date(txFromDay()+"T00:00:00");
+  const acctD=backD<floorD?floorD:backD;
+  const from=Math.floor(Math.min(fromD.getTime(),acctD.getTime())/1000);
   setSync("busy","card feed…");
   try{
     const {base,auth}=sfinParts();
@@ -3630,9 +4089,18 @@ async function sfinPull(quiet){
     });
     if(bankBal!==null){
       S.meta.liveBalance=bankBal; S.meta.liveBalanceAt=Date.now();
-      /* keep two months of history — enough to match this month and see last */
-      const keep=prevMonth(NOW);
-      S.bank={at:Date.now(), rows:bankRowsNew.filter(x=>cmpYM(x.date.slice(0,7),keep)>=0)};
+      /* v70 — merge, don't replace. Every pull only sees its own window, and the
+         column behind it is built out of these rows, so overwriting would delete
+         the past every time you checked the balance. Anything before the records
+         start is dropped; everything after it is kept for good, deduped on the
+         signature the tags are keyed by so a re-pull can't double a row. */
+      const merged=[], seen={};
+      bankRows().concat(bankRowsNew).forEach(t=>{
+        if(!t||!t.date||String(t.date)<txFromDay()) return;
+        const g=TXSIG(t); if(seen[g]) return; seen[g]=1; merged.push(t);
+      });
+      merged.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+      S.bank={at:Date.now(), rows:merged};
     }
     /* a filed statement is the real thing — never overwrite one */
     const held=S.stmts[c.bill];
