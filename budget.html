@@ -636,8 +636,6 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn" id="btnFit">See full year</button>
   </div>
   <div class="menupanel" id="menuPanel">
-    <button class="btn" id="btnRec">Recurring items</button>
-    <button class="btn" id="btnBonus">Add bonus</button>
     <button class="btn" id="btnFeed">Feed me info</button>
     <button class="btn" id="btnCard">Card review</button>
     <button class="btn" id="btnBank" hidden>Account activity</button>
@@ -673,7 +671,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v67";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v69";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -704,8 +702,7 @@ function defaultState(){
     schedule:[{from:ym(y,m),amount:0}]}
   ],
   over:{}, skip:{}, accountNames:{}, catRules:[],
-  bonus:{name:"Yearly bonus", years:{}},
-  balancers:{}, stmts:{}, learned:{}, oneoffs:[], plans:[]
+  stmts:{}, learned:{}, oneoffs:[], plans:[]
  };
 }
 
@@ -732,8 +729,9 @@ const acctList=()=>{
 };
 function migrate(s){
   s.meta.buffer=s.meta.buffer??4000;
-  s.bonus=s.bonus||{name:"Mami's Big Ass Yearly Bonus",years:{}};
-  s.balancers=s.balancers||{};
+  /* v69 — the yearly bonus and the balancer are gone. The balancer's one surviving
+     job, seeding the month the records start in, is done by meta.opening below. */
+  delete s.bonus;
   s.accountNames=s.accountNames||{};
   s.catRules=s.catRules||[];
   s.meta.ccTarget=s.meta.ccTarget??5000;
@@ -746,15 +744,14 @@ function migrate(s){
      forward. The chain holds at meta.opening until it reaches recordsFrom, so that
      month opens at exactly the figure typed in settings.
      Set once here; the month is editable in settings afterwards.
-     The balancer sitting on the month before the wall was doing this job by hand —
-     forcing that month to END at a chosen figure so the next one OPENED there. Inside
-     the frozen zone it would compute against a total that no longer moves, so its
-     target becomes meta.opening and the row goes. */
+     A balancer used to sit on the month before the wall doing this by hand — forcing
+     that month to END at a chosen figure so the next one OPENED there. Its target is
+     adopted here, once, and then balancers are gone from the app entirely. */
   if(!s.meta.wallSet){
     s.meta.recordsFrom="2026-08";
     const before=prevMonth(s.meta.recordsFrom);
     const tgt=s.balancers&&s.balancers[before];
-    if(typeof tgt==="number"){ s.meta.opening=tgt; delete s.balancers[before]; }
+    if(typeof tgt==="number") s.meta.opening=tgt;
     s.meta.wallSet=1;
   }
   const st=parseYM(s.meta.start);
@@ -791,6 +788,7 @@ function migrate(s){
     s.oneoffs=[];
     s.meta.planReset=1;
   }
+  delete s.balancers;
   s.payee=s.payee||{};   /* ruleId -> merchant names you've attached by hand */
   s.learned=s.learned||{};
   /* v60 — biweekly rules used to carry an anchor date ("any payday you know")
@@ -1089,10 +1087,6 @@ function build(){
                    amount:-up10(due), kind:"exp", account:"Main"});
       }
     }
-    const by=S.bonus&&S.bonus.years[parseYM(k).y];
-    if(by&&by.amount&&by.month===parseYM(k).m)
-      rows.push({key:"bonus#"+k,bonus:true,label:S.bonus.name,day:by.day||15,
-                 amount:Math.abs(by.amount),sort:15,kind:"inc",off:false,account:"Main"});
     for(const o of S.oneoffs) if(o.ym===k){
       const oh=S.hits&&S.hits["one#"+o.id];
       const ohit=(oh&&!oh.off)?oh:null;
@@ -1102,16 +1096,6 @@ function build(){
     }
     sortRows(rows);
     let net=rows.filter(r=>!r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
-    /* a balancer plugs a month to a target END figure. Behind the wall the month
-       has no end figure to plug, so it would emit a nonsense row. */
-    const tgt=pre?undefined:(S.balancers?S.balancers[k]:undefined);
-    if(tgt!==undefined){
-      const amt=tgt-(onhand+net);
-      rows.push({key:"bal#"+k,balancer:true,target:tgt,label:"Balancer",day:98,sort:600,
-                 amount:amt,kind:amt>=0?"inc":"exp",off:false,account:"Main"});
-      sortRows(rows);
-      net+=amt;
-    }
     const offTot=rows.filter(r=>r.off&&!r.info).reduce((s,r)=>s+r.amount,0);
     const infoTot=rows.filter(r=>r.info).reduce((s,r)=>s+r.amount,0);
     let end=onhand+net;
@@ -1983,13 +1967,6 @@ function signed(raw,anchor){
 }
 function editAmt(span,r,k){
   if(r.info){ feedMonth=k; openDrawer("feed"); return; }
-  if(r.bonus){ openDrawer("bonus"); return; }
-  if(r.balancer){
-    const v=prompt("What should the next month start with?",r.target);
-    if(v!==null){ const n=parseFloat(String(v).replace(/[^0-9.\-]/g,""));
-      if(!isNaN(n)){ S.balancers[k]=n; save(); render(); toast("Balancer set"); } }
-    return;
-  }
   const anchor = r.oneoff ? (r.oneoff.amount||-1)
                : (r.rule.kind==="income"?1:-1);
   const inp=document.createElement("input"); inp.className="amtin";
@@ -2035,7 +2012,7 @@ function swClose(el){
   if(swOpenEl===el) swOpenEl=null;
 }
 function wireSwipe(el,r){
-  if(r.info||r.bonus) return;         /* reference rows have nothing to remove */
+  if(r.info) return;                  /* reference rows have nothing to remove */
   let x0=0,y0=0,live=false,open=false,decided=false;
   const put=(px,anim)=>{ el.style.transition=anim?"transform .18s ease":"none";
                          el.style.transform=px?"translateX("+px+"px)":""; };
@@ -2085,8 +2062,7 @@ function wireSwipe(el,r){
 }
 function removeRow(r){
   if(r.info){ toast("Reference only — remove it in Feed me info"); return; }
-  if(r.balancer){ delete S.balancers[r.key.split("#")[1]]; save(); render(); toast("Balancer removed"); return; }
-  if(r.bonus){openDrawer("bonus");return;} if(r.oneoff) S.oneoffs=S.oneoffs.filter(o=>o.id!==r.oneoff.id); else S.skip[r.key]=1; save(); render(); }
+  if(r.oneoff) S.oneoffs=S.oneoffs.filter(o=>o.id!==r.oneoff.id); else S.skip[r.key]=1; save(); render(); }
 /* A budget line is a purchase you'll put on the card in THIS month. It raises this
    month's budget straight away and lands on next month's bill, because that's when
    the money actually leaves. The live cycle is the exception — real charges are
@@ -2140,21 +2116,21 @@ function showTip(e,r,k){
 }
 function reallyShowTip(e,r,k){
   const {y}=parseYM(k);
-  const name=r.balancer?"Balancer":r.bonus?S.bonus.name:r.oneoff?r.oneoff.name
+  const name=r.oneoff?r.oneoff.name
              :(r.rule?r.rule.name:(String(r.label||"").split(" · ")[0]||"—"));
   let ytd=0,ytdCount=0,yearTotal=0,planTotal=0,planCount=0,monthTotal=0,remaining=0;
   for(const M of MODEL){
     const inYear=parseYM(M.k).y===y;
     for(const row of M.rows){
-      const same=r.balancer?!!row.balancer:r.bonus?!!row.bonus:r.oneoff?(row.oneoff&&row.oneoff.name===name):(row.ruleId===r.ruleId);
+      const same=r.oneoff?(row.oneoff&&row.oneoff.name===name):(row.ruleId===r.ruleId);
       if(!same) continue;
       planTotal+=row.amount; planCount++;
       if(inYear){ yearTotal+=row.amount; if(cmpYM(M.k,k)<=0){ytd+=row.amount;ytdCount++;} else remaining+=row.amount; }
       if(M.k===k) monthTotal+=row.amount;
     }
   }
-  const rule=(r.oneoff||r.bonus||r.balancer)?null:r.rule;
-  let h=`<div class="tt">${name}</div><div class="td">${MFULL[parseYM(k).m-1]} ${y}${r.day<99?" · "+ordinal(r.day):""}${rule?" · "+rule.cadence:r.balancer?" · plug":r.bonus?" · yearly bonus":" · one-off"}</div>`;
+  const rule=r.oneoff?null:r.rule;
+  let h=`<div class="tt">${name}</div><div class="td">${MFULL[parseYM(k).m-1]} ${y}${r.day<99?" · "+ordinal(r.day):""}${rule?" · "+rule.cadence:" · one-off"}</div>`;
   h+=`<div class="tr"><span>This line</span><b>${money(r.amount)}</b></div>`;
   if(monthTotal!==r.amount) h+=`<div class="tr"><span>All of these this month</span><b>${money(monthTotal)}</b></div>`;
   h+=`<div class="hr"></div>
@@ -2216,8 +2192,6 @@ function reallyShowTip(e,r,k){
   if(r.info) h+=`<div class="note">This statement predates the budget, so it's here for reference only — it isn't subtracted from any balance. Your opening cash already accounts for it.</div>`;
   else if(r.off) h+=`<div class="note">Paid from ${acctLabel(r.account)} — not your main one. It shows here so you can see the whole household picture, but it is <b>not</b> subtracted from the month's ending balance.</div>`;
   else if(rule&&rule.account&&rule.account!=="Main") h+=`<div class="note">Tracked against ${acctLabel(rule.account)}. Still counted in the total.</div>`;
-  if(r.bonus) h+=`<div class="note">Click the amount to edit the bonus year by year.</div>`;
-  if(r.balancer) h+=`<div class="note">This one solves backwards: it's whatever it takes to make the next month open at <b>${money(r.target)}</b>. Change anything else in this month and it re-solves on its own. Click it to move the target, or × to drop it.</div>`;
   if(rule&&rule.manual){
     const bd=stmtBreakdown(k);
     if(bd){
@@ -2257,7 +2231,7 @@ function lineHTML(){
 }
 function lineTitle(){
   const r=lineCtx&&lineCtx.r; if(!r) return "Line";
-  return r.balancer?"Balancer":r.bonus?S.bonus.name:r.oneoff?r.oneoff.name
+  return r.oneoff?r.oneoff.name
        :(r.rule?r.rule.name:String(r.label||"Line").split(" \u00b7 ")[0]);
 }
 function moveTip(e){
@@ -2466,7 +2440,13 @@ function advHTML(){
   const n=insights().filter(i=>i.tone!=="good").length;
   return `<div class="hint">The bits you'll want once in a while rather than every day.</div>
 
-    <div class="sh">Check the numbers over</div>
+    <div class="sh">The plan itself</div>
+    <div class="crow"><button class="mini" id="advRec">Recurring items \u00b7 settings</button></div>
+    <div class="hint">Every repeating line, and the plan's own settings \u2014 what it's
+      called, cash at records start, when records start, the low-balance alert, the CC
+      budget target and when the plan ends.</div>
+
+    <div class="sh" style="margin-top:16px">Check the numbers over</div>
     <div class="crow"><button class="mini" id="advIns">Check-up${n?" · "+n:""}</button></div>
     <div class="hint">Reads your months back to you and flags anything odd — a month that
       dips below your buffer, a bill that jumped, a category creeping up.</div>
@@ -2493,6 +2473,7 @@ function advHTML(){
 function wireAdv(){
   const go=(id,fn)=>{ const b=document.getElementById(id); if(b) b.onclick=fn; };
   go("advIns",()=>openDrawer("ins"));
+  go("advRec",()=>openDrawer("rec"));
   document.querySelectorAll("[data-labdrop]").forEach(b=>b.onclick=ev=>{
     ev.preventDefault(); ev.stopPropagation();
     const [which,...rest]=b.dataset.labdrop.split("|");
@@ -2923,19 +2904,19 @@ function bankHTML(){
 /* ---------- drawer ---------- */
 const drawer=document.getElementById("drawer"),scrim=document.getElementById("scrim");
 function openDrawer(w){
-  const titles={rec:"Recurring items",ins:"Check-up",bonus:S.bonus.name,feed:"Feed me info",
+  const titles={rec:"Recurring items",ins:"Check-up",feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
                 match:"Does this look right?",bank:"Account activity",
                 line:lineTitle(),
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
   document.getElementById("dbody").innerHTML=
-    w==="rec"?recHTML():w==="bonus"?bonusHTML():w==="feed"?feedHTML():
+    w==="rec"?recHTML():w==="feed"?feedHTML():
     w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():w==="bank"?bankHTML():
     w==="line"?lineHTML():
     w==="sync"?syncHTML():w==="card"?(
       nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
-  if(w==="rec") wireRec(); else if(w==="bonus") wireBonus();
+  if(w==="rec") wireRec();
   else if(w==="budget") wireBudget(); else if(w==="adv") wireAdv();
   else if(w==="match") wireMatch();
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
@@ -2965,9 +2946,11 @@ document.getElementById("dclose").onclick=closeDrawer;
 scrim.onclick=closeDrawer;
 /* a tap inside the panel must never reach the scrim behind it */
 drawer.addEventListener("click",e=>e.stopPropagation());
-document.getElementById("btnRec").onclick=()=>openDrawer("rec");
+/* Recurring items is no longer a menu entry — lines get added straight to a column
+   with "+ Add a new line". The drawer itself stays, reachable from Advanced, because
+   it is the only place a rule's cadence, dates and amount steps can be edited, and
+   the plan's settings live at the top of it. */
 
-document.getElementById("btnBonus").onclick=()=>openDrawer("bonus");
 document.getElementById("btnSync").onclick=()=>openDrawer("sync");
 document.getElementById("btnBudget").onclick=()=>openDrawer("budget");
 document.getElementById("btnMatch").onclick=()=>openDrawer("match");
@@ -3168,39 +3151,8 @@ function wireRec(){
   bind(document.getElementById("mEnd"),v=>{if(/^\d{4}-\d{2}$/.test(v))S.meta.end=v;});
 }
 
-function bonusHTML(){
-  const ys=yearsAvail();
-  let h=`<div class="hint">One payout a year. Set the month and the amount for each year — leave an amount at zero and that year stays empty. It lands as money coming in, on your main account.</div>
-  <div class="fg" style="margin-bottom:14px"><div class="f"><label>What to call it</label>
-    <input id="bName" value="${S.bonus.name.replace(/"/g,"&quot;")}"></div></div>`;
-  ys.forEach(y=>{
-    const b=S.bonus.years[y]||{amount:0,month:3};
-    h+=`<div class="card open" style="margin-bottom:8px"><div class="cbody" style="border-top:none;padding-top:10px">
-      <div class="fg" style="margin-top:0;align-items:flex-end">
-        <div class="f" style="max-width:66px"><label>Year</label>
-          <input value="${y}" disabled style="opacity:.75"></div>
-        <div class="f"><label>Month</label><select data-b="month" data-y="${y}">
-          ${MFULL.map((n,i)=>`<option value="${i+1}" ${(i+1)===(b.month||3)?"selected":""}>${n}</option>`).join("")}
-        </select></div>
-        <div class="f"><label>Amount</label>
-          <input data-b="amount" data-y="${y}" value="${b.amount||0}"></div>
-      </div></div></div>`;
-  });
-  h+=`<button class="mini" id="bApply" style="width:100%;padding:9px;margin-top:6px">Apply bonuses</button>`;
-  return h;
-}
-function wireBonus(){
-  document.getElementById("bApply").onclick=()=>{
-    S.bonus.name=document.getElementById("bName").value.trim()||S.bonus.name;
-    yearsAvail().forEach(y=>{
-      const mo=document.querySelector(`[data-b="month"][data-y="${y}"]`);
-      const am=document.querySelector(`[data-b="amount"][data-y="${y}"]`);
-      const v=Math.abs(parseFloat(String(am.value).replace(/[^0-9.]/g,"")))||0;
-      S.bonus.years[y]={month:+mo.value,amount:v};
-    });
-    save(); render(); openDrawer("bonus"); toast("Bonuses updated");
-  };
-}
+
+
 
 let feedMonth=null, feedDraft=null;
 function feedHTML(){
@@ -3545,8 +3497,14 @@ async function syncPush(force){
       /* or this device is nearly empty and about to say so, loudly, forever */
       const gut=wouldGut(S,remote);
       if(gut){
-        setSync("warn","refused — would erase data");
-        toast("Push refused: that would cut "+gut);
+        /* This fires on the automatic push, which has no way to ask. It is the right
+           call by default — a device holding almost nothing stamps itself newest and
+           would otherwise overwrite everything. But a deliberate cut looks identical
+           from here, so the message has to name the way through instead of just
+           saying no. "Push now" passes force and skips this. */
+        setSync("warn","refused \u00b7 Push now to override");
+        toast("Push refused: that would cut "+gut+
+              ". If you meant it, Menu \u2192 Sync \u2192 Push now.");
         return false;
       }
     }
@@ -4735,11 +4693,6 @@ function insights(){
     b:three.map(m=>MFULL[parseYM(m.k).m-1]+" "+parseYM(m.k).y).join(" · ")+
       ". Your natural catch-up months — the extra check is the one worth aiming at a goal before it gets absorbed."});
 
-  const bl=Object.keys(S.balancers||{});
-  if(bl.length) out.push({tone:"warn",t:"Balancer in play",
-    b:bl.map(k=>{const M=MODEL.find(x=>x.k===k),row=M&&M.rows.find(r=>r.balancer);
-      return `${MFULL[parseYM(k).m-1]} ${parseYM(k).y}: ${row?money(row.amount):"—"} to land the next month at ${money(S.balancers[k])}`;}).join(" · ")+
-      `. A balancer is a plug, not a real transaction — it's there to force a month to open at a number you know is true. Worth replacing with the actual line item once you know what it was.`});
   const ob=S.rules.filter(r=>r.offbook);
   if(ob.length) out.push({tone:"good",t:"Shown but not counted",
     b:ob.map(r=>`${r.name} (${acctLabel(r.account)})`).join(" · ")+
