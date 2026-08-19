@@ -691,7 +691,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v72";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v74";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1665,6 +1665,41 @@ function fitGrid(){
     sc.style.setProperty("--colw",cw+"px");
   } else sc.style.removeProperty("--colw");
 }
+/* Several hits from one rule fold into one line — but only when the month is
+   actually crowded. Folding two paycheques behind a ▾ hides the thing you opened
+   the app to look at, and every tap to unfold is one the month didn't need. Past
+   the threshold the column stops being readable and the fold earns itself.
+
+   v72.1 — the uncrowded case now returns the rows untouched. The grouping pass
+   below gathers every row of a rule at the position of the rule's FIRST one, and
+   that ran unconditionally: build() handed render a column in date order and this
+   quietly put it back into rule order on the way out, so three of Andrea's
+   paychecks stacked above two of Jake's exactly as before. Clustering is the
+   whole point when folding; it is pure damage when not.
+
+   Crowded, the clusters stand and each takes the date of its earliest occurrence,
+   so the folded column still reads forward. */
+function foldRows(rows,crowded,k){
+  if(!crowded) return rows.slice();
+  const groups=[], seen={}, out=[];
+  rows.forEach(r=>{
+    const gid=r.ruleId&&!r.info?r.ruleId:null;
+    if(gid&&seen[gid]!==undefined){ groups[seen[gid]].push(r); return; }
+    if(gid) seen[gid]=groups.length;
+    groups.push([r]);
+  });
+  groups.forEach(g=>{
+    if(g.length<2){ out.push(g[0]); return; }
+    const key=k+"|"+g[0].ruleId;
+    const open=expanded.has(key);
+    out.push({group:true,key,rows:g,label:g[0].rule?g[0].rule.name:g[0].label,
+      amount:g.reduce((a,x)=>a+x.amount,0),count:g.length,open,
+      kind:g[0].kind,off:g[0].off,manual:g[0].manual,ruleId:g[0].ruleId,
+      day:Math.min.apply(null,g.map(x=>x.day||99))});
+    if(open) g.forEach(x=>out.push({...x,child:true}));
+  });
+  return out;
+}
 function render(anim,popTab){
   MODEL=build();
   /* the matcher needs the month's rows to compare against. It only ever proposes,
@@ -1760,24 +1795,7 @@ function render(anim,popTab){
        Past the threshold the column stops being readable and the fold earns itself. */
     const FOLD_AT=16;
     const crowded=M.rows.length>FOLD_AT;
-    const groups=[]; const seen={};
-    M.rows.forEach(r=>{
-      const gid=r.ruleId&&!r.info?r.ruleId:null;
-      if(gid&&seen[gid]!==undefined){ groups[seen[gid]].push(r); return; }
-      if(gid) seen[gid]=groups.length;
-      groups.push([r]);
-    });
-    const shown=[];
-    groups.forEach(g=>{
-      if(g.length<2){ shown.push(g[0]); return; }
-      if(!crowded){ g.forEach(x=>shown.push(x)); return; }  /* room enough — show them all */
-      const key=M.k+"|"+g[0].ruleId;
-      const open=expanded.has(key);
-      shown.push({group:true,key,rows:g,label:g[0].rule?g[0].rule.name:g[0].label,
-        amount:g.reduce((a,x)=>a+x.amount,0),count:g.length,open,
-        kind:g[0].kind,off:g[0].off,manual:g[0].manual,ruleId:g[0].ruleId});
-      if(open) g.forEach(x=>shown.push({...x,child:true}));
-    });
+    const shown=foldRows(M.rows,crowded,M.k);
     let plan=trimPlan();
     /* with no statement history there's no category breakdown yet — but a planned
        purchase still needs somewhere to show itself */
@@ -4252,6 +4270,37 @@ good:[
  "financial serenity achieved \u{1F9D8} don't move. don't breathe. stay exactly like this.",
  "y'all could teach a class. 'Not Being Broke: by two people who somehow figured it out.'",
  "biiiiitch. thriving. that's the whole update, go about your day."],
+hot:[
+ "okay so we need to fucking talk. the pace on this card is not a pace, it's a fall.",
+ "WHOA. hi. no. put the card down. I'm not asking.",
+ "y'all are spending like the cycle ends tomorrow. it does NOT end tomorrow.",
+ "this is the part where I stop being nice about it. slow the hell down. \u{1F6A8}",
+ "I did the math four times hoping I was wrong. I was not wrong. shit.",
+ "we are not even done with this cycle and the number is already showing off. knock it off.",
+ "absolutely not. no. I'm putting my little foot down. \u{1F45E}",
+ "the card is on FIRE and nobody in this house has noticed. hello?? \u{1F525}",
+ "y'all hear that? that's me screaming. that's the sound of me screaming.",
+ "someone explain this to me like I'm a notification, because I am one, and I'm horrified.",
+ "this pace is a whole ass problem. I said what I said.",
+ "we are burning through this thing like it's got a coupon on it. it does not.",
+ "damn. DAMN. what happened this week?? \u{1F4B8}",
+ "I'm not mad, I'm doing division, and the division is being very rude to me.",
+ "hard stop. eat what's in the fridge. the fridge has food. I've seen it.",
+ "the budget called. it's scared. \u260E\uFE0F",
+ "bad pace. bad! we don't do this. \u{1F6D1}",
+ "this is your friendly neighborhood budget goblin telling you to cut it out.",
+ "y'all are speedrunning the credit limit and I refuse to be the commentator.",
+ "listen. LISTEN. there is a lot of month left and not a lot of budget left.",
+ "somebody's been busy and my god does it show on this card.",
+ "I want to be the fun one. y'all keep making me be the other one. \u{1F624}",
+ "the vibes are expensive and the math is worse.",
+ "hell no. lock the cards in a drawer. I'll wait. \u{1F512}",
+ "we had a plan!! we HAD a plan!! \u{1F62D}",
+ "at this rate the card's gonna need its own budget. sort it out.",
+ "this is the intervention. you are in it right now. \u{1F198}",
+ "I'd love to know what was so important. genuinely. write me a letter.",
+ "shit's getting loose out here. rein it in before it reins itself in.",
+ "y'all are trending in a direction and that direction is BROKE."],
 early:[
  "yooooo what the heck is going on. y'all should work for the government with that level of disregard for a budget! yowzers.",
  "it is EARLY. why does this card look like it's already been through a whole month??",
@@ -4347,17 +4396,46 @@ close:[
  "we're almost home. don't get cute now."]};
 
 function monthLen(d){ return new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); }
-/* which of the four moods fits where the live cycle currently sits */
+/* Where we are inside the BILLING cycle, which is not the calendar month. The
+   cycle runs the 4th to the 3rd, so on the 18th you are 15 days into 31 — a bit
+   under half — with sixteen still to pay for. The old thresholds read the
+   calendar instead: `day` was 18 and `left` was 13, which fell through every
+   window and called a card at 75% "good". That is the bug. */
+function cyclePos(d){
+  const c=liveCycle(d);
+  const noon=x=>new Date(x+"T12:00:00").getTime();
+  const s=noon(c.start), e=noon(c.end);
+  const now=new Date(d.getFullYear(),d.getMonth(),d.getDate(),12).getTime();
+  const len=Math.max(1,Math.round((e-s)/86400000)+1);
+  const day=Math.min(len,Math.max(1,Math.round((now-s)/86400000)+1));
+  return {len,day,left:len-day,through:day/len};
+}
+/* Which mood fits. Everything below the first two lines is a question about
+   PACE, not about a total: $3,742 of $5,000 is a fine number on the 30th and an
+   alarming one on the 18th, and the only thing that tells them apart is how much
+   of the cycle is left to pay for. `pace` is 1.0 when spending is dead on track
+   to land exactly on target; 1.5 means you're heading for half again over. */
 function nudgeBucket(d){
   /* the day the cycle turns over gets its own announcement, and it fires whether
      or not there's a target or a feed yet — there's nothing to measure on day one */
   if(d.getDate()===CYCLE_DAY) return "cycle";
   const tgt=effTarget(liveCycle(d).spend), lt=liveTotal();
   if(!tgt||lt===null) return null;
-  const pct=Math.abs(lt)/tgt, day=d.getDate(), left=monthLen(d)-day;
+  const pct=Math.abs(lt)/tgt;
+  const {day,left,through}=cyclePos(d);
+  const pace=through>0?pct/through:0;
   if(pct>=1) return "blown";
-  if(day<=12&&pct>=0.45) return "early";
-  if(left<=8&&pct>=0.85) return "close";
+  /* A ratio built on almost nothing shouts at nothing: 3% of the target on day two
+     is a pace of 1.9 and means only that somebody bought groceries. So pace only
+     gets a voice once a fifth of the budget has actually gone.
+     This replaces a `day<=3` guard that could never fire — liveCycle() holds the
+     PREVIOUS cycle open for GRACE_DAYS, so the earliest day of a new cycle this
+     function is ever handed is day 5. The guard read correctly and was dead. */
+  const loud=pct>=0.20;
+  if(loud&&pace>=1.35) return "hot";        /* on course to blow straight past it */
+  if(pct>=0.80&&left<=8) return "close";    /* nearly there, nearly out of month */
+  if(loud&&pace>=1.12) return "early";      /* running warm, not yet on fire */
+  if(pct>=0.85) return "close";
   return "good";
 }
 /* The number, every time. A queued message carries whatever was true when it was
@@ -4369,9 +4447,21 @@ function buddyTail(b){
   const spent=money(Math.abs(lt));
   const tgt=effTarget(liveCycle().spend);
   const of=tgt?" of "+money(tgt):"";
-  return b==="silent"
-    ? " last number I had was "+spent+of+" on this cycle."
-    : " we're at "+spent+of+" on the card this cycle.";
+  if(b==="silent") return " last number I had was "+spent+of+" on this cycle.";
+  let out=" we're at "+spent+of+" on the card this cycle.";
+  /* The pace, out loud. A total on its own sounds fine and isn't — what makes it
+     a problem is the days still to come, so the loud moods carry where this lands
+     if nothing changes. Held back until a tenth of the cycle has gone, because
+     before that the projection is arithmetic on nearly nothing. */
+  if(tgt&&(b==="hot"||b==="early"||b==="close"||b==="blown")){
+    const p=cyclePos(new Date());
+    if(p.through>=0.1&&p.left>0){
+      const proj=Math.abs(lt)/p.through;
+      out+=" "+p.left+(p.left===1?" day":" days")+" left"
+          +(proj>tgt*1.05?" \u2014 keep this pace and that's "+money(proj)+" by the 3rd.":".");
+    }
+  }
+  return out;
 }
 /* Random with a memory. Straight Math.random() repeats a line every few days and
    it reads like a bug even when it isn't. The last dozen picks are off the table. */
@@ -4427,15 +4517,16 @@ async function ntfyPending(){
     try{ return JSON.parse(l); }catch(e){ return null; }
   }).filter(m=>m&&m.event==="message");
 }
-const TAGS={good:"tada",early:"eyes",blown:"fire",close:"crossed_fingers",
-            cycle:"calendar",silent:"see_no_evil",nodata:"grey_question"};
+const TAGS={good:"tada",early:"eyes",hot:"rotating_light",blown:"fire",
+            close:"crossed_fingers",cycle:"calendar",silent:"see_no_evil",
+            nodata:"grey_question"};
 
 /* What the message would SAY, boiled down. Re-queue only when this changes —
    otherwise the random wording would look like new info every single hour. */
 /* Bump this whenever the WORDING changes shape. Without it, messages already
    sitting at ntfy keep the old format until the number happens to move — a build
    that adds something to every message would take a day to actually show up. */
-const NUDGE_FMT="total-1";
+const NUDGE_FMT="pace-1";
 function nudgeSig(d){
   const b=nudgeBucket(d); if(!b) return null;
   const lt=liveTotal();
