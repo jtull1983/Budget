@@ -216,6 +216,9 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* a month that has closed counts what happened, so the things it predicted sit
    there faded rather than pretending to still be owed */
 .row.stale{opacity:.38}
+/* the transaction a recurring line was made from, marked so you can find it again
+   without opening every row in the month */
+.row .rec{flex:none;margin:0 3px;color:var(--teal);font-size:9px;opacity:.9}
 .row .tq{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #7a6320;border-radius:3px;
   color:var(--amber);font-size:9.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .row .tk{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #2f6b60;border-radius:3px;
@@ -691,7 +694,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v74";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v76";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1889,6 +1892,13 @@ function render(anim,popTab){
                                           openTxPane(r,M.k); };
           el.insertBefore(chip,el.querySelector(".amt"));
         }
+        /* this is the one a recurring line came out of */
+        if(g.rule&&(S.rules||[]).some(x=>x.id===g.rule)){
+          const d=document.createElement("span");
+          d.className="rec"; d.textContent="\u25C6";
+          d.title="A repeating line was made from this one";
+          el.insertBefore(d,el.querySelector(".amt"));
+        }
       }
       /* v70.1 — the "not seen" chip is gone. It was written for a column that only
          held predictions, where a line past its day and unmatched was the only
@@ -2395,7 +2405,8 @@ function lineHTML(){
    real transaction to be sat against it. */
 function lineExtra(){
   const r=lineCtx&&lineCtx.r;
-  if(!r||!r.oneoff) return "";
+  if(!r) return "";
+  if(!r.oneoff) return lineRemoveHTML();
   return `<div class="steps"><div class="sh">Does it happen again?</div>
     <div class="fg" style="margin-top:0">
       <div class="f"><label>How often</label><select id="lnRep">
@@ -2407,9 +2418,80 @@ function lineExtra(){
       ${prettySpend(lineCtx.k)}. Give it a cadence and it appears in every month from
       here on.</div>
     <div class="crow"><button class="mini on" id="lnGo">Make it repeat</button></div>
-  </div>`;
+  </div>`+lineRemoveHTML();
+}
+/* ── removing one line of a repeating series ─────────────────────────────────
+   Three different intentions that a single delete button can't tell apart: a
+   month you're skipping, the day the thing stopped, and the day it stops after
+   one last go. Scoped to this rule and nothing else — every other line in the
+   column is untouched.
+
+   The awkward case is a cadence with more than one occurrence in a month. Ending
+   the rule at the previous month would take out the earlier ones in THIS month
+   too, which isn't what "this one and every one after" means when you're stood on
+   the second of the fortnight. So when this isn't the month's first occurrence,
+   the rule ends here and the occurrences from this one on are skipped by hand. */
+function ruleRowIdx(r){ const p=String(r.key||"").split("#"); return +p[2]||0; }
+/* The three removals, with no DOM in them so they can be run in Node. `mode` is
+   "one" (skip this month's occurrence), "fwd" (this one and everything after) or
+   "rest" (this one stands, nothing after it). Returns what happened, for the
+   toast and for the tests. */
+function removeSeries(rule,key,k,mode){
+  const idx=(+String(key).split("#")[2])||0;
+  S.skip=S.skip||{};
+  if(mode==="one"){ S.skip[key]=1; return {kind:"skipped",month:k}; }
+  const occ=occDates(rule,k);
+  if(mode==="rest"){
+    rule.end=k;
+    for(let i=idx+1;i<occ.length;i++) S.skip[rule.id+"#"+k+"#"+i]=1;
+    return {kind:"endsAfter",month:k};
+  }
+  /* fwd */
+  if(idx>0){
+    /* stood on the second of a fortnight: the earlier one this month survives, so
+       the rule ends HERE and the occurrences from this one on are skipped by hand.
+       Ending at the previous month would have taken the earlier one out too. */
+    rule.end=k;
+    for(let i=idx;i<occ.length;i++) S.skip[rule.id+"#"+k+"#"+i]=1;
+    return {kind:"endsAfter",month:k};
+  }
+  if(cmpYM(String(rule.start).slice(0,7),k)>=0){
+    /* it never ran before this month, so ending it would leave an empty rule */
+    dropRule(rule.id);
+    return {kind:"dropped"};
+  }
+  rule.end=prevMonth(k);
+  return {kind:"endsAfter",month:prevMonth(k)};
+}
+function dropRule(id){
+  S.rules=(S.rules||[]).filter(x=>x.id!==id);
+  const strip=o=>{ if(!o) return; Object.keys(o).forEach(kk=>{
+    if(String(kk).split("#")[0]===id) delete o[kk]; }); };
+  strip(S.skip); strip(S.hits); strip(S.props); strip(S.over); strip(S.assign);
+  if(S.payee) delete S.payee[id];
+  /* a transaction still pointing at a rule that no longer exists would keep its
+     diamond and offer to edit a ghost */
+  Object.keys(S.tag||{}).forEach(sig=>{ if(S.tag[sig]&&S.tag[sig].rule===id) delete S.tag[sig].rule; });
+}
+function lineRemoveHTML(){
+  const r=lineCtx&&lineCtx.r, k=lineCtx&&lineCtx.k;
+  if(!r||r.info||r.real||r.budget||r.group) return "";
+  if(r.oneoff) return `<div class="steps"><div class="sh">Remove</div>
+    <div class="crow"><button class="mini" id="rmOne">Delete this line</button></div>
+    <div class="hint" style="margin-top:6px">It only exists in ${prettySpend(k)},
+      so this is the whole of it.</div></div>`;
+  if(!r.rule||r.ruleId==="cc") return "";
+  return `<div class="steps"><div class="sh">Remove</div>
+    <div class="crow" style="flex-direction:column;align-items:stretch">
+      <button class="mini" id="rmOne">Just this one</button>
+      <button class="mini" id="rmFwd">This one and every one after</button>
+      <button class="mini" id="rmRest">Keep this one, drop the rest</button>
+    </div>
+    <div class="hint" style="margin-top:6px">Only ${esc(r.rule.name)}. Every other
+      line in the column is left where it is.</div></div>`;
 }
 function wireLine(){
+  wireLineRemove();
   const go=document.getElementById("lnGo"); if(!go) return;
   go.onclick=()=>{
     const r=lineCtx&&lineCtx.r; if(!r||!r.oneoff) return;
@@ -3206,24 +3288,41 @@ function esc(v){ return String(v==null?"":v)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;"); }
 /* Born out of a transaction, so its shape is taken from that transaction: the
    amount, the day, and the month it landed in. */
-function ruleFromTx(t,cadence,endYM,name){
+/* Step a real payday forward or back in fortnights until it lands in the month
+   the owner asked the line to start in. Biweekly's start IS its anchor, so moving
+   the start by hand would otherwise throw away the rhythm the bank showed us. */
+function anchorIn(dateStr,targetYM){
+  const d=new Date(dateStr+"T12:00:00");
+  const at=()=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  let guard=0;
+  while(at()<targetYM&&guard++<600) d.setDate(d.getDate()+14);
+  while(at()>targetYM&&guard++<600) d.setDate(d.getDate()-14);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
+        +"-"+String(d.getDate()).padStart(2,"0");
+}
+function ruleFromTx(t,cadence,endYM,name,startYM){
   const k=String(t.date).slice(0,7), day=+String(t.date).slice(8,10)||1;
-  const amt=Number(t.amt)||0, mo=parseYM(k).m;
+  const st=(startYM&&/^\d{4}-\d{2}$/.test(startYM))?startYM:k;
+  const amt=Number(t.amt)||0, mo=parseYM(st).m;
   const nums=(S.rules||[]).filter(x=>(x.sort||0)<9000).map(x=>x.sort||0);
   const r={id:uid(), name:name||"New line", kind:amt>=0?"income":"expense",
     cadence, day, account:"Main", offbook:false,
     sort:(nums.length?Math.max.apply(null,nums):0)+10,
-    start:cadence==="biweekly"?String(t.date):k,
-    end:endYM||null, schedule:[{from:k,amount:amt}]};
-  if(cadence==="biweekly") r.anchor=String(t.date);
+    start:cadence==="biweekly"?anchorIn(String(t.date),st):st,
+    end:endYM||null, schedule:[{from:st,amount:amt}]};
+  if(cadence==="biweekly") r.anchor=r.start;
   if(cadence==="annual") r.months=[mo];
   if(cadence==="quarterly"){ const b=((mo-1)%3)+1; r.months=[b,b+3,b+6,b+9]; }
   S.rules.push(r);
-  /* The month it was born in already holds the real thing. Hand that month's
-     occurrence straight to it, or the column shows the transaction beside a
-     prediction of the very same transaction. */
-  const i=Math.max(0,occDates(r,k).indexOf(day));
-  S.assign=S.assign||{}; S.assign[r.id+"#"+k+"#"+i]=TXSIG(t);
+  /* The month it was born in already holds the real thing, so that month's
+     occurrence goes straight to it — otherwise the column shows the transaction
+     beside a prediction of the very same transaction. Only when the line actually
+     starts that month: pushed to a later one, there is no occurrence to hand over
+     and the transaction stands alone, which is right. */
+  if(cmpYM(st,k)<=0){
+    const occ=occDates(r,k), i=occ.indexOf(day);
+    if(i>=0){ S.assign=S.assign||{}; S.assign[r.id+"#"+k+"#"+i]=TXSIG(t); }
+  }
   return r;
 }
 function clearAssign(sig){
@@ -3253,8 +3352,8 @@ function txHTML(){
 
   <div class="fg" style="margin-bottom:0">
     <div class="f" style="flex:2"><label>What is this?</label>
-      <input id="txName" value="${esc(g.label||txLabel(t))}"
-        placeholder="Rent, groceries, mum"></div>
+      <input id="txName" value="${esc(g.label||(!transfer&&S.merch?S.merch[normMerchant(t.desc)]:"")||"")}"
+        placeholder="${esc(String(t.desc||"").slice(0,28))}"></div>
   </div>
   <div class="hint" style="margin-top:6px">${transfer
     ? "A transfer doesn't remember its name. You'll be asked again next time this one turns up."
@@ -3279,17 +3378,25 @@ function txHTML(){
 
   <div class="steps"><div class="sh">Does it happen again?</div>
     <div class="fg" style="margin-top:0">
-      <div class="f"><label>How often</label><select id="txRep">
+      <div class="f" style="flex:2"><label>How often</label><select id="txRep">
         ${CADENCES.map(c=>`<option value="${c[0]}"${
           (rule?rule.cadence:"")===c[0]?" selected":""}>${c[1]}</option>`).join("")}
       </select></div>
+    </div>
+    <div class="fg" style="margin-top:0">
+      <div class="f"><label>Starts</label>
+        <input type="month" id="txStart" value="${esc(
+          rule&&rule.start?String(rule.start).slice(0,7):String(t.date).slice(0,7))}">
+      </div>
       <div class="f"><label>Stops after</label>
         <input type="month" id="txEnd" value="${rule&&rule.end?esc(String(rule.end).slice(0,7)):""}">
       </div>
     </div>
     <div class="hint" style="margin-top:6px">${rule
       ? "Already repeating. Change it here, or set it back to \u201cdoesn't repeat\u201d to stop."
-      : "Say how often and a line appears in every month from here on, waiting for the real one."}</div>
+      : "Say how often and a line appears in every month from the start month on, waiting"
+        +" for the real one. Push the start later than this transaction and this one just"
+        +" stays a transaction."}</div>
   </div>
 
   <div class="crow">
@@ -3326,19 +3433,30 @@ function applyTx(t,a){
   } else if(rule){
     rule.cadence=cad; rule.end=a.endM||null;
     if(name) rule.name=name;
-    if(cad==="biweekly"){ rule.anchor=String(t.date); rule.start=String(t.date); }
+    const st=(a.startM&&/^\d{4}-\d{2}$/.test(a.startM))?a.startM:String(t.date).slice(0,7);
+    if(cad==="biweekly"){ rule.start=anchorIn(String(t.date),st); rule.anchor=rule.start; }
+    else rule.start=st;
     syncFirstStep(rule);
   } else {
-    rule=ruleFromTx(t,cad,a.endM,name||txLabel(t));
+    rule=ruleFromTx(t,cad,a.endM,name||txLabel(t),a.startM);
     tag.rule=rule.id;
     born=rule;
   }
   if(a.pick){
     clearAssign(sig);
     S.assign[a.pick]=sig;
-    /* it takes the planned line's name — that is the whole point of assigning it */
+    /* It takes the planned line's name — that is the whole point of assigning it.
+       Two things were wrong here. The field arrived pre-filled with whatever the
+       bank called it, so `name` was never empty and this never ran; and a row's
+       label carries its date ("Cleaning · 12th"), which is not a name. Take the
+       rule's or the one-off's own name, and treat a name the owner never touched
+       as no name at all. */
     const row=openLines(k).find(r=>r.key===a.pick);
-    if(row&&!name) tag.label=row.label;
+    const mine=name&&name!==String(t.desc||"").trim();
+    if(row&&!mine){
+      const nm=row.rule?row.rule.name:(row.oneoff?row.oneoff.name:row.label);
+      if(nm){ tag.label=nm; if(!a.transfer) S.merch[mer]=nm; }
+    }
     /* Both at once: sit this against a line you'd typed AND make it repeat. The
        new rule handed itself this month a moment ago and the pick has just taken
        that back, which would leave its own placeholder standing beside the
@@ -3365,6 +3483,7 @@ function wireTx(){
       transfer:!!(el("txTr")||{}).checked,
       card:!!(el("txCC")||{}).checked,
       cad:(el("txRep")||{}).value||"",
+      startM:(el("txStart")||{}).value||"",
       endM:(el("txEnd")||{}).value||"",
       pick:(el("txAssign")||{}).value||""
     });
@@ -3383,6 +3502,40 @@ function wireTx(){
     if(S.tmerch) delete S.tmerch[mer];
     if(S.ccpay) delete S.ccpay[mer];
     save(); render(); closeDrawer(); toast("Back to how the bank sent it");
+  };
+}
+
+function wireLineRemove(){
+  const r=lineCtx&&lineCtx.r, k=lineCtx&&lineCtx.k;
+  if(!r) return;
+  const el=id=>document.getElementById(id);
+  const done=msg=>{ save(); render(); closeDrawer(); toast(msg); };
+
+  const one=el("rmOne");
+  if(one) one.onclick=()=>{
+    if(r.oneoff){ S.oneoffs=(S.oneoffs||[]).filter(o=>o.id!==r.oneoff.id);
+                  return done(r.oneoff.name+" removed"); }
+    removeSeries(r.rule,r.key,k,"one");
+    done(r.rule.name+" \u00b7 skipped in "+prettySpend(k));
+  };
+  if(!r.rule||r.ruleId==="cc") return;
+  const nm=r.rule.name;
+
+  const fwd=el("rmFwd");
+  if(fwd) fwd.onclick=()=>{
+    if(!confirm(nm+" stops here.\n\n"+prettySpend(k)
+       +" and every month after it lose this line. Earlier months keep theirs.")) return;
+    const out=removeSeries(r.rule,r.key,k,"fwd");
+    done(out.kind==="dropped"?nm+" removed"
+                             :nm+" \u00b7 stops after "+prettySpend(out.month));
+  };
+
+  const rest=el("rmRest");
+  if(rest) rest.onclick=()=>{
+    if(!confirm(prettySpend(k)+" keeps its "+nm+".\n\nEvery month after it loses the line."))
+      return;
+    removeSeries(r.rule,r.key,k,"rest");
+    done(nm+" \u00b7 this one stands, nothing after it");
   };
 }
 
