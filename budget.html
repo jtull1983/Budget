@@ -694,7 +694,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v76";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v77";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2219,14 +2219,87 @@ function addBudgetLine(k){
     ? n+" added to the "+prettySpend(k)+" budget — the live card already sees the real charges"
     : n+" added to the "+prettySpend(k)+" budget — lands on the "+prettySpend(nextMonth(k))+" bill");
 }
-/* a plain line in this month — cash, another account, anything that isn't the card */
-function addOneoff(k){
-  const n=prompt("New line in "+prettySpend(k)+" — what is it?  (e.g. Vet bill)"); if(!n) return;
-  const a=prompt("How much?  Money out by default — lead with + if it's money coming in.","500"); if(a===null) return;
-  const v=signed(a,-1); if(v===null) return;
-  const d=prompt("Day of month (optional)","15");
-  S.oneoffs.push({id:uid(),ym:k,name:n,amount:v,day:d?+d:99});
-  save(); render(); toast("Added to "+prettySpend(k));
+/* ── a plain line — cash, another account, anything that isn't the card ──────
+   Was three prompts in a row ending in "day of month", which could only ever make
+   a single month's line. A date and a cadence in one pane instead: say it repeats
+   and it repeats from here, without having to add it and then go back in to make
+   it recurring.
+
+   The date wins over the column it was opened from. Pick the 2nd of next month
+   from inside August and it belongs to next month — "date" has to mean date or it
+   is just "day of month" wearing a calendar. */
+let addCtx=null;
+function addOneoff(k){ addCtx={k}; openDrawer("add"); }
+function addTitle(){ return "New line in "+prettySpend(addCtx?addCtx.k:NOW); }
+function addHTML(){
+  const k=(addCtx&&addCtx.k)||NOW;
+  const today=new Date();
+  const def=(k===ym(today.getFullYear(),today.getMonth()+1))
+    ? k+"-"+String(today.getDate()).padStart(2,"0") : k+"-01";
+  return `
+  <div class="fg" style="margin-bottom:0">
+    <div class="f" style="flex:2"><label>What is it?</label>
+      <input id="adName" placeholder="Vet bill, cleaner, tax refund"></div>
+  </div>
+  <div class="fg">
+    <div class="f"><label>How much</label>
+      <input id="adAmt" inputmode="decimal" placeholder="500"></div>
+    <div class="f"><label>Date</label>
+      <input type="date" id="adDate" value="${def}"></div>
+  </div>
+  <div class="hint" style="margin-top:6px">Money out by default \u2014 lead with a
+    + if it's coming in.</div>
+
+  <div class="steps"><div class="sh">Does it happen again?</div>
+    <div class="fg" style="margin-top:0">
+      <div class="f" style="flex:2"><label>How often</label><select id="adRep">
+        ${CADENCES.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join("")}
+      </select></div>
+      <div class="f"><label>Stops after</label><input type="month" id="adEnd" value=""></div>
+    </div>
+    <div class="hint" style="margin-top:6px">Leave it on \u201cdoesn't repeat\u201d and
+      it's a one-off in that month. Anything else and a line appears in every month
+      from the date on.</div>
+  </div>
+
+  <div class="crow"><button class="mini on" id="adGo">Add it</button></div>`;
+}
+/* No DOM in here, so it can be run in Node. Returns the rule it made, or null for
+   a one-off, or a string if the input was no good. */
+function addLine(a){
+  const name=String(a.name||"").trim();
+  if(!name) return "Give it a name";
+  const v=signed(String(a.amount==null?"":a.amount),-1);
+  if(v===null||!v||isNaN(v)) return "That amount didn't read as a number";
+  const date=/^\d{4}-\d{2}-\d{2}$/.test(a.date||"")?a.date:null;
+  if(!date) return "Pick a date";
+  const k=date.slice(0,7);
+  if(!a.cad){
+    S.oneoffs=S.oneoffs||[];
+    S.oneoffs.push({id:uid(),ym:k,name,amount:v,day:+date.slice(8,10)||99});
+    return null;
+  }
+  /* ruleFromTx wants a transaction's shape and this has all of it — an amount, a
+     day and a month. One rule builder, fed from both ends. */
+  const r=ruleFromTx({date,amt:v,desc:name},a.cad,a.endM,name,k);
+  clearAssign(TXSIG({date,amt:v,desc:name}));   /* no real transaction to answer it */
+  return r;
+}
+function wireAdd(){
+  const el=id=>document.getElementById(id);
+  const go=el("adGo"); if(!go) return;
+  go.onclick=()=>{
+    const date=(el("adDate")||{}).value||"";
+    const out=addLine({name:(el("adName")||{}).value,
+                       amount:(el("adAmt")||{}).value,
+                       date,
+                       cad:(el("adRep")||{}).value||"",
+                       endM:(el("adEnd")||{}).value||""});
+    if(typeof out==="string"){ toast(out); return; }
+    save(); render(); closeDrawer();
+    toast(out ? out.name+" \u00b7 repeating from "+prettySpend(date.slice(0,7))
+              : "Added to "+prettySpend(date.slice(0,7)));
+  };
 }
 
 function drawStats(){
@@ -3545,13 +3618,13 @@ function openDrawer(w){
   const titles={rec:"Recurring items",ins:"Check-up",feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
                 match:"Not seen on the account",bank:"Account activity",
-                line:lineTitle(), tx:txPaneTitle(),
+                line:lineTitle(), tx:txPaneTitle(), add:addTitle(),
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
   document.getElementById("dbody").innerHTML=
     w==="rec"?recHTML():w==="feed"?feedHTML():
     w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():w==="bank"?bankHTML():
-    w==="line"?lineHTML():w==="tx"?txHTML():
+    w==="line"?lineHTML():w==="tx"?txHTML():w==="add"?addHTML():
     w==="sync"?syncHTML():w==="card"?(
       nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
   if(w==="rec") wireRec();
@@ -3560,6 +3633,7 @@ function openDrawer(w){
   else if(w==="feed") wireFeed(); else if(w==="sync") wireSync();
   else if(w==="card") wireCard();
   else if(w==="tx") wireTx();
+  else if(w==="add") wireAdd();
   else if(w==="line") wireLine();
   else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
