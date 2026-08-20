@@ -219,6 +219,10 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* the transaction a recurring line was made from, marked so you can find it again
    without opening every row in the month */
 .row .rec{flex:none;margin:0 3px;color:var(--teal);font-size:9px;opacity:.9}
+/* a word you can press — used for the stops-after switch */
+.f label .lnk{color:var(--teal);border-bottom:1px dotted currentColor;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.f label .lnk b{font-weight:700;letter-spacing:.02em}
 .row .tq{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #7a6320;border-radius:3px;
   color:var(--amber);font-size:9.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .row .tk{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #2f6b60;border-radius:3px;
@@ -694,7 +698,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v77";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v78";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -961,6 +965,16 @@ let _pcache={},_pstamp=0;
 function payoffMap(rule){
   const tag=rule.id+"|"+_pstamp; if(_pcache[tag]) return _pcache[tag];
   const map={}; let bal=rule.payoff;
+  /* v77.1 — a real transaction beats the plan. Thirty payments of a thousand
+     against a thirty thousand loan is the plan; five payments and then a lump of
+     twenty-five thousand is what happened, and the balance has to know the
+     difference or the column keeps drawing payments on a debt that is settled.
+     An occurrence counts at its real amount as soon as a transaction is sat
+     against it — which is also the only way the app can be told a lump sum WAS
+     this loan rather than something else that size. Built once per map rather
+     than looked up per occurrence; the map itself is cached per build. */
+  const real={};
+  if(S.assign) txRows().forEach(t=>{ real[TXSIG(t)]=Number(t.amt)||0; });
   for(const mk of monthList()){
     if(!inWindow(rule,mk)) continue;
     const dates=occDates(rule,mk);
@@ -969,7 +983,12 @@ function payoffMap(rule){
       if(S.skip[key]) continue;
       if(bal<=0){ map[key]={left:0,applied:false,amount:0}; continue; }
       let amt=key in S.over?S.over[key]:amountAt(rule,mk);
-      if(Math.abs(amt)>bal) amt=-bal;
+      const sig=S.assign&&S.assign[key];
+      if(sig&&real[sig]!==undefined) amt=real[sig];
+      /* Clamping is right for a prediction — a planned payment can't take more
+         than is owed. It is wrong for a transaction that already happened, which
+         was whatever it was. Overpay and the balance simply lands on zero. */
+      if(!sig&&Math.abs(amt)>bal) amt=-bal;
       bal+=amt; if(bal<0) bal=0;
       map[key]={left:bal,applied:true,amount:amt};
     }
@@ -2255,7 +2274,7 @@ function addHTML(){
       <div class="f" style="flex:2"><label>How often</label><select id="adRep">
         ${CADENCES.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join("")}
       </select></div>
-      <div class="f"><label>Stops after</label><input type="month" id="adEnd" value=""></div>
+      ${endSwapHTML("ad","date","","")}
     </div>
     <div class="hint" style="margin-top:6px">Leave it on \u201cdoesn't repeat\u201d and
       it's a one-off in that month. Anything else and a line appears in every month
@@ -2281,12 +2300,13 @@ function addLine(a){
   }
   /* ruleFromTx wants a transaction's shape and this has all of it — an amount, a
      day and a month. One rule builder, fed from both ends. */
-  const r=ruleFromTx({date,amt:v,desc:name},a.cad,a.endM,name,k);
+  const r=ruleFromTx({date,amt:v,desc:name},a.cad,a.endM,name,k,a.payoff);
   clearAssign(TXSIG({date,amt:v,desc:name}));   /* no real transaction to answer it */
   return r;
 }
 function wireAdd(){
   const el=id=>document.getElementById(id);
+  wireEndSwap("ad",()=>signed(String((el("adAmt")||{}).value||""),-1)||0);
   const go=el("adGo"); if(!go) return;
   go.onclick=()=>{
     const date=(el("adDate")||{}).value||"";
@@ -2294,7 +2314,8 @@ function wireAdd(){
                        amount:(el("adAmt")||{}).value,
                        date,
                        cad:(el("adRep")||{}).value||"",
-                       endM:(el("adEnd")||{}).value||""});
+                       endM:endSwapRead("ad").endM,
+                       payoff:endSwapRead("ad").payoff});
     if(typeof out==="string"){ toast(out); return; }
     save(); render(); closeDrawer();
     toast(out ? out.name+" \u00b7 repeating from "+prettySpend(date.slice(0,7))
@@ -3357,6 +3378,54 @@ function openLines(k){
 }
 const CADENCES=[["","Doesn't repeat"],["monthly","Every month"],["biweekly","Every 2 weeks"],
   ["semimonthly","Twice a month"],["quarterly","Every 3 months"],["annual","Once a year"]];
+/* "Stops after date" / "Stops after amount" — the word is the switch. Both inputs
+   are rendered and one is hidden, rather than redrawing the pane on a tap: a redraw
+   would throw away everything else already typed into it. */
+function endSwapHTML(idBase,mode,endVal,payVal){
+  return `<div class="f">
+    <label><span class="lnk" id="${idBase}Swap" data-mode="${mode}">Stops after
+      <b>${mode==="amount"?"amount":"date"}</b></span></label>
+    <input type="month" id="${idBase}End" value="${esc(endVal||"")}"${
+      mode==="amount"?" hidden":""}>
+    <input inputmode="decimal" id="${idBase}Pay" value="${esc(payVal||"")}"
+      placeholder="30000"${mode==="date"?" hidden":""}>
+    <div class="hint" id="${idBase}Note" style="margin-top:4px"></div>
+  </div>`;
+}
+/* Wire the switch, and keep a running count of how many payments the balance buys.
+   `amountOf` is a function because in the add pane the amount is still being typed. */
+function wireEndSwap(idBase,amountOf){
+  const el=id=>document.getElementById(id);
+  const sw=el(idBase+"Swap"), en=el(idBase+"End"), pa=el(idBase+"Pay"), no=el(idBase+"Note");
+  if(!sw) return;
+  const note=()=>{
+    if(!no) return;
+    if(sw.dataset.mode!=="amount"){ no.textContent=""; return; }
+    const bal=Math.abs(parseFloat(String(pa.value).replace(/[^0-9.]/g,"")))||0;
+    const per=Math.abs(amountOf()||0);
+    no.textContent=(bal&&per)?"about "+Math.ceil(bal/per)+" payments":"";
+  };
+  sw.onclick=()=>{
+    const to=sw.dataset.mode==="amount"?"date":"amount";
+    sw.dataset.mode=to;
+    sw.querySelector("b").textContent=to;
+    en.hidden=to==="amount"; pa.hidden=to==="date";
+    note();
+  };
+  if(pa) pa.oninput=note;
+  note();
+}
+function endSwapRead(idBase){
+  const el=id=>document.getElementById(id);
+  const sw=el(idBase+"Swap");
+  if(!sw) return {mode:"date",endM:"",payoff:null};
+  if(sw.dataset.mode==="amount"){
+    const v=Math.abs(parseFloat(String((el(idBase+"Pay")||{}).value||"")
+      .replace(/[^0-9.]/g,"")));
+    return {mode:"amount",endM:"",payoff:(v&&!isNaN(v))?v:null};
+  }
+  return {mode:"date",endM:(el(idBase+"End")||{}).value||"",payoff:null};
+}
 function esc(v){ return String(v==null?"":v)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;"); }
 /* Born out of a transaction, so its shape is taken from that transaction: the
@@ -3373,7 +3442,7 @@ function anchorIn(dateStr,targetYM){
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
         +"-"+String(d.getDate()).padStart(2,"0");
 }
-function ruleFromTx(t,cadence,endYM,name,startYM){
+function ruleFromTx(t,cadence,endYM,name,startYM,payoff){
   const k=String(t.date).slice(0,7), day=+String(t.date).slice(8,10)||1;
   const st=(startYM&&/^\d{4}-\d{2}$/.test(startYM))?startYM:k;
   const amt=Number(t.amt)||0, mo=parseYM(st).m;
@@ -3382,7 +3451,7 @@ function ruleFromTx(t,cadence,endYM,name,startYM){
     cadence, day, account:"Main", offbook:false,
     sort:(nums.length?Math.max.apply(null,nums):0)+10,
     start:cadence==="biweekly"?anchorIn(String(t.date),st):st,
-    end:endYM||null, schedule:[{from:st,amount:amt}]};
+    end:endYM||null, payoff:payoff||null, schedule:[{from:st,amount:amt}]};
   if(cadence==="biweekly") r.anchor=r.start;
   if(cadence==="annual") r.months=[mo];
   if(cadence==="quarterly"){ const b=((mo-1)%3)+1; r.months=[b,b+3,b+6,b+9]; }
@@ -3461,9 +3530,8 @@ function txHTML(){
         <input type="month" id="txStart" value="${esc(
           rule&&rule.start?String(rule.start).slice(0,7):String(t.date).slice(0,7))}">
       </div>
-      <div class="f"><label>Stops after</label>
-        <input type="month" id="txEnd" value="${rule&&rule.end?esc(String(rule.end).slice(0,7)):""}">
-      </div>
+      ${endSwapHTML("tx", rule&&rule.payoff?"amount":"date",
+          rule&&rule.end?String(rule.end).slice(0,7):"", rule&&rule.payoff?rule.payoff:"")}
     </div>
     <div class="hint" style="margin-top:6px">${rule
       ? "Already repeating. Change it here, or set it back to \u201cdoesn't repeat\u201d to stop."
@@ -3504,14 +3572,17 @@ function applyTx(t,a){
   if(!cad){
     if(rule){ S.rules=S.rules.filter(x=>x.id!==rule.id); delete tag.rule; rule=null; }
   } else if(rule){
-    rule.cadence=cad; rule.end=a.endM||null;
+    rule.cadence=cad;
+    /* the two are alternatives, not both — whichever the switch was showing wins,
+       and the other is cleared so a stale one can't quietly end the line early */
+    rule.end=a.endM||null; rule.payoff=a.payoff||null;
     if(name) rule.name=name;
     const st=(a.startM&&/^\d{4}-\d{2}$/.test(a.startM))?a.startM:String(t.date).slice(0,7);
     if(cad==="biweekly"){ rule.start=anchorIn(String(t.date),st); rule.anchor=rule.start; }
     else rule.start=st;
     syncFirstStep(rule);
   } else {
-    rule=ruleFromTx(t,cad,a.endM,name||txLabel(t),a.startM);
+    rule=ruleFromTx(t,cad,a.endM,name||txLabel(t),a.startM,a.payoff);
     tag.rule=rule.id;
     born=rule;
   }
@@ -3548,6 +3619,7 @@ function applyTx(t,a){
 function wireTx(){
   const t=txCtx&&txFind(txCtx.sig); if(!t) return;
   const el=id=>document.getElementById(id);
+  wireEndSwap("tx",()=>Number(t.amt)||0);
   const btn=el("txSave");
   if(btn) btn.onclick=()=>{
     const out=applyTx(t,{
@@ -3557,7 +3629,8 @@ function wireTx(){
       card:!!(el("txCC")||{}).checked,
       cad:(el("txRep")||{}).value||"",
       startM:(el("txStart")||{}).value||"",
-      endM:(el("txEnd")||{}).value||"",
+      endM:endSwapRead("tx").endM,
+      payoff:endSwapRead("tx").payoff,
       pick:(el("txAssign")||{}).value||""
     });
     save(); render(); closeDrawer();
