@@ -219,6 +219,26 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* the transaction a recurring line was made from, marked so you can find it again
    without opening every row in the month */
 .row .rec{flex:none;margin:0 3px;color:var(--teal);font-size:9px;opacity:.9}
+/* the two columns of a charge you can sort on. Faintly underlined so it reads as
+   pressable without shouting; the one in use is solid and carries the arrow. */
+.txrow .sortby{border-bottom:1px dotted #3a4550;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.txrow .sortby.sorton{border-bottom-style:solid;border-bottom-color:var(--teal);
+  color:var(--teal)!important}
+/* Shown once, on the way into a category: the dates pulse, then the amounts, so
+   it's obvious both columns are controls. Background and underline only — the
+   amount carries an inline colour and a keyframe would win over it, which would
+   look like the figure itself had changed rather than the button around it. */
+@keyframes sortHint{
+  0%  {background:transparent;border-bottom-color:#3a4550;box-shadow:none}
+  30% {background:rgba(94,214,196,.20);border-bottom-color:var(--teal);
+       box-shadow:0 0 0 3px rgba(94,214,196,.12)}
+  100%{background:transparent;border-bottom-color:#3a4550;box-shadow:none}
+}
+.txrow .sortby.flash{border-radius:3px;animation:sortHint .7s ease-out both}
+.txrow .dt.sortby.flash{animation-delay:.25s}
+.txrow .a.sortby.flash{animation-delay:1.0s}
+@media (prefers-reduced-motion:reduce){ .txrow .sortby.flash{animation:none} }
 /* a word you can press — used for the stops-after switch */
 .f label .lnk{color:var(--teal);border-bottom:1px dotted currentColor;cursor:pointer;
   -webkit-tap-highlight-color:transparent}
@@ -698,7 +718,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v78";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v80";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -5458,23 +5478,62 @@ function shortDay(d,spend){
   if(!iso) return (String(d||"").trim()||"\u2014").slice(0,6);
   return new Date(iso+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
 }
+/* Which column the category list is sorted on, and which way. Lives outside the
+   builder so it survives the redraw that a tap causes — the drawer is rebuilt
+   from scratch on every openDrawer(), so anything held inside catHTML would reset
+   itself the moment it was used. Biggest first to start with, which is how the
+   list has always opened. */
+let catSort={by:"amt",dir:-1};
+/* True only on the redraw that lands you inside a category. Every other redraw of
+   the same pane is a sort tap, and replaying the hint each time you sorted would
+   be noise pointing at a control you had visibly just used. Cleared by the wiring
+   pass once the flash has been handed to the markup. */
+let catFlash=false;
+/* Sorting on a date means sorting on the ISO date, not the "Aug 10" the statement
+   printed — isoDay() already works out which month a bare day belongs to. Anything
+   it can't read keeps its raw text behind a leading space, which sorts below every
+   real date rather than pretending to be one. */
+function catKey(r,by){
+  if(by==="date") return isoDay(r.date,r.spend)||" "+String(r.date||"").trim();
+  return Number(r.amt)||0;
+}
+function catCmp(a,b){
+  const ka=catKey(a,catSort.by), kb=catKey(b,catSort.by);
+  const n = (typeof ka==="number") ? ka-kb : String(ka).localeCompare(String(kb));
+  if(n) return n*catSort.dir;
+  /* The tiebreak does NOT take the direction with it. Folding it into the same
+     multiply meant that sorting dates newest-first also turned the tiebreak round,
+     so a day holding two charges listed the smaller one first — right list, wrong
+     order inside a day, and the sort of thing you'd stare at for a while. */
+  return (Number(b.amt)||0)-(Number(a.amt)||0);
+}
 function catHTML(){
   const y=YEAR, c=nav.cat, tx=cardTx(y,c,nav.month);
   const tot=tx.reduce((a,r)=>a+r.amt,0);
   let h=crumbs()+`<div class="flag" style="border-left-color:${CATCOLOR[c]||"var(--teal)"}">
       <div class="ft">${c}${nav.month?" · "+prettySpend(nav.month):" · "+y}</div>
       <div class="fb"><b>${money(tot)}</b> across <b>${tx.length}</b> charges.
-      Tap any charge to move it — I'll remember that merchant and re-file it everywhere. Tap a month to fold it away, double-tap to fold them all.</div></div>`;
+      Tap a charge's name to move it — I'll remember that merchant and re-file it
+      everywhere. Tap any date or any amount to sort the list by that column; tap it
+      again to turn it round. Tap a month to fold it away, double-tap to fold them
+      all.</div></div>`;
   const byM={}; tx.forEach(r=>(byM[r.spend]=byM[r.spend]||[]).push(r));
   Object.keys(byM).sort().reverse().forEach(m=>{
     const rows=byM[m], sub=rows.reduce((a,r)=>a+r.amt,0);
     h+=`<div class="card open"><div class="chead"><span class="nm">${prettySpend(m)}</span>
       <span class="am">${money(sub)} · ${rows.length}</span></div><div class="cbody">`;
-    rows.forEach(r=>{
+    /* within the month. The months themselves stay newest-first — this sorts the
+       charges inside one, which is the list you are actually reading. */
+    rows.slice().sort(catCmp).forEach(r=>{
+      const fl=catFlash?" flash":"";
+      const on=k=>catSort.by===k?" sorton":"";
+      const arrow=k=>catSort.by===k?(catSort.dir<0?"\u2193":"\u2191"):"";
       h+=`<button class="txrow" data-move="${r.filed}|${r.idx}">
-        <span class="dt">${shortDay(r.date,r.spend)}</span>
+        <span class="dt sortby${on("date")}${fl}" data-sort="date">${
+          shortDay(r.date,r.spend)}${arrow("date")}</span>
         <span class="d">${r.desc}</span>
-        <span class="a" style="color:${r.amt<0?"var(--teal)":"var(--txt)"}">${money(r.amt)}</span>
+        <span class="a sortby${on("amt")}${fl}" data-sort="amt"
+          style="color:${r.amt<0?"var(--teal)":"var(--txt)"}">${money(r.amt)}${arrow("amt")}</span>
         <span class="c" style="color:${CATCOLOR[r.cat]||"var(--dim)"}">${r.cat}</span></button>`;
     });
     h+=`</div></div>`;
@@ -5536,7 +5595,21 @@ function wireCard(){
   });
   document.querySelectorAll("[data-move]").forEach(b=>{
     const [k,i]=b.dataset.move.split("|");
-    b.onclick=e=>{ e.preventDefault(); openPicker(k,+i); };
+    b.onclick=e=>{
+      /* the date and the amount are their own controls now — a tap that landed on
+         one of them was a sort, and must not also open the picker behind it */
+      if(e.target.closest("[data-sort]")) return;
+      e.preventDefault(); openPicker(k,+i);
+    };
+  });
+  document.querySelectorAll("[data-sort]").forEach(x=>x.onclick=e=>{
+    e.preventDefault(); e.stopPropagation();
+    const by=x.dataset.sort;
+    /* same column again turns it round; a new column starts the way that column is
+       usually wanted — newest first, biggest first */
+    catSort = (catSort.by===by) ? {by,dir:-catSort.dir} : {by,dir:-1};
+    catFlash=false;
+    openDrawer("card");
   });
   document.querySelectorAll("[data-crumb]").forEach(b=>b.onclick=()=>{
     if(b.dataset.crumb==="root"){ nav={month:null,cat:null}; } else { nav.cat=null; }
@@ -5546,8 +5619,12 @@ function wireCard(){
     nav={month:b.dataset.month,cat:null}; openDrawer("card");
   });
   document.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
-    nav.cat=b.dataset.cat; openDrawer("card");
+    nav.cat=b.dataset.cat; catFlash=true; openDrawer("card");
   });
+  /* The markup for this pass already has its flash classes, so the flag has done
+     its job. Clearing it here means the next redraw — a sort, a re-file — is
+     quiet, without needing to know which of them caused it. */
+  catFlash=false;
 
 }
 
