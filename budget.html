@@ -812,7 +812,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v91";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v92";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2415,22 +2415,29 @@ function editAmt(span,r,k){
    Wired before el.onclick and before the credit card gestures on purpose. When
    the row itself is the click target, listeners run in registration order, so
    being first is what lets the open-state guard below swallow the tap. */
-/* v89 \u2014 arbitration between the two sideways gestures.
+/* Arbitration between the two sideways gestures. Before v89, any leftward drag
+   on a row claimed the delete outright at 10px, and stopPropagation meant the
+   month scroller never saw the rest of it \u2014 so swiping forward a month over a
+   row, which is most of a column, peeled the row open instead.
 
-   Before this, any leftward drag on a row claimed the delete outright at 10px of
-   movement, and stopPropagation meant the month scroller never saw the rest of
-   it. Swiping forward a month over a row \u2014 which is most of a column \u2014 started
-   peeling the row open instead. Three things separate them now:
+   **Distance decides, and only distance.**
 
-     \u00b7 distance   nothing is decided until SW_CLAIM px of movement, up from 10
-     \u00b7 angle      the drag has to be clearly sideways, 1.6:1 rather than 1.3:1
-     \u00b7 speed      a flick is a month change. A delete is a deliberate, slower
-                  drag; past SW_FLICK px/ms the row keeps its hands off.
+     \u00b7 under SW_CLAIM px    nothing has happened yet
+     \u00b7 SW_CLAIM \u2192 SW_BAIL   the row opens; the month does not move
+     \u00b7 past SW_BAIL         the row hands the gesture back mid-stroke, snaps
+                            shut, and the scroller changes the month. Nothing has
+                            to be released and retried.
 
-   And an escape hatch: keep dragging past SW_BAIL and the row hands the gesture
-   back mid-stroke, snaps shut, and the scroller picks up the remaining movement
-   and changes the month. Nothing needs to be released and retried. */
-var SW_W=58, SW_CLAIM=16, SW_FLICK=0.55, SW_BAIL=105, swOpenEl=null;
+   v92 \u2014 v89 also gated on speed: anything faster than 0.55 px/ms was treated as
+   a flick and refused. That was wrong and it is gone. The velocity was measured
+   from touchstart to the first move over the threshold, so it was really timing
+   how long the finger rested before setting off. Start moving the instant you
+   touch down and 20px in 20ms reads as 1.0 px/ms \u2014 a flick \u2014 and the delete never
+   armed. Pause a beat first and the identical drag worked. That is what "works on
+   some things and not others" was: not the row, the run-up. The angle went back
+   to 1.3:1 at the same time, since 1.6:1 was refusing the ordinary diagonal a
+   thumb makes swinging across a phone. */
+var SW_W=58, SW_CLAIM=12, SW_BAIL=105, swOpenEl=null;
 function swClose(el){
   if(!el) return;
   el.classList.remove("swopen","swiping");
@@ -2439,12 +2446,12 @@ function swClose(el){
 }
 function wireSwipe(el,r){
   if(r.info) return;                  /* reference rows have nothing to remove */
-  let x0=0,y0=0,t0=0,live=false,open=false,decided=false;
+  let x0=0,y0=0,live=false,open=false,decided=false;
   const put=(px,anim)=>{ el.style.transition=anim?"transform .18s ease":"none";
                          el.style.transform=px?"translateX("+px+"px)":""; };
   el.addEventListener("touchstart",ev=>{
     if(ev.touches.length!==1) return;
-    x0=ev.touches[0].clientX; y0=ev.touches[0].clientY; t0=Date.now();
+    x0=ev.touches[0].clientX; y0=ev.touches[0].clientY;
     live=false; decided=false; open=el.classList.contains("swopen");
     if(swOpenEl&&swOpenEl!==el) swClose(swOpenEl);
   },{passive:true});
@@ -2453,9 +2460,8 @@ function wireSwipe(el,r){
     if(!decided){
       if(Math.abs(dx)<SW_CLAIM&&Math.abs(dy)<SW_CLAIM) return;   /* too small to mean anything yet */
       decided=true;
-      const v=Math.abs(dx)/Math.max(1,Date.now()-t0);
-      live=Math.abs(dx)>Math.abs(dy)*1.6&&(dx<0||open)&&v<SW_FLICK;
-      if(!live) return;      /* vertical, a right-drag on a shut row, or a flick */
+      live=Math.abs(dx)>Math.abs(dy)*1.3&&(dx<0||open);
+      if(!live) return;      /* vertical, or a right-drag on a shut row */
     }
     if(!live) return;
     /* changed its mind mid-stroke: give the month scroller everything from here.
