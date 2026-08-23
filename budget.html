@@ -68,7 +68,9 @@ body.fitOn .navarr{display:none}
 /* v83 — no longer flex:1. It used to stretch across the whole row, which left
    nowhere for the assets figure to sit and pushed Menu into the middle of the
    header. Everything before the spacer now packs left at its natural width. */
-.menubtn{flex:0 1 auto;display:flex;align-items:center;justify-content:center;gap:8px;
+/* width has to be stable for the centring maths below to mean anything */
+.menupad{flex:none;width:0;min-width:0}
+.menubtn{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;
   padding:11px 12px;font-size:12px;letter-spacing:.16em}
 /* takes the slack the Menu button used to, so the corner stays a corner whether
    or not there are any asset accounts to show */
@@ -717,6 +719,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
   <div class="toprow2">
     <button class="btn" id="btnUndo" title="Undo">↶ Undo</button>
     <button class="btn navarr" id="btnLeft" title="Back a month">‹</button>
+    <div class="menupad" id="menuPad"></div>
     <button class="btn menubtn" id="btnMenu"><span>Menu</span><i class="car">▾</i></button>
     <div class="statuspill" id="statusPill"></div>
     <button class="btn navarr" id="btnRight" title="Forward a month">›</button>
@@ -760,7 +763,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v86";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v87";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1748,6 +1751,51 @@ function fitGrid(){
     const cw=Math.floor((sc.clientWidth||1200)/6);
     sc.style.setProperty("--colw",cw+"px");
   } else sc.style.removeProperty("--colw");
+  placeMenu();
+}
+/* Put the Menu button's midline on a column divider.
+
+   Measured off the real columns rather than computed from --colw, because the
+   grid has three layouts (phone, desktop scrolling, desktop fit-the-year) and
+   only the DOM knows which one is on screen. The pad grows to push Menu right;
+   everything stays in normal flow, so nothing can end up underneath anything.
+
+   It walks the dividers left to right and takes the first one where the button
+   clears Undo on the left and the assets corner on the right. If no divider
+   fits — a narrow phone, a long Menu label — the pad collapses to nothing and
+   the row falls back to how it was, which is untidy but never broken. */
+function placeMenu(){
+  const row=document.querySelector(".toprow2");
+  const pad=document.getElementById("menuPad");
+  const mb=document.getElementById("btnMenu");
+  if(!row||!pad||!mb) return;
+  const cols=Array.prototype.slice.call(document.querySelectorAll(".mcol"))
+    .filter(c=>c.offsetParent);
+  if(!cols.length){ pad.style.width="0px"; return; }
+  const GAP=10;
+  const R=row.getBoundingClientRect();
+  /* whatever sits to the left of the pad, whichever of them is showing */
+  let before=R.left;
+  ["btnUndo","btnLeft"].forEach(id=>{
+    const e=document.getElementById(id);
+    if(e&&e.offsetParent) before=Math.max(before,e.getBoundingClientRect().right);
+  });
+  /* and the block in the far corner it must not reach */
+  let after=R.right;
+  ["btnAssets","btnFit"].forEach(id=>{
+    const e=document.getElementById(id);
+    if(e&&!e.hidden&&e.offsetParent) after=Math.min(after,e.getBoundingClientRect().left);
+  });
+  const half=mb.offsetWidth/2;
+  for(let i=0;i<cols.length;i++){
+    const x=cols[i].getBoundingClientRect().right;   /* the divider after this column */
+    if(x+half>after-GAP) break;                      /* and every later one is worse */
+    if(x-half>=before+GAP){
+      pad.style.width=Math.max(0,(x-half)-(before+GAP))+"px";
+      return;
+    }
+  }
+  pad.style.width="0px";
 }
 /* Several hits from one rule fold into one line — but only when the month is
    actually crowded. Folding two paycheques behind a ▾ hides the thing you opened
@@ -6537,6 +6585,7 @@ function wireSync(){
     document.getElementById("sfPeekBody").innerHTML=sfinPeekHTML();
   };
   wireAcct();
+  wireHand();          /* v87 — these buttons rendered dead from v84 until now */
   const sfp=document.getElementById("sfPull");
   if(sfp) sfp.onclick=()=>sfinPull().then(()=>openDrawer("sync"));
   const sfo=document.getElementById("sfOff");
