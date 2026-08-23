@@ -480,6 +480,23 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .scrim.on{opacity:1;pointer-events:auto}
 
 /* off-book: shown for context, not deducted */
+/* A section heading. Deliberately slimmer than a row — it is a control, not a
+   line of the budget, and two of them on every column would otherwise cost four
+   rows of height in a place already short of it. */
+.row.seg{min-height:24px;padding:4px 11px 4px 5px;cursor:pointer;gap:4px;
+  border-top:1px solid var(--line);margin-top:3px}
+.rows > .row.seg:first-child{border-top:none;margin-top:0}
+.row.seg .lbl{font-size:9.5px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--dimmer)}
+.row.seg .gn{font-size:9px;font-weight:600;color:var(--dimmer);letter-spacing:.06em}
+.row.seg .amt{font-size:11px;font-weight:700;opacity:.85;cursor:pointer}
+.row.seg.inc .amt{color:var(--teal)}
+.row.seg.exp .amt{color:#ffb8a4}
+.row.seg.done .lbl,.row.seg.done .amt{text-decoration:line-through;opacity:.5}
+/* wider than it looks: the glyph is small on purpose but the tap target has to
+   clear a thumb, so the whole heading is clickable and this just aims the eye */
+.row.seg .tri{font-size:11px;width:14px;text-align:center;padding-left:0;color:var(--dim)}
+.row.seg .tri.up{color:var(--teal)}
 .row.grp{cursor:pointer}
 .row.grp .lbl{font-weight:700}
 .row.grp .gn{color:var(--dimmer);font-weight:600;font-size:10px}
@@ -702,12 +719,17 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .dbody .mini.role.on{border-color:var(--cyan);color:var(--cyan);border-style:solid}
 .dbody .mini.role.hint{border-color:var(--amber);color:var(--amber)}
 .acctrow.fresh{background:#241a06;border-radius:6px;padding-left:8px;padding-right:8px}
-.row.hit .lbl{text-decoration:line-through;opacity:.6}
+.row.hit .lbl,.row.hit .amt{text-decoration:line-through;opacity:.6}
 /* A transaction off the account is not a prediction waiting to come true — it has
    already left. Struck through says so at a glance, and separates the settled half
-   of a month from the half still to come. The amount is left alone: it is the one
-   figure on the row that has to stay readable. */
-.row.tx .lbl{text-decoration:line-through;text-decoration-thickness:1px;opacity:.72}
+   of a month from the half still to come.
+
+   v89 — the amount is struck too. It was deliberately left readable before, on the
+   grounds that it is the one figure on the row you still need. That was the wrong
+   call for a collapsed section: a heading that reads "Paychecks ×5" with a live
+   total next to it looks like money still coming, when all five have landed. The
+   strike has to reach the number or the summary lies. */
+.row.tx .lbl,.row.tx .amt{text-decoration:line-through;text-decoration-thickness:1px;opacity:.72}
 .row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
   color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
 .row .late{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #6b4a12;border-radius:3px;
@@ -790,7 +812,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v89";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v91";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1740,6 +1762,9 @@ function pickAnim(prev,next){
 }
 let viewIndex=0;
 const expanded=new Set();
+/* which columns have already been dropped to their foot in the current view, and
+   the token that says what "the current view" is */
+const ccSeen=new Set(); let lastViewTok="";
 let fitMode=(()=>{ try{ return localStorage.getItem("budget_fit_v2")==="1"; }catch(e){ return false; } })();
 /* wide screens: slide the current month to the middle */
 function centerWide(){
@@ -1846,6 +1871,44 @@ function placeMenu(){
 
    Crowded, the clusters stand and each takes the date of its earliest occurrence,
    so the folded column still reads forward. */
+/* ---------- collapsible sections ------------------------------------------
+   Two of them per column: income at the top, expenses under it. The card row and
+   its budget are never in a section \u2014 keeping those on screen is the whole point
+   of scrolling the column to them, and folding them away would undo it. Off-book
+   rows (a card payment out of savings) stay loose too: there are rarely more than
+   one or two and they are the rows most likely to need reading.
+
+   Shut, not open, is what's remembered: a section defaults to showing its rows,
+   so the Set holds the exceptions. Runtime only \u2014 which sections you folded is
+   not something the other phone should inherit. */
+const segShut=new Set();
+function segOf(r){ const b=rowBand(r); return b===0?"inc":b===1?"exp":null; }
+function segKey(k,g){ return k+"|seg:"+g; }
+function rowDone(r){
+  /* a folded group is done only when every occupant of it is */
+  if(r.group) return r.rows.length>0&&r.rows.every(x=>!!(x.real||x.hit));
+  return !!(r.real||r.hit);
+}
+function segHead(k,g,list){
+  const own=list.filter(r=>!r.child);          /* a group already carries its children */
+  const shut=segShut.has(segKey(k,g));
+  const tot=own.reduce((a,r)=>a+r.amount,0);
+  const cnt=own.reduce((a,r)=>a+(r.count||1),0);
+  const done=own.length>0&&own.every(rowDone);
+  const el=document.createElement("div");
+  el.className="row seg "+g+(done?" done":"");
+  /* left corner, in the column the row dots run down \u2014 v90 had it on the right
+     with the amounts, which is where every other triangle in the app lives, but
+     that is not where it was asked for. */
+  el.innerHTML=`<span class="tri${shut?"":" up"}">\u25be</span>
+    <span class="lbl">${g==="inc"?"Paychecks":"Line items"}
+      <span class="gn">\u00d7${cnt}</span></span>
+    <span class="amt">${money(tot)}</span>`;
+  el.title=(shut?"Show":"Hide")+" "+(g==="inc"?"income":"expenses")+" for this month";
+  el.onclick=()=>{ const key=segKey(k,g);
+    segShut.has(key)?segShut.delete(key):segShut.add(key); render(); };
+  return el;
+}
 function foldRows(rows,crowded,k){
   if(!crowded) return rows.slice();
   const groups=[], seen={}, out=[];
@@ -1916,6 +1979,20 @@ function render(anim,popTab){
   const rail=document.getElementById("rail");
   rail.className="rail"+(anim?" "+anim:"");
   swOpenEl=null;                 /* the row it pointed at is about to stop existing */
+  /* Every render rebuilds the rail from scratch, which used to drop each column
+     back to the top \u2014 so an edit anywhere scrolled the card row back out of
+     sight. Where each column was sitting is carried across the rebuild. */
+  const keepScroll={};
+  rail.querySelectorAll(".mcol").forEach(c=>{
+    const b=c.querySelector(".rows");
+    if(c.dataset.k&&b) keepScroll[c.dataset.k]=b.scrollTop;
+  });
+  /* The first time a column is painted in this view it is scrolled to its foot
+     instead, which is where the statement and its budget sit. Leaving the year
+     and coming back counts as a new view, so it re-exposes rather than restoring
+     wherever it was left. */
+  const viewTok=YEAR+"|"+viewIndex+"|"+(fitMode?1:0)+"|"+perView();
+  if(viewTok!==lastViewTok){ lastViewTok=viewTok; ccSeen.clear(); }
   rail.innerHTML="";
 
   const wide=perView()>=12;
@@ -1925,6 +2002,7 @@ function render(anim,popTab){
     const {y,m}=parseYM(M.k);
     const past=cmpYM(M.k,NOW)<0, now=M.k===NOW;
     const col=document.createElement("div");
+    col.dataset.k=M.k;
     col.className="mcol"+(past?" past":"")+(now?" now":"")
                 +(M.noData?(M.rows.length?" refonly":" blank"):"");
     if(anim) col.style.animationDelay=(ci*0.035)+"s";
@@ -1968,7 +2046,18 @@ function render(anim,popTab){
        purchase still needs somewhere to show itself */
     if(!plan&&plannedFor(M.k)) plan={target:S.meta.ccTarget||0,rows:[],bare:true};
     if(plan) shown.push({budget:true,plan});
+    /* counted before anything is drawn, because the heading has to know its own
+       total and whether every row under it has landed */
+    const segRows={inc:[],exp:[]}, segMade={};
+    shown.forEach(r=>{ const g=segOf(r); if(g) segRows[g].push(r); });
+    /* One row under a heading is a heading that costs more than it saves. */
+    const segOn=g=>segRows[g].filter(r=>!r.child).length>=2;
     shown.forEach((r,ri)=>{
+      const sg=segOf(r);
+      if(sg&&segOn(sg)){
+        if(!segMade[sg]){ segMade[sg]=1; box.appendChild(segHead(M.k,sg,segRows[sg])); }
+        if(segShut.has(segKey(M.k,sg))) return;
+      }
       if(r.budget){
         const p=r.plan, key=M.k+"|budget", open=expanded.has(key);
         const el=document.createElement("div");
@@ -2172,6 +2261,25 @@ function render(anim,popTab){
     rail.appendChild(col);
   });
 
+  /* After layout, not before: scrollHeight on a column that hasn't been measured
+     yet is its content height with no scrollbox, and every one of these would be
+     a no-op. */
+  requestAnimationFrame(()=>{
+    rail.querySelectorAll(".mcol").forEach(c=>{
+      const b=c.querySelector(".rows"), k=c.dataset.k;
+      if(!b||!k) return;
+      if(!ccSeen.has(k)){
+        ccSeen.add(k);
+        /* only worth doing where there is something below the fold, and only
+           where the card block is actually down there */
+        if(b.scrollHeight>b.clientHeight+2&&b.querySelector(".row.cc,.row.bud"))
+          b.scrollTop=b.scrollHeight;
+      } else if(keepScroll[k]!==undefined){
+        b.scrollTop=Math.min(keepScroll[k],Math.max(0,b.scrollHeight-b.clientHeight));
+      }
+    });
+  });
+
   const hint=null;
   if(hint){
     const [lo,hi]=yearBounds();
@@ -2307,7 +2415,22 @@ function editAmt(span,r,k){
    Wired before el.onclick and before the credit card gestures on purpose. When
    the row itself is the click target, listeners run in registration order, so
    being first is what lets the open-state guard below swallow the tap. */
-var SW_W=58, swOpenEl=null;
+/* v89 \u2014 arbitration between the two sideways gestures.
+
+   Before this, any leftward drag on a row claimed the delete outright at 10px of
+   movement, and stopPropagation meant the month scroller never saw the rest of
+   it. Swiping forward a month over a row \u2014 which is most of a column \u2014 started
+   peeling the row open instead. Three things separate them now:
+
+     \u00b7 distance   nothing is decided until SW_CLAIM px of movement, up from 10
+     \u00b7 angle      the drag has to be clearly sideways, 1.6:1 rather than 1.3:1
+     \u00b7 speed      a flick is a month change. A delete is a deliberate, slower
+                  drag; past SW_FLICK px/ms the row keeps its hands off.
+
+   And an escape hatch: keep dragging past SW_BAIL and the row hands the gesture
+   back mid-stroke, snaps shut, and the scroller picks up the remaining movement
+   and changes the month. Nothing needs to be released and retried. */
+var SW_W=58, SW_CLAIM=16, SW_FLICK=0.55, SW_BAIL=105, swOpenEl=null;
 function swClose(el){
   if(!el) return;
   el.classList.remove("swopen","swiping");
@@ -2316,24 +2439,31 @@ function swClose(el){
 }
 function wireSwipe(el,r){
   if(r.info) return;                  /* reference rows have nothing to remove */
-  let x0=0,y0=0,live=false,open=false,decided=false;
+  let x0=0,y0=0,t0=0,live=false,open=false,decided=false;
   const put=(px,anim)=>{ el.style.transition=anim?"transform .18s ease":"none";
                          el.style.transform=px?"translateX("+px+"px)":""; };
   el.addEventListener("touchstart",ev=>{
     if(ev.touches.length!==1) return;
-    x0=ev.touches[0].clientX; y0=ev.touches[0].clientY;
+    x0=ev.touches[0].clientX; y0=ev.touches[0].clientY; t0=Date.now();
     live=false; decided=false; open=el.classList.contains("swopen");
     if(swOpenEl&&swOpenEl!==el) swClose(swOpenEl);
   },{passive:true});
   el.addEventListener("touchmove",ev=>{
     const dx=ev.touches[0].clientX-x0, dy=ev.touches[0].clientY-y0;
     if(!decided){
-      if(Math.abs(dx)<10&&Math.abs(dy)<10) return;   /* too small to mean anything yet */
+      if(Math.abs(dx)<SW_CLAIM&&Math.abs(dy)<SW_CLAIM) return;   /* too small to mean anything yet */
       decided=true;
-      live=Math.abs(dx)>Math.abs(dy)*1.3&&(dx<0||open);
-      if(!live) return;                              /* vertical, or a right-drag on a shut row */
+      const v=Math.abs(dx)/Math.max(1,Date.now()-t0);
+      live=Math.abs(dx)>Math.abs(dy)*1.6&&(dx<0||open)&&v<SW_FLICK;
+      if(!live) return;      /* vertical, a right-drag on a shut row, or a flick */
     }
     if(!live) return;
+    /* changed its mind mid-stroke: give the month scroller everything from here.
+       Not stopping propagation from now on is what lets it see the movement, and
+       settle() below already returns without stopping once live is false. */
+    if(!open&&dx<-SW_BAIL){
+      live=false; el.classList.remove("swiping"); put(0,true); return;
+    }
     ev.stopPropagation();                            /* the month grid must not see this */
     if(ev.cancelable) ev.preventDefault();
     el.classList.add("swiping");                     /* lifts the heat row's own clip */
