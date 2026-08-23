@@ -790,7 +790,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v88";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v89";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3309,31 +3309,57 @@ function unmatch(key){
 }
 
 const GUESSNAME={card:"a card",bank:"a bank account",asset:"an investment account",loan:"a loan"};
-function acctHTML(){
-  const list=(S.meta.acctList||[]);
-  if(!list.length) return `<div class="hint">Check the card once and the accounts on your
+/* v88 — the picker is split in two by where an account has been filed. Assets and
+   loans are listed under Asset info, everything else under Bank info, so the group
+   an account belongs to is the group it appears in. A row is never rendered twice:
+   two copies with the same data-id would both answer to wireAcct and only one of
+   them would light up. Tapping a role moves the row across instead of redrawing
+   the panel, which would throw away the scroll position on a list this long. */
+const ASSETROLE=r=>r==="asset"||r==="loan";
+function acctHTML(group){
+  const asset=group==="asset";
+  const list=(S.meta.acctList||[]).filter(a=>ASSETROLE(acctRole(a.id))===asset);
+  const any=(S.meta.acctList||[]).length;
+  if(!any) return asset?"":`<div class="hint">Check the card once and the accounts on your
     SimpleFIN token will be listed here.</div>`;
-  const fresh=newAccts();
-  return `${fresh.length?`<div class="flag bad"><div class="ft">${
-      fresh.length===1?"A new account showed up":fresh.length+" new accounts showed up"}</div>
-    <div class="fb">Until you say what ${fresh.length===1?"it is":"they are"}, ${
-      fresh.length===1?"it feeds":"they feed"} nothing — no card row, no balance, no matching.
-    That's deliberate: a current account filed as a card turns your mortgage into a
-    credit-card charge.</div></div>`:""}
-    <div class="sh" style="margin-top:14px">What is each account?</div>
-    <div class="hint" style="margin-bottom:8px">Cards feed the credit-card row. A current
-      account feeds your real balance, and its transactions get matched against the lines
-      you've predicted. Anything else is best left on <b>Ignore</b> for now \u2014 a balance
-      counted here is a balance the ending figures walk away from.</div>
-    ${list.map(a=>`<div class="acctrow${acctRole(a.id)==="new"?" fresh":""}" data-id="${a.id}">
+  const fresh=asset?[]:newAccts();
+  const row=a=>`<div class="acctrow${acctRole(a.id)==="new"?" fresh":""}" data-id="${a.id}">
       <div class="an"><b>${a.name||"Account"}</b>
-        <span class="gn">${a.org||""}${typeof a.balance==="number"?" · "+money(a.balance):""}${
-          acctRole(a.id)==="new"&&acctGuess(a)?" · looks like "+GUESSNAME[acctGuess(a)]:""}</span></div>
+        <span class="gn">${a.org||""}${typeof a.balance==="number"?" \u00b7 "+money(a.balance):""}${
+          acctRole(a.id)==="new"&&acctGuess(a)?" \u00b7 looks like "+GUESSNAME[acctGuess(a)]:""}</span></div>
       <div class="ar">
         ${[["card","Card"],["bank","Bank"],["asset","Asset"],["loan","Loan"],["off","Ignore"]].map(([k,l])=>
           `<button class="mini role${acctRole(a.id)===k?" on":""}${
             acctRole(a.id)==="new"&&acctGuess(a)===k?" hint":""}" data-role="${k}">${l}</button>`).join("")}
-      </div></div>`).join("")}`;
+      </div></div>`;
+  const head=asset
+    ? `<div class="sh">Filed as an asset or a loan</div>
+       <div class="hint" style="margin-bottom:8px">Balance only \u2014 no transactions, no rows
+         in the month, no effect on the budget. Tap a different role to send one back.</div>`
+    : `${fresh.length?`<div class="flag bad"><div class="ft">${
+        fresh.length===1?"A new account showed up":fresh.length+" new accounts showed up"}</div>
+      <div class="fb">Until you say what ${fresh.length===1?"it is":"they are"}, ${
+        fresh.length===1?"it feeds":"they feed"} nothing — no card row, no balance, no matching.
+      That's deliberate: a current account filed as a card turns your mortgage into a
+      credit-card charge.</div></div>`:""}
+      <div class="sh" style="margin-top:14px">What is each account?</div>
+      <div class="hint" style="margin-bottom:8px">Cards feed the credit-card row. A current
+        account feeds your real balance, and its transactions get matched against the lines
+        you've predicted. Anything else is best left on <b>Ignore</b> for now \u2014 a balance
+        counted here is a balance the ending figures walk away from.</div>`;
+  /* The empty line is rendered either way and shown or hidden as rows move, so a
+     list that empties out says so without the panel being rebuilt. */
+  return `${head}<div id="acctList_${asset?"asset":"money"}">${list.map(row).join("")}</div>
+    <div class="hint" id="acctEmpty_${asset?"asset":"money"}" style="opacity:.7;display:${
+      list.length?"none":"block"}">${asset
+        ? "Nothing filed as an asset yet. Tap <b>Asset</b> on an account under Bank info."
+        : "Every account is filed as an asset or a loan."}</div>`;
+}
+function acctEmptyPaint(){
+  ["asset","money"].forEach(g=>{
+    const l=document.getElementById("acctList_"+g), e=document.getElementById("acctEmpty_"+g);
+    if(l&&e) e.style.display=l.querySelector(".acctrow")?"none":"block";
+  });
 }
 function wireAcct(){
   document.querySelectorAll(".acctrow .role").forEach(b=>{
@@ -3341,6 +3367,13 @@ function wireAcct(){
       const row=b.closest(".acctrow");
       setAcctRole(row.dataset.id,b.dataset.role);
       row.querySelectorAll(".role").forEach(x=>x.classList.toggle("on",x===b));
+      row.querySelectorAll(".role.hint").forEach(x=>x.classList.remove("hint"));
+      row.classList.remove("fresh");     /* it has been filed; stop shouting */
+      /* move it into the group it now belongs to */
+      const dest=document.getElementById(
+        ASSETROLE(b.dataset.role)?"acctList_asset":"acctList_money");
+      if(dest&&row.parentNode!==dest) dest.appendChild(row);
+      acctEmptyPaint();
       if(b.dataset.role!=="bank"){                 /* stop using a balance we no longer trust */
         const anyBank=(S.meta.acctList||[]).some(a=>acctRole(a.id)==="bank");
         if(!anyBank){ delete S.meta.liveBalance; S.bank=null; S.hits={}; }
@@ -6400,19 +6433,20 @@ function syncHTML(){
 
   /* The role picker is where an account becomes a bank account, so it lives
      under Bank info even though it files cards and assets from the same list. */
-  const bank=sfinOn()?acctHTML()
+  const bank=sfinOn()?acctHTML("money")
     :`<div class="hint">Nothing to file yet. Connect the card under <b>Card info</b>
       and every account on that token gets listed here to be told what it is.</div>`;
 
-  const assetB=liveLoanHTML()+handHTML();
+  const assetB=(sfinOn()?acctHTML("asset"):"")+liveLoanHTML()+handHTML();
 
   const fresh=(typeof newAccts==="function"?newAccts():[]).length;
   let grp="";
   grp+=accSec("card","Card info",
               sfinOn()?(lt!==null?`${money(-lt)} this cycle`:"connected"):"not connected",card);
+  const nMoney=(S.meta.acctList||[]).filter(a=>!ASSETROLE(acctRole(a.id))).length;
   grp+=accSec("bank","Bank info",
               fresh?`${fresh} still need${fresh===1?"s":""} a role`
-                   :sfinOn()?`${(S.meta.acctList||[]).length} account${(S.meta.acctList||[]).length===1?"":"s"} filed`
+                   :sfinOn()?`${nMoney} card${nMoney===1?"":"s"} and account${nMoney===1?"":"s"}`
                    :"nothing to file",bank);
   grp+=accSec("asset","Asset info",
               (()=>{ const n=assetLines().length;
