@@ -103,6 +103,33 @@ body.fitOn .navarr{display:none}
 .loandet{font-size:10.5px;letter-spacing:.04em;color:var(--dimmer);
   padding:0 12px 10px;margin-top:-6px;border-bottom:1px solid var(--line)}
 .card > .loandet:last-child{border-bottom:none}
+/* Folded sections in Sync. The panel is long enough that the thing you came for
+   is usually below the fold; this puts every part of it one tap from the top.
+   Child combinators throughout, because these nest one level deep and a
+   descendant selector would hide an open child inside a closed parent and then
+   fail to show it again. */
+.acc{border:1px solid var(--line);border-radius:6px;margin:10px 0;background:var(--panel);
+  overflow:hidden}
+.acc .acc{background:transparent;margin:8px 0}
+.acch{display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.acch .accl{flex:none;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.acch .accn{flex:1;min-width:0;text-align:right;font-size:10px;letter-spacing:.04em;
+  color:var(--dimmer);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acch .accx{flex:none;width:14px;text-align:center;font-size:15px;line-height:1;color:var(--cyan)}
+.acc.on>.acch{border-bottom:1px solid var(--line)}
+.acc.on>.acch .accl{color:var(--cyan)}
+.acc.on>.acch .accn{opacity:.55}
+.accb{display:none;padding:12px}
+.acc.on>.accb{display:block}
+.accb>.acc:first-child{margin-top:0}
+.accb>.acc:last-child{margin-bottom:0}
+.accb>.hint:first-child,.accb>.sh:first-child{margin-top:0}
+@media(max-width:420px){
+  .acch{padding:11px 10px;gap:8px}
+  .acch .accl{font-size:10px;letter-spacing:.1em}
+  .accb{padding:10px}
+}
 .handbox{border:1px solid var(--line2);border-radius:5px;padding:10px 12px;margin:10px 0}
 .handhead{display:flex;align-items:baseline;gap:10px;font-size:11px;
   letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
@@ -763,7 +790,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v87";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v88";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1313,6 +1340,14 @@ function allCats(){ return CATS.concat(S.meta.myCats||[]); }
 /* The built-in list is a starting point, not a fixture. "Andrea paycheck" and
    "Jacob paycheck" shipped hardcoded and could not be removed, which is wrong —
    the vocabulary should be whatever this household actually uses. Hidden rather
+   than deleted, so a keyword rule still pointing at one keeps working.
+
+   v88 — this comment had no closing marker. It was opened somewhere in v87 and
+   never shut, so everything down to the next closing marker twenty lines below
+   was commented out: hueOf(), catColor() and addLabel(). Every panel that colours a category
+   — Advanced, the category views, the label editor — threw ReferenceError the
+   moment it opened. The sentence above breaks off mid-thought at "Hidden rather"
+   and the ending is a reconstruction; the code below was never touched. */
 function hueOf(name){
   let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))|0;
   return Math.abs(h)%360;
@@ -4107,15 +4142,17 @@ function assetTip(){
   h+=`<div class="note">Click for each account on its own.</div>`;
   return h;
 }
-let assetEdit=false;
-/* The same fields as Sync, put where the number is. Someone looking at a figure
-   that's wrong shouldn't have to go and find the place it's kept. */
-const ORD=n=>{ const t=n%100; if(t>=11&&t<=13) return "th";
-  return ({1:"st",2:"nd",3:"rd"})[n%10]||"th"; };
-function loanEditHTML(){
-  const hand=handAll().filter(e=>e.kind==="loan");
+/* The "started at" figure for a loan the bridge fetches has nowhere else to be
+   typed — a connected account has a balance but no history. This used to sit in
+   the Assets pane; from v88 it sits under Sync with everything else. Hand-entered
+   loans are not here: handHTML() already edits those, and two forms writing the
+   same record is how they end up disagreeing. */
+function liveLoanHTML(){
   const live=(S.meta.acctList||[]).filter(a=>acctRole(String(a.id))==="loan");
-  let h=`<div class="hr" style="margin:14px 0 10px"></div>`;
+  if(!live.length) return "";
+  let h=`<div class="sh" style="margin-top:14px">Loans off the account</div>
+    <div class="hint">The bridge sends what's owed. Say what it started at and the
+      difference is the principal you've paid in.</div>`;
   live.forEach(a=>{
     const id=String(a.id), L=(S.meta.loan||{})[id]||{};
     h+=`<div class="handbox" data-lid="${id}">
@@ -4125,92 +4162,28 @@ function loanEditHTML(){
         <input class="lOrig" inputmode="decimal" value="${L.orig||""}" placeholder="455000"></div></div>
       <div class="crow"><button class="mini lSave">Save</button></div></div>`;
   });
-  hand.forEach(e=>{
-    h+=`<div class="handbox" data-hid="${e.id}">
-      <div class="handhead"><b>${esc(e.name||"Loan")}</b>
-        <span class="gn">typed ${fmtDate(e.at)}</span></div>
-      <div class="fg"><div class="f"><label>Name</label>
-        <input class="hName" value="${esc(e.name||"")}" placeholder="Mortgage"></div></div>
-      <div class="fg2">
-        <div class="f"><label>Started at</label>
-          <input class="hOrig" inputmode="decimal" value="${e.orig||""}" placeholder="455000"></div>
-        <div class="f"><label>Owed now</label>
-          <input class="hBal" inputmode="decimal" value="${
-            e.bal?(Math.round(e.bal*100)/100).toFixed(2):""}" placeholder="390087.49"></div>
-      </div>
-      <div class="fg2">
-        <div class="f"><label>Rate %</label>
-          <input class="hRate" inputmode="decimal" value="${e.rate||""}" placeholder="2.625"></div>
-        <div class="f"><label>Payment</label>
-          <input class="hPay" inputmode="decimal" value="${e.pay||""}" placeholder="1827.51"></div>
-      </div>
-      <div class="fg2">
-        <div class="f"><label>Extra a month</label>
-          <input class="hExtra" inputmode="decimal" value="${e.extra||""}" placeholder="90"></div>
-        <div class="f"><label>Due on the</label>
-          <input class="hDay" inputmode="numeric" value="${e.payDay||1}" placeholder="1"></div>
-      </div>
-      <div class="hint" style="margin:2px 0 8px">It writes the new balance in itself
-        on the ${e.payDay||1}${ORD(e.payDay||1)} of each month. Only touch <b>owed now</b>
-        when you're looking at a fresh figure from the servicer \u2014 doing so resets
-        it to that number and starts counting again from today.</div>
-      ${(e.log||[]).length?`<div class="hint" style="margin:2px 0 8px;opacity:.75">
-        Stepped: ${e.log.slice(-4).map(x=>fmtDate(x.d)+" \u2192 "+money(x.b)).join(" \u00b7 ")}</div>`:""}
-      <div class="crow"><button class="mini hSave2">Save</button>
-        <div style="flex:1"></div><button class="del hDel2">Remove</button></div></div>`;
-  });
-  if(!live.length&&!hand.length)
-    h+=`<div class="hint">Nothing to change here yet.</div>`;
   return h;
 }
-function wireLoanEdit(){
+function wireLiveLoan(){
   const num=v=>{ const n=parseFloat(String(v||"").replace(/[^0-9.\-]/g,"")); return isFinite(n)?n:0; };
-  const done=()=>{ save(); render(); openDrawer("assets"); toast("Saved"); };
   document.querySelectorAll("[data-lid]").forEach(box=>{
     const b=box.querySelector(".lSave"); if(!b) return;
     b.onclick=()=>{
       S.meta.loan=S.meta.loan||{};
       S.meta.loan[box.dataset.lid]={orig:num(box.querySelector(".lOrig").value)};
-      reReadAssets(); done();
-    };
-  });
-  document.querySelectorAll("[data-hid]").forEach(box=>{
-    const id=box.dataset.hid, g=c=>box.querySelector("."+c);
-    const sv=g("hSave2"); if(sv) sv.onclick=()=>{
-      const e=handAll().find(x=>x.id===id); if(!e) return;
-      const wasBal=Number(e.bal)||0, newBal=num(g("hBal").value);
-      e.name=(g("hName").value||"").trim();
-      e.orig=num(g("hOrig").value);
-      e.rate=num(g("hRate").value);
-      e.pay=num(g("hPay").value);
-      e.extra=num(g("hExtra").value);
-      e.payDay=Math.min(28,Math.max(1,num(g("hDay").value)||1));
-      /* Only restamp when the balance itself moved. Fixing a typo in the rate
-         shouldn't throw away months of projection that were correct. */
-      /* compared at cents, because the stored figure carries a fraction the
-         field never showed — otherwise saving an untouched form would look like
-         a correction and throw the anchor away */
-      if(Math.round(newBal*100)!==Math.round(wasBal*100)){
-        e.bal=newBal; e.at=ymdLocal(new Date());
-        e.checked=e.at; e.auto=""; e.log=[];
-      }
-      reReadAssets(); done();
-    };
-    const dl=g("hDel2"); if(dl) dl.onclick=()=>{
-      S.meta.hand=handAll().filter(x=>x.id!==id);
-      reReadAssets(); done();
+      reReadAssets(); save(); render(); openDrawer("sync"); toast("Saved");
     };
   });
 }
 function wireAssets(){
-  const b=document.getElementById("aIncL");
-  if(b) b.onclick=()=>{
-    S.meta.assetsLoan = !loansCount();
+  /* Nothing to wire. The two buttons that lived here — "I need to change
+     something" and the counted-in-the-total toggle — were removed in v88.
+     Loans are always counted; the flag is healed on open for anyone whose saved
+     state still has it switched off, since there is no longer a way back on. */
+  if(S.meta.assetsLoan===false){
+    S.meta.assetsLoan=true;
     retotalAssets(); save(); render(); openDrawer("assets");
-  };
-  const e=document.getElementById("aEdit");
-  if(e) e.onclick=()=>{ assetEdit=!assetEdit; openDrawer("assets"); };
-  if(assetEdit) wireLoanEdit();
+  }
 }
 function assetsHTML(){
   const snap=S.meta.assets, live=assetLines();
@@ -4221,53 +4194,42 @@ function assetsHTML(){
       :" Mark an account as an Asset under Sync, then check the card once."}</div>`;
   }
   const all=snap.per.slice();
-  const rows=all.filter(r=>r.kind!=="loan").sort((a,b)=>b.balance-a.balance);
-  const loans=all.filter(r=>r.kind==="loan").sort((a,b)=>(b.paid||0)-(a.paid||0));
+  /* v88 — a loan is an ordinary row now. It used to sit in its own card below the
+     assets with all three figures shown and two buttons under it. What it started
+     at and what is still owed are edited under Sync, where every other account
+     setting already lives, so the pane no longer carries an editor of its own. */
+  const worth=r=>r.kind==="loan"
+    ?((r.paid===null||r.paid===undefined)?-1:r.paid)
+    :r.balance;
+  const rows=all.slice().sort((a,b)=>worth(b)-worth(a));
   const n=assetNext(), tue=n.getDay()===2;
   let h=`<div class="assetsum"><span class="al">Assets</span>
       <span class="av">${money(snap.total)}</span></div>
     <div class="sh">Read ${fmtDate(snap.day)} \u00b7 next ${tue?"Tuesday":"Monday"} ${fmtDate(ymdLocal(n))}</div>`;
   if(rows.length)
-    h+=`<div class="card">`+rows.map(r=>`<div class="assetrow"><span class="an">${esc(r.name)}${
-      r.org||!r.live?`<span class="ao">${esc(r.org||"")}${
-        r.org&&!r.live?" \u00b7 ":""}${!r.live?"typed in":""}</span>`:""}</span>
-      <span class="ab">${money(r.balance)}</span></div>`).join("")+`</div>`;
-  /* A loan gets all three figures shown, not just the one that counts, so the
-     subtraction is on the page and you can check it against a statement. */
-  if(loans.length){
-    h+=`<div class="sh" style="margin-top:16px">Paid into loans</div><div class="card">`;
-    h+=loans.map(r=>{
+    h+=`<div class="card">`+rows.map(r=>{
+      if(r.kind!=="loan")
+        return `<div class="assetrow"><span class="an">${esc(r.name)}${
+          r.org||!r.live?`<span class="ao">${esc(r.org||"")}${
+            r.org&&!r.live?" \u00b7 ":""}${!r.live?"typed in":""}</span>`:""}</span>
+          <span class="ab">${money(r.balance)}</span></div>`;
+      /* no original amount means no answer, not a large confident wrong one */
       if(r.paid===null||r.paid===undefined)
         return `<div class="assetrow"><span class="an">${esc(r.name)}
           <span class="ao">needs what it started at \u2014 set it under Sync</span></span>
           <span class="ab dim">\u2014</span></div>`;
-      return `<div class="assetrow"><span class="an">${esc(r.name)}${
-          r.org?`<span class="ao">${esc(r.org)}</span>`:""}</span>
-          <span class="ab">${money(r.paid)}</span></div>
-        <div class="loandet">started at ${money(r.orig)} \u00b7 ${money(r.balance)} still owed${
-          r.extra?` \u00b7 ${money(r.extra)} extra a month`:""}<br>${
-          r.proj
-            ? (r.auto
-                ? `stepped itself forward on ${fmtDate(r.auto)}${
-                    r.checked?` \u00b7 you last checked it ${fmtDate(r.checked)}`:""}`
-                : `waiting on the first payment after ${fmtDate(r.at)}`)
-            : r.live ? `read off the account`
-            : `typed ${fmtDate(r.at)}, and sitting still \u2014 add a rate and a payment to keep it moving`}${
-          r.drift!==null&&r.drift!==undefined&&r.drift>=6
-            ? `<br><span class="warn">${r.drift} payments since you last checked it against the
-               servicer \u2014 worth a look, escrow and payment changes are invisible to this.</span>`
-            : ""}</div>`;
-    }).join("");
-    h+=`</div>
-      <div class="crow"><button class="mini" id="aEdit">I need to change something</button>
-        <div style="flex:1"></div>
-        <button class="mini${loansCount()?" on":""}" id="aIncL">${
-        loansCount()?"Counted in the total":"Not in the total"}</button></div>
-      ${assetEdit?loanEditHTML():""}
-      <div class="hint">Principal paid is real money and a real fact, but it isn't
-        money you can spend. Tap above if you'd rather the headline figure stayed
-        investments only.</div>`;
-  }
+      /* The drift warning stays. Escrow changes, payment changes and
+         principal-only payments are all invisible to the projection, and this is
+         the only place that says so. */
+      return `<div class="assetrow"><span class="an">${esc(r.name)}
+          <span class="ao">principal accumulated so far</span></span>
+          <span class="ab">${money(r.paid)}</span></div>`
+        + (r.drift!==null&&r.drift!==undefined&&r.drift>=6
+            ? `<div class="loandet"><span class="warn">${r.drift} payments since you last
+               checked it against the servicer \u2014 worth a look, escrow and payment
+               changes are invisible to this.</span></div>`
+            : "");
+    }).join("")+`</div>`;
   /* Anything tagged since the reading is shown but not counted, because the
      total on the header is the reading and the two must not disagree. */
   const late=live.filter(a=>!all.some(r=>r.id===String(a.id)));
@@ -4286,8 +4248,7 @@ function assetsHTML(){
    front door. */
 function handHTML(){
   const list=handAll();
-  let h=`<div class="hr" style="margin:18px 0 12px"></div>
-    <div class="sh">Accounts that don't connect</div>
+  let h=`<div class="sh" style="margin-top:14px">Accounts that don't connect</div>
     <div class="hint">For anything the bridge can't reach. A typed balance feeds
       the Assets figure and nothing else \u2014 no transactions, no rows in the month.
       A loan only needs to know what it started at and what's left; the difference
@@ -6342,9 +6303,28 @@ function sfinPeekHTML(){
       second account. If one shows up, the app can split spending by person.</div>`;
   return h;
 }
+/* ---------- Sync, folded ---------------------------------------------------
+   Everything in this panel used to be one long scroll. It is the same content in
+   the same order, wrapped in sections that start closed. Which ones are open is
+   kept here rather than in S: it is a view state, it must not ride the gist to
+   another device, and it must not land on the undo stack. It survives the panel
+   re-rendering itself, which happens after almost every action in here, and
+   resets when the app is reloaded. */
+let syncOpen={};
+function accSec(id,label,note,body){
+  const on=!!syncOpen[id];
+  return `<div class="acc${on?" on":""}" data-acc="${id}">
+    <div class="acch"><span class="accl">${label}</span>
+      <span class="accn">${note||""}</span>
+      <span class="accx">${on?"\u2212":"+"}</span></div>
+    <div class="accb">${body}</div></div>`;
+}
 function syncHTML(){
   let h="";
   const loc=whereAmI();
+  /* This one is never folded. If the page can't reach GitHub from where it is
+     being served, nothing below it can work, and burying that behind a tap is
+     how someone spends ten minutes re-pasting a token that was always fine. */
   if(!loc.ok){
     h+=`<div class="flag bad"><div class="ft">Sync can't run from here</div><div class="fb">
       Right now this page is running as <b>${loc.what}</b>, and ${loc.why}. GitHub is unreachable no
@@ -6356,14 +6336,16 @@ function syncHTML(){
     h+=`<div class="flag good"><div class="ft">Good to go</div><div class="fb">
       Served from <b>${loc.what}</b> — outside connections are allowed here.</div></div>`;
   }
-  h+=`<div class="hint">Your numbers live in a <b>private</b> GitHub gist, so every device you set this up on sees the same budget. Nothing is public, and the token is kept out of the budget file — exporting an app copy never carries it along.</div>`;
+
+  /* ===== 1 · my personal info ============================================= */
+  let me=`<div class="hint">Your numbers live in a <b>private</b> GitHub gist, so every device you set this up on sees the same budget. Nothing is public, and the token is kept out of the budget file — exporting an app copy never carries it along.</div>`;
   if(!sync.token){
-    h+=`<div class="flag"><div class="ft">First time · make a token</div><div class="fb">
+    me+=`<div class="flag"><div class="ft">First time · make a token</div><div class="fb">
       On GitHub go to Settings → Developer settings → Personal access tokens → <b>Tokens (classic)</b>,
       generate one with only the <b>gist</b> box ticked, and paste it below. It's the only permission this needs —
       it can't touch your repos.</div></div>`;
   }
-  h+=`<div class="fg">
+  me+=`<div class="fg">
     <div class="f"><label>GitHub token</label><input id="sTok" type="password" placeholder="ghp_…" value="${sync.token?"••••••••••••":""}"></div>
   </div>
   <div class="fg">
@@ -6377,50 +6359,76 @@ function syncHTML(){
     ${sync.token?`<button class="del" id="sOff">Disconnect</button>`:""}
   </div>`;
   if(syncOn()){
-    h+=`<div class="flag good" style="margin-top:14px"><div class="ft">Connected</div><div class="fb">
+    me+=`<div class="flag good" style="margin-top:14px"><div class="ft">Connected</div><div class="fb">
       Loads on open, saves a few seconds after you stop typing. Gist <b>${sync.gistId.slice(0,10)}…</b><br>
       To add another device, open this page there and paste the same token and gist ID.</div></div>
       <div class="flag"><div class="ft">If two of you edit at once</div><div class="fb">
       Last save wins — but if the copy on GitHub is newer than the one this device started from, it stops and
       warns you instead of overwriting. Use <b>Pull now</b> to take theirs, or <b>Push now</b> twice to force yours.</div></div>`;
   }
+  h+=accSec("me","My personal info",
+            syncOn()?`gist ${sync.gistId.slice(0,8)}…`
+                    :sync.token?"token saved, no gist yet":"not set up yet",me);
+
+  /* ===== 2 · card, bank and assets ======================================== */
   const c=liveCycle(), lt=liveTotal();
-  h+=`<div class="hr" style="margin:18px 0 12px"></div>`;
-  h+=`<div class="hint">A live feed from your card, read-only. It fills in
+  let card=`<div class="hint">A live feed from your card, read-only. It fills in
     <b>${MFULL[parseYM(c.bill).m-1]} ${parseYM(c.bill).y}</b> as you spend —
     ${c.start} to ${c.end}. Every later month keeps its flat target.</div>`;
   if(!sfinOn()){
-    h+=`<div class="flag"><div class="ft">Connect the card</div><div class="fb">
+    card+=`<div class="flag"><div class="ft">Connect the card</div><div class="fb">
       Sign up at <b>beta-bridge.simplefin.org</b>, link the card, then make a setup token under
       Apps → New Connection and paste it below. It's read-only and works once.</div></div>
       <div class="fg"><div class="f"><label>Setup token</label>
       <input id="sfTok" type="password" placeholder="long string from the bridge"></div></div>
       <div class="crow"><button class="mini" id="sfConnect">Connect card</button></div>`;
   } else {
-    h+=`<div class="flag good"><div class="ft">Card connected</div><div class="fb">
+    card+=`<div class="flag good"><div class="ft">Card connected</div><div class="fb">
       ${lt!==null?`<b>${money(-lt)}</b> so far this cycle, across ${liveStmt().rows.length} charges.`
                  :"Nothing pulled yet."}
       ${sfin.lastPull?`<br>Last checked ${new Date(sfin.lastPull).toLocaleString()}.`:""}
       <br>Checks once an hour.</div></div>`;
-    if(sfin.lastErr) h+=`<div class="flag bad"><div class="ft">The bridge said</div><div class="fb">${sfin.lastErr}</div></div>`;
-    h+=`<div class="hint">${sfinLeft()} of ${SFIN_CAP} card checks left today.
+    if(sfin.lastErr) card+=`<div class="flag bad"><div class="ft">The bridge said</div><div class="fb">${sfin.lastErr}</div></div>`;
+    card+=`<div class="hint">${sfinLeft()} of ${SFIN_CAP} card checks left today.
         Most banks only refresh once a day, so this is plenty.</div>`;
-    h+=acctHTML();
-    h+=`<div class="crow"><button class="mini" id="sfPull">Check card now</button>
+    card+=`<div class="crow"><button class="mini" id="sfPull">Check card now</button>
         <button class="mini" id="sfPeek">Who spent it?</button>
         <div style="flex:1"></div><button class="del" id="sfOff">Disconnect card</button></div>
         <div class="flag" id="sfPeekBox" style="display:none"><div class="ft">What the bank actually sends</div>
         <div id="sfPeekBody"></div></div>`;
   }
-  h+=`<div class="hr" style="margin:18px 0 12px"></div>`;
-  h+=`<div class="hint">Buddy the Budget lands at 8pm, every day without fail, in
+
+  /* The role picker is where an account becomes a bank account, so it lives
+     under Bank info even though it files cards and assets from the same list. */
+  const bank=sfinOn()?acctHTML()
+    :`<div class="hint">Nothing to file yet. Connect the card under <b>Card info</b>
+      and every account on that token gets listed here to be told what it is.</div>`;
+
+  const assetB=liveLoanHTML()+handHTML();
+
+  const fresh=(typeof newAccts==="function"?newAccts():[]).length;
+  let grp="";
+  grp+=accSec("card","Card info",
+              sfinOn()?(lt!==null?`${money(-lt)} this cycle`:"connected"):"not connected",card);
+  grp+=accSec("bank","Bank info",
+              fresh?`${fresh} still need${fresh===1?"s":""} a role`
+                   :sfinOn()?`${(S.meta.acctList||[]).length} account${(S.meta.acctList||[]).length===1?"":"s"} filed`
+                   :"nothing to file",bank);
+  grp+=accSec("asset","Asset info",
+              (()=>{ const n=assetLines().length;
+                     return n?`${n} feeding the Assets figure`:"nothing typed in"; })(),assetB);
+  h+=accSec("money","My bank, card and asset info",
+            sfinOn()?"card, accounts, loans":"not connected",grp);
+
+  /* ===== 3 · communication =============================================== */
+  let nt=`<div class="hint">Buddy the Budget lands at 8pm, every day without fail, in
     whichever mood the card has earned, and always with the running total on the end.
     Opening the app replaces tonight's queued message with the latest numbers. If 8pm
     passes with nothing queued, the next time the app opens he sends it straight away.
     Stay away two days and he says so. The ${CYCLE_DAY}th gets its own announcement
     when the billing cycle turns over.</div>`;
   if(!ntfyOn()){
-    h+=`<div class="flag"><div class="ft">Set up the nudges</div><div class="fb">
+    nt+=`<div class="flag"><div class="ft">Set up the nudges</div><div class="fb">
       Install <b>ntfy</b> from the App Store on both phones, subscribe to the topic
       below, then save it here. Anyone who knows the topic gets the messages, so keep
       it long and don't post it anywhere.</div></div>
@@ -6429,7 +6437,7 @@ function syncHTML(){
       <div class="crow"><button class="mini" id="ntRoll">Roll me one</button>
       <button class="mini" id="ntSave">Save topic</button></div>`;
   } else {
-    h+=`<div class="flag good"><div class="ft">Buddy is on duty</div><div class="fb">
+    nt+=`<div class="flag good"><div class="ft">Buddy is on duty</div><div class="fb">
       <div class="topicline">Topic <code id="ntShow">${ntfy.topic}</code>
         <button class="mini" id="ntCopy">Copy</button></div>
       ${ntfy.lastSent?`Last nudge ${new Date(ntfy.lastSent).toLocaleString()}`
@@ -6439,10 +6447,10 @@ function syncHTML(){
           :"Nothing sent yet."}
       ${S.meta.lastNudge?`<br>Next one is due after ${S.meta.lastNudge} plus two days.`:""}
       </div></div>`;
-    if(ntfy.lastErr) h+=`<div class="flag bad"><div class="ft">ntfy said</div><div class="fb">${ntfy.lastErr}</div></div>`;
+    if(ntfy.lastErr) nt+=`<div class="flag bad"><div class="ft">ntfy said</div><div class="fb">${ntfy.lastErr}</div></div>`;
     const q=S.meta.buddyQ||{};
     const qk=Object.keys(q).sort();
-    if(qk.length) h+=`<div class="flag"><div class="ft">Queued at ntfy</div><div class="fb">${
+    if(qk.length) nt+=`<div class="flag"><div class="ft">Queued at ntfy</div><div class="fb">${
       qk.map(id=>{ const m=id.slice(9,11),dd=id.slice(11,13);
         const e=q[id], sg=typeof e==="string"?e:(e&&e.sig)||"?";
         return `${m}/${dd} ${e&&e.sentNow?"sent":"8pm"} \u2014 <b>${
@@ -6450,12 +6458,33 @@ function syncHTML(){
              + (e&&e.stuck?` <span class="gn">(couldn't be replaced — left as is)</span>`:"")
              + (e&&e.unsure?` <span class="gn">(send unconfirmed)</span>`:"");
       }).join("<br>")}</div></div>`;
-    h+=`<div class="crow"><button class="mini" id="ntTest">Send one now</button>
+    nt+=`<div class="crow"><button class="mini" id="ntTest">Send one now</button>
         <button class="mini" id="ntSched">Check the queue</button>
         <div style="flex:1"></div><button class="del" id="ntOff">Turn Buddy off</button></div>
         <div id="ntDiag"></div>`;
   }
-  h+=handHTML();
+
+  /* Nothing here is wired to anything. It is a placeholder on purpose: the
+     registration takes days to weeks and the app has no Twilio code in it yet. */
+  const tw=`<div class="flag"><div class="ft">Not built yet</div><div class="fb">
+      Nothing on this tab does anything. It's here so the paperwork and the code
+      aren't waiting on each other.</div></div>
+    <div class="hint">Sending a text through Twilio needs three things that don't
+      exist yet: <b>A2P 10DLC registration</b>, which US carriers require and which
+      takes days to weeks to clear; a Cloudflare Worker to send on a schedule,
+      because a phone that's asleep can't send its own 8pm nudge; and a decision
+      about length — Buddy runs about 300 characters, which is three SMS segments
+      and three times the per-message cost.</div>
+    <div class="hint"><b>Unregistered messages are filtered silently, not
+      rejected</b>, so the failure mode is texts that simply never arrive. ntfy
+      keeps running until this clears.</div>`;
+
+  let comms="";
+  comms+=accSec("ntfy","ntfy (legacy)",
+                ntfyOn()?(ntfy.lastSent?"on duty":"topic set"):"off",nt);
+  comms+=accSec("twilio","Twilio SMS","not built yet",tw);
+  h+=accSec("comms","My communication info",
+            ntfyOn()?"ntfy on · Twilio pending":"nothing set up",comms);
   return h;
 }
 function wireSync(){
@@ -6586,6 +6615,18 @@ function wireSync(){
   };
   wireAcct();
   wireHand();          /* v87 — these buttons rendered dead from v84 until now */
+  wireLiveLoan();      /* v88 — moved out of the Assets pane */
+  /* Folds are toggled in place rather than by re-rendering the panel: a redraw
+     would throw away a half-typed token. */
+  document.querySelectorAll("#dbody .acch").forEach(hd=>{
+    hd.onclick=()=>{
+      const box=hd.parentNode, id=box.dataset.acc;
+      syncOpen[id]=!syncOpen[id];
+      box.classList.toggle("on",!!syncOpen[id]);
+      const x=hd.querySelector(".accx");
+      if(x) x.textContent=syncOpen[id]?"\u2212":"+";
+    };
+  });
   const sfp=document.getElementById("sfPull");
   if(sfp) sfp.onclick=()=>sfinPull().then(()=>openDrawer("sync"));
   const sfo=document.getElementById("sfOff");
