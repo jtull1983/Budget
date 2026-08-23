@@ -65,8 +65,48 @@ button{cursor:pointer;background:none;border:none}
 @media(min-width:1101px){.navarr{display:inline-flex}}
 body.fitOn .navarr{display:none}
 @media(max-width:1100px){#btnFit{display:none}}
-.menubtn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
+/* v83 — no longer flex:1. It used to stretch across the whole row, which left
+   nowhere for the assets figure to sit and pushed Menu into the middle of the
+   header. Everything before the spacer now packs left at its natural width. */
+.menubtn{flex:0 1 auto;display:flex;align-items:center;justify-content:center;gap:8px;
   padding:11px 12px;font-size:12px;letter-spacing:.16em}
+/* takes the slack the Menu button used to, so the corner stays a corner whether
+   or not there are any asset accounts to show */
+.toprow2 .grow{flex:1 1 auto;min-width:0}
+.assets{flex:none;display:flex;align-items:center;gap:9px;cursor:pointer;
+  background:transparent;border:1px solid var(--line2);border-radius:4px;
+  padding:8px 13px;font:inherit;color:inherit}
+.assets:hover{border-color:var(--teal)}
+.assets .al{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.assets .av{font-size:13.5px;font-weight:600;color:var(--teal);white-space:nowrap}
+/* On a phone the row has no width to spare, so the label goes above the number
+   rather than beside it. */
+@media(max-width:1100px){
+  .assets{flex-direction:column;align-items:flex-end;gap:0;padding:5px 10px;line-height:1.25}
+  .assets .al{font-size:8.5px;letter-spacing:.1em}
+  .assets .av{font-size:13px}
+}
+.assetsum{display:flex;align-items:baseline;justify-content:space-between;
+  padding:2px 2px 10px}
+.assetsum .al{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.assetsum .av{font-size:26px;font-weight:600;color:var(--teal)}
+.assetrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:10px 12px;border-bottom:1px solid var(--line)}
+.assetrow:last-child{border-bottom:none}
+.assetrow .an{font-size:13px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.assetrow .ao{font-size:10px;letter-spacing:.08em;color:var(--dimmer)}
+.assetrow .ab{font-size:13.5px;font-weight:600;white-space:nowrap}
+.assetrow .ab.dim{color:var(--dimmer);font-weight:400}
+.loandet .warn{color:var(--amber,#e0a458)}
+.loandet{font-size:10.5px;letter-spacing:.04em;color:var(--dimmer);
+  padding:0 12px 10px;margin-top:-6px;border-bottom:1px solid var(--line)}
+.card > .loandet:last-child{border-bottom:none}
+.handbox{border:1px solid var(--line2);border-radius:5px;padding:10px 12px;margin:10px 0}
+.handhead{display:flex;align-items:baseline;gap:10px;font-size:11px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+.fg2{display:flex;gap:10px}
+.fg2 .f{flex:1;min-width:0}
+.mini.on{border-color:var(--teal);color:var(--teal)}
 .menubtn .car{font-style:normal;font-size:10px;transition:.18s;color:var(--dimmer)}
 .menubtn.open .car{transform:rotate(180deg);color:var(--teal)}
 .menubtn.open{color:var(--teal);border-color:var(--teal);background:#11262a}
@@ -680,6 +720,8 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn menubtn" id="btnMenu"><span>Menu</span><i class="car">▾</i></button>
     <div class="statuspill" id="statusPill"></div>
     <button class="btn navarr" id="btnRight" title="Forward a month">›</button>
+    <div class="grow"></div>
+    <button class="assets" id="btnAssets" hidden></button>
     <button class="btn" id="btnFit">See full year</button>
   </div>
   <div class="menupanel" id="menuPanel">
@@ -718,7 +760,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v80";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v86";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2064,6 +2106,8 @@ function render(anim,popTab){
     document.title=appT+" "+APP_V;
   }
 
+  if(rollLoans()) reReadAssets();
+  paintAssets();
   fitGrid(); localSave(); stampSaved();
   const cb=document.getElementById("btnCard");
   if(cb){ const st=cardBtnState(); cb.textContent=st.label;
@@ -2913,7 +2957,13 @@ function acctRole(id){
 function acctGuess(a){
   const bal=Number(a.balance);
   const n=(a.name||"").toLowerCase();
+  /* before the card test, because a HELOC and a credit line both say "credit"
+     while being nothing like a credit card */
+  if(/mortgage|heloc|home\s?equity|home\s?loan|auto\s?loan|car\s?loan|student\s?loan|\bloan\b|lien/.test(n)) return "loan";
   if(/credit|card|visa|mastercard|amex|venture|freedom|sapphire/.test(n)) return "card";
+  /* Checked before the savings patterns below, because "Roth IRA Savings" and
+     "Brokerage Cash" are investments wearing a savings word. */
+  if(/401\s?\(?k|\b403b?\b|\bira\b|roth|brokerage|invest|retire|pension|vanguard|fidelity|schwab|\bhsa\b|\b529\b|equity|portfolio/.test(n)) return "asset";
   /* v70 — savings IS the cash account. There is no separate checking to confuse it
      with, so guessing it into "bank" is right rather than dangerous. It is still only
      a guess, offered and never applied on its own. */
@@ -3175,7 +3225,7 @@ function unmatch(key){
   save(); render(); toast("Back to the predicted amount");
 }
 
-const GUESSNAME={card:"a card",bank:"a bank account"};
+const GUESSNAME={card:"a card",bank:"a bank account",asset:"an investment account",loan:"a loan"};
 function acctHTML(){
   const list=(S.meta.acctList||[]);
   if(!list.length) return `<div class="hint">Check the card once and the accounts on your
@@ -3197,7 +3247,7 @@ function acctHTML(){
         <span class="gn">${a.org||""}${typeof a.balance==="number"?" · "+money(a.balance):""}${
           acctRole(a.id)==="new"&&acctGuess(a)?" · looks like "+GUESSNAME[acctGuess(a)]:""}</span></div>
       <div class="ar">
-        ${[["card","Card"],["bank","Bank"],["off","Ignore"]].map(([k,l])=>
+        ${[["card","Card"],["bank","Bank"],["asset","Asset"],["loan","Loan"],["off","Ignore"]].map(([k,l])=>
           `<button class="mini role${acctRole(a.id)===k?" on":""}${
             acctRole(a.id)==="new"&&acctGuess(a)===k?" hint":""}" data-role="${k}">${l}</button>`).join("")}
       </div></div>`).join("")}`;
@@ -3214,7 +3264,10 @@ function wireAcct(){
       }
       save(); render();
       toast(b.dataset.role==="bank"?"Reading balance and transactions from that one"
-           :b.dataset.role==="card"?"Feeding the credit-card row":"Left alone");
+           :b.dataset.role==="card"?"Feeding the credit-card row"
+           :b.dataset.role==="asset"?"Counted in Assets \u2014 balance only, nothing else"
+           :b.dataset.role==="loan"?"Set what it started at in Assets to see principal paid"
+           :"Left alone");
       /* re-file straight away so nothing sits in the wrong place */
       if(!newAccts().length&&sfinLeft()>0) setTimeout(()=>sfinPull(false),300);
     };
@@ -3705,12 +3758,586 @@ function wireLineRemove(){
   };
 }
 
+/* ---------- loans, and accounts that don't connect -----------------------
+   A loan contributes one number worth having: the principal you've paid into
+   it. That's the original amount minus what you still owe, and both of those
+   are facts — no house valuation, no guessing, nothing that goes stale in a
+   way you can't see. */
+function handAll(){ return (S.meta.hand||[]); }
+/* Step a hand-entered loan balance forward from the day it was typed. Only runs
+   when a rate and a payment were given; without them the typed figure stands and
+   the pane says how old it is. Interest first, then the payment — same order the
+   servicer does it. */
+function amortFwd(bal,rate,pay,months,extra){
+  const r=(Number(rate)||0)/100/12;
+  let b=Number(bal)||0;
+  const p=(Number(pay)||0)+(Number(extra)||0);
+  if(!r||!p) return b;
+  for(let i=0;i<months&&b>0;i++){
+    /* Carried at full precision and only rounded for display, which is what the
+       servicer does — rounding the balance every month drifts a cent inside three
+       months and a few dollars over the life of the loan. Checked against a real
+       Truist schedule: it matches to the penny for as far as the schedule runs. */
+    const nxt=b+b*r-p;
+    if(nxt>=b) return b;                 /* payment doesn't cover interest — stop */
+    b=nxt;
+  }
+  return Math.max(0,b);
+}
+/* Payments land on a day of the month, not every 30 days. Counting calendar
+   months from whenever the balance happened to be typed gets it wrong by one
+   whenever the typing and the payment fall either side of the 1st — which is
+   most of the time, because you check the balance right after it posts. */
+function paymentsSince(atISO,payDay){
+  if(!atISO) return 0;
+  const a=new Date(atISO+"T12:00:00"); if(isNaN(a)) return 0;
+  const day=Math.min(28,Math.max(1,Number(payDay)||1));
+  const now=new Date();
+  let d=new Date(a.getFullYear(),a.getMonth(),day,12);
+  if(d<=a) d=new Date(a.getFullYear(),a.getMonth()+1,day,12);
+  let n=0;
+  while(d<=now&&n<600){ n++; d=new Date(d.getFullYear(),d.getMonth()+1,day,12); }
+  return n;
+}
+function monthsSince(iso){
+  if(!iso) return 0;
+  const a=new Date(iso+"T12:00:00"), b=new Date();
+  if(isNaN(a)) return 0;
+  let m=(b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth());
+  if(b.getDate()<a.getDate()) m--;
+  return Math.max(0,m);
+}
+function handLoanBal(e){
+  if(!e.rate||!e.pay) return Number(e.bal)||0;
+  return amortFwd(e.bal,e.rate,e.pay,paymentsSince(e.at,e.payDay),e.extra);
+}
+/* The date of the most recent payment that has landed since `at`. Null when
+   none has, which is the signal to leave the stored balance alone. */
+function lastPayOn(atISO,payDay){
+  const n=paymentsSince(atISO,payDay);
+  if(!n) return null;
+  const a=new Date(atISO+"T12:00:00");
+  const day=Math.min(28,Math.max(1,Number(payDay)||1));
+  let d=new Date(a.getFullYear(),a.getMonth(),day,12);
+  if(d<=a) d=new Date(a.getFullYear(),a.getMonth()+1,day,12);
+  return ymdLocal(new Date(d.getFullYear(),d.getMonth()+n-1,day,12));
+}
+/* Write the new balance in, once per payment date, instead of projecting an
+   ever-longer way from one fixed anchor. Same arithmetic either way, but the
+   stored figure is then never more than a month old, the pane can say plainly
+   when it last moved, and a wrong number is one month of drift rather than
+   several years of it.
+
+   The balance is kept at full precision on purpose. Rounding to cents on every
+   commit is a fresh rounding error 288 times over, and the servicer doesn't do
+   it — it carries the fraction and only rounds what it prints. The edit field
+   rounds for display so you never see the tail. */
+function rollLoans(){
+  let moved=0;
+  handAll().forEach(e=>{
+    if(e.kind!=="loan"||!e.rate||!e.pay) return;
+    const n=paymentsSince(e.at,e.payDay);
+    if(!n) return;
+    const on=lastPayOn(e.at,e.payDay);
+    if(!on) return;
+    const nb=amortFwd(e.bal,e.rate,e.pay,n,e.extra);
+    /* a short trail, so a figure that looks wrong can be traced back rather
+       than argued with */
+    e.log=(e.log||[]).concat([{d:on,b:Math.round(nb*100)/100,n:n}]).slice(-12);
+    e.bal=nb; e.at=on; e.auto=on;
+    moved++;
+  });
+  /* straight to storage rather than through save() — a background step nobody
+     wants sitting on the undo stack */
+  if(moved){ S.meta.savedAt=Date.now(); localSave(); schedulePush(); }
+  return moved;
+}
+/* how long since you last put a real figure in, rather than the app carrying
+   its own — escrow moves, payments change, and a projection can't see either */
+function loanDrift(e){
+  if(!e.checked) return null;
+  return paymentsSince(e.checked,e.payDay);
+}
+/* how far the typed figure has been carried, for the pane to own up to */
+function handLoanRun(e){
+  return (e.rate&&e.pay)?paymentsSince(e.at,e.payDay):0;
+}
+/* Everything that feeds the Assets figure, connected or typed, in one shape.
+   A loan's balance is taken as an absolute value: some institutions send a debt
+   back negative and some send it positive, and which one yours does is not worth
+   finding out the hard way. */
+function assetLines(){
+  const out=[];
+  (S.meta.acctList||[]).forEach(a=>{
+    const id=String(a.id), role=acctRole(id);
+    if(role==="asset")
+      out.push({id:id,name:a.name||"Account",org:a.org||"",kind:"asset",
+                live:true,bal:Number(a.balance)||0});
+    else if(role==="loan"){
+      const L=(S.meta.loan||{})[id]||{};
+      out.push({id:id,name:a.name||"Loan",org:a.org||"",kind:"loan",live:true,
+                bal:Math.abs(Number(a.balance)||0),orig:Number(L.orig)||0});
+    }
+  });
+  handAll().forEach(e=>{
+    if(e.kind==="loan")
+      out.push({id:e.id,name:e.name||"Loan",org:"",kind:"loan",live:false,at:e.at,
+                bal:handLoanBal(e),orig:Number(e.orig)||0,
+                proj:!!(e.rate&&e.pay),run:handLoanRun(e),extra:Number(e.extra)||0,
+                auto:e.auto||"",checked:e.checked||"",drift:loanDrift(e)});
+    else
+      out.push({id:e.id,name:e.name||"Account",org:"",kind:"asset",live:false,
+                at:e.at,bal:Number(e.bal)||0});
+  });
+  return out;
+}
+/* principal paid — never negative, and nothing at all until you've said what the
+   loan started at, because orig-minus-balance with orig at zero is a large
+   confident wrong answer */
+function linePaid(l){
+  if(l.kind!=="loan"||!l.orig) return null;
+  return Math.max(0,l.orig-l.bal);
+}
+function lineWorth(l){
+  return l.kind==="loan"?(linePaid(l)||0):l.bal;
+}
+function loansCount(){ return S.meta.assetsLoan!==false; }
+
+/* ---------- assets -------------------------------------------------------
+   A number you are meant to glance at, not watch. 401k and brokerage balances
+   move every day the market is open and none of that daily movement is a
+   decision you made, so the reading is taken once a week and then held. Watching
+   it tick is the failure mode, not the feature.
+
+   It is deliberately NOT part of the column arithmetic. An asset account feeds
+   this figure and nothing else — no transactions, no rows, no effect on the
+   month's bottom line. */
+function assetAccts(){
+  return (S.meta.acctList||[]).filter(a=>{
+    const r=acctRole(String(a.id)); return r==="asset"||r==="loan";
+  });
+}
+/* the date of the nth given weekday in a month, and of the last one. 0=Sun. */
+function nthDow(y,m,dow,n){
+  const first=new Date(y,m-1,1).getDay();
+  return 1+((dow-first+7)%7)+(n-1)*7;
+}
+function lastDow(y,m,dow){
+  const len=new Date(y,m,0).getDate();
+  return len-((new Date(y,m-1,len).getDay()-dow+7)%7);
+}
+/* Is this Monday one the US market is shut? Every closure that can land on a
+   Monday is computable from the calendar, so there is no table here to go stale
+   in 2029: four are defined AS a Monday, and the other four are fixed dates that
+   are observed on the Monday after when they fall on a Sunday. Good Friday and
+   Thanksgiving can never be a Monday and are left out on purpose. */
+function marketHolidayMon(y,m,d){
+  const sun=(mo,da)=>new Date(y,mo-1,da).getDay()===0;
+  if(m===1&&d===1) return "New Year's Day";
+  if(m===1&&d===2&&sun(1,1)) return "New Year's Day";
+  if(m===1&&d===nthDow(y,1,1,3)) return "Martin Luther King Jr. Day";
+  if(m===2&&d===nthDow(y,2,1,3)) return "Presidents' Day";
+  if(m===5&&d===lastDow(y,5,1)) return "Memorial Day";
+  if(m===6&&d===19) return "Juneteenth";
+  if(m===6&&d===20&&sun(6,19)) return "Juneteenth";
+  if(m===7&&d===4) return "Independence Day";
+  if(m===7&&d===5&&sun(7,4)) return "Independence Day";
+  if(m===9&&d===nthDow(y,9,1,1)) return "Labor Day";
+  if(m===12&&d===25) return "Christmas Day";
+  if(m===12&&d===26&&sun(12,25)) return "Christmas Day";
+  return null;
+}
+/* The reading day for whatever week `d` falls in: that week's Monday, or the
+   Tuesday after it when the market was shut. The point of moving it is that a
+   closed market means the balances have not changed — reading them on the
+   holiday would burn the week's reading on Friday's numbers. */
+function weekRead(d){
+  const m=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  m.setDate(m.getDate()-((m.getDay()+6)%7));        /* back to Monday */
+  if(marketHolidayMon(m.getFullYear(),m.getMonth()+1,m.getDate())) m.setDate(m.getDate()+1);
+  return m;
+}
+/* the most recent reading day that has actually arrived */
+function assetDue(d){
+  const now=d||new Date();
+  let r=weekRead(now);
+  if(ymdLocal(r)>ymdLocal(now)){                    /* this week's hasn't come yet */
+    const back=new Date(now); back.setDate(back.getDate()-7);
+    r=weekRead(back);
+  }
+  return ymdLocal(r);
+}
+/* and the next one, which is what the hover promises */
+function assetNext(d){
+  const now=d||new Date();
+  let r=weekRead(now);
+  if(ymdLocal(r)<=ymdLocal(now)){
+    const fwd=new Date(now); fwd.setDate(fwd.getDate()+7);
+    r=weekRead(fwd);
+  }
+  return r;
+}
+/* Take the week's reading, once. Guarded on the age of the balances themselves:
+   the reading day arriving is not the same as fresh numbers arriving, and
+   stamping Friday's figures as Monday's would freeze a stale total for a whole
+   week. If the card hasn't been checked yet, last week's reading stands — which
+   is the honest answer, because it hasn't updated. */
+function assetSnap(){
+  const due=assetDue();
+  const cur=S.meta.assets;
+  if(cur&&cur.day===due) return cur;
+  const lines=assetLines();
+  if(!lines.length) return cur||null;
+  /* The freshness gate only applies to accounts the bridge fetches. A typed
+     balance is as fresh as the day it was typed and doesn't wait on a pull —
+     otherwise someone with no SimpleFIN link would never get a reading at all. */
+  if(lines.some(l=>l.live)){
+    const at=Number(S.meta.acctListAt)||0;
+    if(!at||ymdLocal(new Date(at))<due) return cur||null;
+  }
+  const per=lines.map(l=>({id:l.id,name:l.name,org:l.org||"",kind:l.kind,live:!!l.live,
+                           balance:l.bal,orig:l.orig||0,paid:linePaid(l),
+                           proj:!!l.proj,run:l.run||0,extra:l.extra||0,at:l.at||"",
+                           auto:l.auto||"",checked:l.checked||"",drift:l.drift}));
+  const inc=loansCount();
+  S.meta.assets={day:due,at:Date.now(),per:per,incLoan:inc,
+                 total:per.reduce((s,x)=>s+(x.kind==="loan"
+                   ?(inc?(x.paid||0):0):x.balance),0)};
+  /* written straight rather than through save(), which would put a weekly
+     background reading on the undo stack for no one to ever want back */
+  S.meta.savedAt=Date.now(); localSave(); schedulePush();
+  return S.meta.assets;
+}
+/* Flipping whether loans count re-totals the reading in place rather than
+   waiting for next Monday — the balances haven't changed, only what you asked
+   to be shown. */
+/* Correcting a figure must show immediately. Waiting until Monday to reflect a
+   number you just fixed reads as the app ignoring you. The reading day is left
+   alone — this is the same week's reading, taken again off better numbers. */
+function reReadAssets(){
+  const lines=assetLines();
+  if(!lines.length) return;
+  const day=(S.meta.assets&&S.meta.assets.day)||assetDue();
+  const inc=loansCount();
+  const per=lines.map(l=>({id:l.id,name:l.name,org:l.org||"",kind:l.kind,live:!!l.live,
+                           balance:l.bal,orig:l.orig||0,paid:linePaid(l),
+                           proj:!!l.proj,run:l.run||0,extra:l.extra||0,at:l.at||"",
+                           auto:l.auto||"",checked:l.checked||"",drift:l.drift}));
+  S.meta.assets={day:day,at:Date.now(),per:per,incLoan:inc,
+                 total:per.reduce((s,x)=>s+(x.kind==="loan"
+                   ?(inc?(x.paid||0):0):x.balance),0)};
+}
+function retotalAssets(){
+  const a=S.meta.assets; if(!a||!a.per) return;
+  const inc=loansCount();
+  a.incLoan=inc;
+  a.total=a.per.reduce((s,x)=>s+(x.kind==="loan"?(inc?(x.paid||0):0):x.balance),0);
+}
+function paintAssets(){
+  const el=document.getElementById("btnAssets");
+  if(!el) return;
+  if(!assetLines().length){ el.hidden=true; return; }
+  const snap=assetSnap();
+  el.hidden=false;
+  el.innerHTML=`<span class="al">Assets</span><span class="av">${
+    snap?money(snap.total):"\u2014"}</span>`;
+}
+function assetTip(){
+  const n=assetNext(), tue=n.getDay()===2;
+  let why="";
+  if(tue){
+    const m=new Date(n); m.setDate(m.getDate()-1);
+    const h=marketHolidayMon(m.getFullYear(),m.getMonth()+1,m.getDate());
+    if(h) why=" \u2014 the market is shut Monday for "+h;
+  }
+  const snap=S.meta.assets;
+  let h=`<div class="tt">Assets</div>
+    <div class="td">updates next ${tue?"Tuesday":"Monday"}, ${fmtDate(ymdLocal(n))}${why}</div>`;
+  if(snap&&snap.day)
+    h+=`<div class="tr"><span>This reading</span><b>${fmtDate(snap.day)}</b></div>
+        <div class="tr"><span>Accounts</span><b>${snap.per.length}</b></div>`;
+  h+=`<div class="note">Click for each account on its own.</div>`;
+  return h;
+}
+let assetEdit=false;
+/* The same fields as Sync, put where the number is. Someone looking at a figure
+   that's wrong shouldn't have to go and find the place it's kept. */
+const ORD=n=>{ const t=n%100; if(t>=11&&t<=13) return "th";
+  return ({1:"st",2:"nd",3:"rd"})[n%10]||"th"; };
+function loanEditHTML(){
+  const hand=handAll().filter(e=>e.kind==="loan");
+  const live=(S.meta.acctList||[]).filter(a=>acctRole(String(a.id))==="loan");
+  let h=`<div class="hr" style="margin:14px 0 10px"></div>`;
+  live.forEach(a=>{
+    const id=String(a.id), L=(S.meta.loan||{})[id]||{};
+    h+=`<div class="handbox" data-lid="${id}">
+      <div class="handhead"><b>${esc(a.name||"Loan")}</b>
+        <span class="gn">off the account \u00b7 ${money(Math.abs(Number(a.balance)||0))} owed</span></div>
+      <div class="fg"><div class="f"><label>Started at</label>
+        <input class="lOrig" inputmode="decimal" value="${L.orig||""}" placeholder="455000"></div></div>
+      <div class="crow"><button class="mini lSave">Save</button></div></div>`;
+  });
+  hand.forEach(e=>{
+    h+=`<div class="handbox" data-hid="${e.id}">
+      <div class="handhead"><b>${esc(e.name||"Loan")}</b>
+        <span class="gn">typed ${fmtDate(e.at)}</span></div>
+      <div class="fg"><div class="f"><label>Name</label>
+        <input class="hName" value="${esc(e.name||"")}" placeholder="Mortgage"></div></div>
+      <div class="fg2">
+        <div class="f"><label>Started at</label>
+          <input class="hOrig" inputmode="decimal" value="${e.orig||""}" placeholder="455000"></div>
+        <div class="f"><label>Owed now</label>
+          <input class="hBal" inputmode="decimal" value="${
+            e.bal?(Math.round(e.bal*100)/100).toFixed(2):""}" placeholder="390087.49"></div>
+      </div>
+      <div class="fg2">
+        <div class="f"><label>Rate %</label>
+          <input class="hRate" inputmode="decimal" value="${e.rate||""}" placeholder="2.625"></div>
+        <div class="f"><label>Payment</label>
+          <input class="hPay" inputmode="decimal" value="${e.pay||""}" placeholder="1827.51"></div>
+      </div>
+      <div class="fg2">
+        <div class="f"><label>Extra a month</label>
+          <input class="hExtra" inputmode="decimal" value="${e.extra||""}" placeholder="90"></div>
+        <div class="f"><label>Due on the</label>
+          <input class="hDay" inputmode="numeric" value="${e.payDay||1}" placeholder="1"></div>
+      </div>
+      <div class="hint" style="margin:2px 0 8px">It writes the new balance in itself
+        on the ${e.payDay||1}${ORD(e.payDay||1)} of each month. Only touch <b>owed now</b>
+        when you're looking at a fresh figure from the servicer \u2014 doing so resets
+        it to that number and starts counting again from today.</div>
+      ${(e.log||[]).length?`<div class="hint" style="margin:2px 0 8px;opacity:.75">
+        Stepped: ${e.log.slice(-4).map(x=>fmtDate(x.d)+" \u2192 "+money(x.b)).join(" \u00b7 ")}</div>`:""}
+      <div class="crow"><button class="mini hSave2">Save</button>
+        <div style="flex:1"></div><button class="del hDel2">Remove</button></div></div>`;
+  });
+  if(!live.length&&!hand.length)
+    h+=`<div class="hint">Nothing to change here yet.</div>`;
+  return h;
+}
+function wireLoanEdit(){
+  const num=v=>{ const n=parseFloat(String(v||"").replace(/[^0-9.\-]/g,"")); return isFinite(n)?n:0; };
+  const done=()=>{ save(); render(); openDrawer("assets"); toast("Saved"); };
+  document.querySelectorAll("[data-lid]").forEach(box=>{
+    const b=box.querySelector(".lSave"); if(!b) return;
+    b.onclick=()=>{
+      S.meta.loan=S.meta.loan||{};
+      S.meta.loan[box.dataset.lid]={orig:num(box.querySelector(".lOrig").value)};
+      reReadAssets(); done();
+    };
+  });
+  document.querySelectorAll("[data-hid]").forEach(box=>{
+    const id=box.dataset.hid, g=c=>box.querySelector("."+c);
+    const sv=g("hSave2"); if(sv) sv.onclick=()=>{
+      const e=handAll().find(x=>x.id===id); if(!e) return;
+      const wasBal=Number(e.bal)||0, newBal=num(g("hBal").value);
+      e.name=(g("hName").value||"").trim();
+      e.orig=num(g("hOrig").value);
+      e.rate=num(g("hRate").value);
+      e.pay=num(g("hPay").value);
+      e.extra=num(g("hExtra").value);
+      e.payDay=Math.min(28,Math.max(1,num(g("hDay").value)||1));
+      /* Only restamp when the balance itself moved. Fixing a typo in the rate
+         shouldn't throw away months of projection that were correct. */
+      /* compared at cents, because the stored figure carries a fraction the
+         field never showed — otherwise saving an untouched form would look like
+         a correction and throw the anchor away */
+      if(Math.round(newBal*100)!==Math.round(wasBal*100)){
+        e.bal=newBal; e.at=ymdLocal(new Date());
+        e.checked=e.at; e.auto=""; e.log=[];
+      }
+      reReadAssets(); done();
+    };
+    const dl=g("hDel2"); if(dl) dl.onclick=()=>{
+      S.meta.hand=handAll().filter(x=>x.id!==id);
+      reReadAssets(); done();
+    };
+  });
+}
+function wireAssets(){
+  const b=document.getElementById("aIncL");
+  if(b) b.onclick=()=>{
+    S.meta.assetsLoan = !loansCount();
+    retotalAssets(); save(); render(); openDrawer("assets");
+  };
+  const e=document.getElementById("aEdit");
+  if(e) e.onclick=()=>{ assetEdit=!assetEdit; openDrawer("assets"); };
+  if(assetEdit) wireLoanEdit();
+}
+function assetsHTML(){
+  const snap=S.meta.assets, live=assetLines();
+  if(!snap||!snap.per||!snap.per.length){
+    return `<div class="hint">No reading yet.${live.length
+      ?" The accounts are tagged \u2014 the first number lands on the next reading day, "
+        +fmtDate(ymdLocal(assetNext()))+"."
+      :" Mark an account as an Asset under Sync, then check the card once."}</div>`;
+  }
+  const all=snap.per.slice();
+  const rows=all.filter(r=>r.kind!=="loan").sort((a,b)=>b.balance-a.balance);
+  const loans=all.filter(r=>r.kind==="loan").sort((a,b)=>(b.paid||0)-(a.paid||0));
+  const n=assetNext(), tue=n.getDay()===2;
+  let h=`<div class="assetsum"><span class="al">Assets</span>
+      <span class="av">${money(snap.total)}</span></div>
+    <div class="sh">Read ${fmtDate(snap.day)} \u00b7 next ${tue?"Tuesday":"Monday"} ${fmtDate(ymdLocal(n))}</div>`;
+  if(rows.length)
+    h+=`<div class="card">`+rows.map(r=>`<div class="assetrow"><span class="an">${esc(r.name)}${
+      r.org||!r.live?`<span class="ao">${esc(r.org||"")}${
+        r.org&&!r.live?" \u00b7 ":""}${!r.live?"typed in":""}</span>`:""}</span>
+      <span class="ab">${money(r.balance)}</span></div>`).join("")+`</div>`;
+  /* A loan gets all three figures shown, not just the one that counts, so the
+     subtraction is on the page and you can check it against a statement. */
+  if(loans.length){
+    h+=`<div class="sh" style="margin-top:16px">Paid into loans</div><div class="card">`;
+    h+=loans.map(r=>{
+      if(r.paid===null||r.paid===undefined)
+        return `<div class="assetrow"><span class="an">${esc(r.name)}
+          <span class="ao">needs what it started at \u2014 set it under Sync</span></span>
+          <span class="ab dim">\u2014</span></div>`;
+      return `<div class="assetrow"><span class="an">${esc(r.name)}${
+          r.org?`<span class="ao">${esc(r.org)}</span>`:""}</span>
+          <span class="ab">${money(r.paid)}</span></div>
+        <div class="loandet">started at ${money(r.orig)} \u00b7 ${money(r.balance)} still owed${
+          r.extra?` \u00b7 ${money(r.extra)} extra a month`:""}<br>${
+          r.proj
+            ? (r.auto
+                ? `stepped itself forward on ${fmtDate(r.auto)}${
+                    r.checked?` \u00b7 you last checked it ${fmtDate(r.checked)}`:""}`
+                : `waiting on the first payment after ${fmtDate(r.at)}`)
+            : r.live ? `read off the account`
+            : `typed ${fmtDate(r.at)}, and sitting still \u2014 add a rate and a payment to keep it moving`}${
+          r.drift!==null&&r.drift!==undefined&&r.drift>=6
+            ? `<br><span class="warn">${r.drift} payments since you last checked it against the
+               servicer \u2014 worth a look, escrow and payment changes are invisible to this.</span>`
+            : ""}</div>`;
+    }).join("");
+    h+=`</div>
+      <div class="crow"><button class="mini" id="aEdit">I need to change something</button>
+        <div style="flex:1"></div>
+        <button class="mini${loansCount()?" on":""}" id="aIncL">${
+        loansCount()?"Counted in the total":"Not in the total"}</button></div>
+      ${assetEdit?loanEditHTML():""}
+      <div class="hint">Principal paid is real money and a real fact, but it isn't
+        money you can spend. Tap above if you'd rather the headline figure stayed
+        investments only.</div>`;
+  }
+  /* Anything tagged since the reading is shown but not counted, because the
+     total on the header is the reading and the two must not disagree. */
+  const late=live.filter(a=>!all.some(r=>r.id===String(a.id)));
+  if(late.length)
+    h+=`<div class="hint">${late.length===1?"One account was":late.length+" accounts were"}
+      tagged after this reading \u2014 ${late.map(a=>esc(a.name)).join(", ")}.
+      ${late.length===1?"It joins":"They join"} the total on ${fmtDate(ymdLocal(n))}.</div>`;
+  h+=`<div class="hint">These feed this number and nothing else. No transactions,
+      no rows in the month, no effect on the budget.</div>`;
+  return h;
+}
+
+/* ---------- accounts you type in yourself --------------------------------
+   Sits at the bottom of Sync because it belongs with the other plumbing, and
+   because most accounts should be connected — this is the fallback, not the
+   front door. */
+function handHTML(){
+  const list=handAll();
+  let h=`<div class="hr" style="margin:18px 0 12px"></div>
+    <div class="sh">Accounts that don't connect</div>
+    <div class="hint">For anything the bridge can't reach. A typed balance feeds
+      the Assets figure and nothing else \u2014 no transactions, no rows in the month.
+      A loan only needs to know what it started at and what's left; the difference
+      is the principal you've paid in. Give it a rate and a payment as well and it
+      keeps itself moving between the times you check.</div>`;
+  if(!list.length) h+=`<div class="hint" style="opacity:.7">Nothing typed in yet.</div>`;
+  list.forEach(e=>{
+    const loan=e.kind==="loan";
+    h+=`<div class="handbox" data-id="${e.id}">
+      <div class="handhead"><b>${loan?"Loan":"Account"}</b>
+        ${e.at?`<span class="gn">set ${fmtDate(e.at)}</span>`:""}</div>
+      <div class="fg"><div class="f"><label>Name</label>
+        <input class="hName" value="${esc(e.name||"")}" placeholder="${loan?"Mortgage":"401k"}"></div></div>`;
+    if(loan){
+      h+=`<div class="fg2">
+        <div class="f"><label>Started at</label>
+          <input class="hOrig" inputmode="decimal" value="${e.orig||""}" placeholder="450000"></div>
+        <div class="f"><label>Owed now</label>
+          <input class="hBal" inputmode="decimal" value="${
+            e.bal?(Math.round(e.bal*100)/100).toFixed(2):""}" placeholder="390087.49"></div>
+      </div>
+      <div class="fg2">
+        <div class="f"><label>Rate % (optional)</label>
+          <input class="hRate" inputmode="decimal" value="${e.rate||""}" placeholder="2.625"></div>
+        <div class="f"><label>Payment (optional)</label>
+          <input class="hPay" inputmode="decimal" value="${e.pay||""}" placeholder="1827.51"></div>
+      </div>
+      <div class="fg2">
+        <div class="f"><label>Extra a month</label>
+          <input class="hExtra" inputmode="decimal" value="${e.extra||""}" placeholder="90"></div>
+        <div class="f"><label>Due on the</label>
+          <input class="hDay" inputmode="numeric" value="${e.payDay||1}" placeholder="1"></div>
+      </div>`;
+      if(e.rate&&e.pay){
+        const m=handLoanRun(e);
+        h+=`<div class="hint" style="margin:2px 0 8px">${m
+          ?`Carried on ${m} payment${m===1?"":"s"} from what you typed`
+          :`No payment has landed since you typed it`} \u2014 <b>${money(handLoanBal(e))}</b>
+          owed today, <b>${money(Math.max(0,(Number(e.orig)||0)-handLoanBal(e)))}</b> paid in.</div>`;
+      } else if(e.orig&&e.bal){
+        h+=`<div class="hint" style="margin:2px 0 8px"><b>${
+          money(Math.max(0,Number(e.orig)-Number(e.bal)))}</b> paid in, as of what you typed.</div>`;
+      }
+    } else {
+      h+=`<div class="fg"><div class="f"><label>Balance</label>
+        <input class="hBal" inputmode="decimal" value="${e.bal||""}" placeholder="24000"></div></div>`;
+    }
+    h+=`<div class="crow"><button class="mini hSave">Save</button>
+      <div style="flex:1"></div><button class="del hDel">Remove</button></div></div>`;
+  });
+  h+=`<div class="crow"><button class="mini" id="hAddA">+ Add an account</button>
+      <button class="mini" id="hAddL">+ Add a loan</button></div>`;
+  return h;
+}
+function wireHand(){
+  const num=v=>{ const n=parseFloat(String(v||"").replace(/[^0-9.\-]/g,"")); return isFinite(n)?n:0; };
+  document.querySelectorAll(".handbox").forEach(box=>{
+    const id=box.dataset.id;
+    const grab=c=>box.querySelector("."+c);
+    const sv=grab("hSave"); if(sv) sv.onclick=()=>{
+      const e=handAll().find(x=>x.id===id); if(!e) return;
+      e.name=(grab("hName").value||"").trim();
+      const wasB=Number(e.bal)||0, newB=num(grab("hBal").value);
+      if(Math.round(newB*100)!==Math.round(wasB*100)){
+        e.bal=newB; e.checked=ymdLocal(new Date()); e.auto=""; e.log=[];
+      }
+      if(e.kind==="loan"){
+        e.orig=num(grab("hOrig").value);
+        e.rate=num(grab("hRate").value);
+        e.pay=num(grab("hPay").value);
+        e.extra=num(grab("hExtra").value);
+        e.payDay=Math.min(28,Math.max(1,num(grab("hDay").value)||1));
+      }
+      /* restamp: the figure is only as fresh as the moment it was entered, and
+         the projection counts months from here */
+      e.at=ymdLocal(new Date());
+      reReadAssets(); save(); render(); openDrawer("sync"); toast("Saved");
+    };
+    const dl=grab("hDel"); if(dl) dl.onclick=()=>{
+      S.meta.hand=handAll().filter(x=>x.id!==id);
+      save(); render(); openDrawer("sync"); toast("Removed");
+    };
+  });
+  const add=kind=>{
+    S.meta.hand=handAll().concat([{id:"h"+Date.now().toString(36),kind:kind,
+      name:"",bal:0,orig:0,rate:0,pay:0,extra:0,payDay:1,at:ymdLocal(new Date())}]);
+    save(); openDrawer("sync");
+  };
+  const a=document.getElementById("hAddA"); if(a) a.onclick=()=>add("asset");
+  const l=document.getElementById("hAddL"); if(l) l.onclick=()=>add("loan");
+}
+
 /* ---------- drawer ---------- */
 const drawer=document.getElementById("drawer"),scrim=document.getElementById("scrim");
 function openDrawer(w){
   const titles={rec:"Recurring items",ins:"Check-up",feed:"Feed me info",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
-                match:"Not seen on the account",bank:"Account activity",
+                match:"Not seen on the account",bank:"Account activity",assets:"Assets",
                 line:lineTitle(), tx:txPaneTitle(), add:addTitle(),
                 card:nav.cat?nav.cat:nav.month?prettySpend(nav.month):cardBtnState().label};
   document.getElementById("dtitle").textContent=titles[w];
@@ -3718,6 +4345,7 @@ function openDrawer(w){
     w==="rec"?recHTML():w==="feed"?feedHTML():
     w==="budget"?budgetHTML():w==="adv"?advHTML():w==="match"?matchHTML():w==="bank"?bankHTML():
     w==="line"?lineHTML():w==="tx"?txHTML():w==="add"?addHTML():
+    w==="assets"?assetsHTML():
     w==="sync"?syncHTML():w==="card"?(
       nav.cat?catHTML():nav.month?monthHTML():cardHTML()):insHTML();
   if(w==="rec") wireRec();
@@ -3728,6 +4356,7 @@ function openDrawer(w){
   else if(w==="tx") wireTx();
   else if(w==="add") wireAdd();
   else if(w==="line") wireLine();
+  else if(w==="assets") wireAssets();
   else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
   tabifyDrawer();
@@ -3763,6 +4392,22 @@ document.getElementById("btnMatch").onclick=()=>openDrawer("match");
 document.getElementById("btnBank").onclick=()=>openDrawer("bank");
 document.getElementById("btnAdv").onclick=()=>openDrawer("adv");
 document.getElementById("btnCard").onclick=()=>{ nav={month:null,cat:null}; openDrawer("card"); };
+{
+  const bA=document.getElementById("btnAssets");
+  if(bA){
+    bA.onclick=()=>{ hideTip(); openDrawer("assets"); };
+    /* Same 360ms settle the row tooltips use, so dragging the pointer across the
+       header on the way to something else doesn't flash a card at you. On a
+       phone FINE is false and the click is the whole interaction. */
+    bA.onmouseenter=e=>{
+      if(!FINE) return;
+      clearTimeout(tipTimer);
+      const ev={clientX:e.clientX,clientY:e.clientY,currentTarget:e.currentTarget};
+      tipTimer=setTimeout(()=>emitTip(assetTip(),ev),360);
+    };
+    bA.onmouseleave=hideTip;
+  }
+}
 document.getElementById("btnFeed").onclick=()=>{ feedDraft=null; openDrawer("feed"); };
 document.getElementById("stmtIn").addEventListener("change",async e=>{
   const files=e.target.files;
@@ -4269,6 +4914,17 @@ function wouldGut(mine,theirs){
 }
 /* nothing automatic may write until this device has actually heard from GitHub */
 let pulledOK=false;
+/* The stamp this device has already tried to heal from. Without it a push the
+   gut-guard refuses would be retried on every three-minute pull, toasting each
+   time; with it, one attempt per edit. */
+let healedAt=0;
+/* Is there work on this device that GitHub has never seen? savedAt only moves on
+   a real save(), so a local stamp ahead of the remote one is not a clock quirk —
+   it is an edit that never got pushed. */
+function needsHeal(local,remote,tried){
+  if(!local||local<=remote) return false;
+  return tried!==local;
+}
 
 async function syncPull(quiet){
   if(!syncOn()) return;
@@ -4283,7 +4939,17 @@ async function syncPull(quiet){
       if(!quiet) toast("Loaded the newer copy");
     } else {
       sync.lastPulled=ts(remote); saveSync(); pulledOK=true; keepBackup(remote);
-      setSync("ok", ts(S)>ts(remote) ? "local is newer" : "up to date");
+      /* "local is newer" was reported as an OK state and then nothing acted on it.
+         That is exactly the shape of the bug it was describing: an edit made on
+         the phone, stranded in that phone's localStorage, invisible everywhere
+         else, and quietly overwritten the moment another device saved. A pull
+         that lands here has FOUND the stranded edit, so it sends it. */
+      if(needsHeal(ts(S),ts(remote),healedAt)){
+        healedAt=ts(S);
+        setSync("busy","local is newer \u2014 sending\u2026");
+        const sent=await syncPush(false);
+        if(sent&&!quiet) toast("Sent this device\u2019s newer copy");
+      } else setSync("ok", ts(S)>ts(remote) ? "local is newer" : "up to date");
     }
   }catch(e){ setSync("err",netMsg(e)); }
 }
@@ -4325,7 +4991,16 @@ function schedulePush(){
   if(!syncOn()) return;
   clearTimeout(pushTimer);
   setSync("busy","pending…");
-  pushTimer=setTimeout(()=>syncPush(false),2500);   // settle before hitting the network
+  pushTimer=setTimeout(()=>{ pushTimer=null; syncPush(false); },2500);   // settle before hitting the network
+}
+/* The 2.5s settle is there so that dragging a slider doesn't fire twenty writes.
+   It also means a change made and then immediately swiped away from never leaves
+   the device: iOS suspends the page and the timer dies with it. So anything that
+   takes the page away cashes the timer in first. */
+function flushPush(){
+  if(!pushTimer) return;
+  clearTimeout(pushTimer); pushTimer=null;
+  syncPush(false);
 }
 
 
@@ -4409,10 +5084,17 @@ async function sfinPull(quiet){
     S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
       name:a.name||"Account", org:(a.org&&(a.org.name||a.org.domain))||"",
       balance:Number(a.balance)}));
+    /* when these balances were actually fetched — the weekly reading refuses to
+       stamp last week's numbers as this week's */
+    S.meta.acctListAt=Date.now();
     const bankRowsNew=[]; let bankBal=null;
     (j.accounts||[]).forEach(a=>{
       const role=acctRole(String(a.id||a.name));
       if(role==="off"||role==="new") return;      /* nothing until it's been named */
+      /* An asset account's balance was already captured into acctList above, and
+         that is its entire contribution. Its transactions are somebody else's
+         rebalancing, not your spending, and must never reach a statement. */
+      if(role==="asset"||role==="loan") return;
       if(role==="bank"){
         /* the account the bills actually leave from */
         if(!isNaN(Number(a.balance))) bankBal=(bankBal||0)+Number(a.balance);
@@ -4511,8 +5193,21 @@ const BUDDY_HI=[
  "heyyy\u2026 it's Buddy the Budget\u2026",
  "hiiii\u2026 ya boy Buddy the Budget\u2026",
  "hiiiii\u2026 Buddy the Budget, back again\u2026",
- "hiii\u2026 Buddy the Budget, reporting for duty\u2026"];
+ "hiii\u2026 Buddy the Budget, reporting for duty\u2026",
+ "evening\u2026 Buddy the Budget, as always\u2026",
+ "hiiii\u2026 it's me. it's Buddy. it's 8pm\u2026",
+ "knock knock\u2026 Buddy the Budget\u2026",
+ "heyyy\u2026 your least favorite notification here\u2026",
+ "hiiii\u2026 Buddy the Budget, unpaid and unbothered\u2026",
+ "yo\u2026 Buddy the Budget, on schedule as usual\u2026"];
 
+/* Eight moods, and the bank is the whole personality — there is no model behind
+   this, just text and thresholds, so the range has to live here. The loud buckets
+   carry ~100 lines each: at one message a night that's a season before a repeat,
+   and pickFresh keeps a chunk of the bank off the table on top of that.
+   Escalation runs early -> hot -> blown, with close sitting off to the side as
+   the tense one, because close means you are about to WIN and being screamed at
+   for nearly succeeding would be the wrong note. Threats stay cartoonish. */
 const BUDDY={
 silent:[
  "you haven't opened the app so I don't know wtf is going on \u{1F937}",
@@ -4524,7 +5219,27 @@ silent:[
  "hello? is this thing on? \u{1F4E2} the numbers are stale and so am I.",
  "y'all ghosted me. I have no idea what the card's been up to. probably nothing! probably.",
  "flying blind out here. open the app and tell me we're okay. \u{1F648}",
- "no data, no idea, no peace. someone open the app. \u{1F635}\u200D\u{1F4AB}"],
+ "no data, no idea, no peace. someone open the app. \u{1F635}\u200D\u{1F4AB}",
+ "I've been sitting in the dark holding a number from Tuesday. it's not my best work.",
+ "still nothing. I'm out here doing improv with a two-day-old figure.",
+ "y'all left me on read. I'm a notification. that's all I get.",
+ "this number has a birthday coming up, that's how old it is.",
+ "nobody's opened the app so I've been rounding my own guesses. bad system.",
+ "I am a lighthouse and nobody is sailing anywhere near me \u{1F3E0}",
+ "no check-in, no fresh feed, no clue. just me and this fossil of a total.",
+ "I could be wildly wrong right now and neither of us would know. fun!",
+ "the last thing I heard was two days ago and I've been chewing on it since.",
+ "open the app. that's it. that's the ask. I'm not even gonna roast you.",
+ "y'all disappeared and left me holding the bag. the bag is a stale number.",
+ "I don't know what's happening. I'm choosing to assume the best. it's a stretch.",
+ "reporting live from two days ago \u{1F4FB}",
+ "somebody check on the card. I can't. that's literally your job.",
+ "no news. old number. mild panic. standard evening.",
+ "this is a rerun. the original aired Tuesday. \u{1F4FA}",
+ "I'm not stale, YOU'RE stale. okay we're both stale.",
+ "still waiting. still holding. still guessing. \u{1F9CD}",
+ "the app is closed, the feed is quiet, and I am simply vibing incorrectly.",
+ "two days of silence. I've started narrating to myself. it's fine. it's fine."],
 nodata:[
  "no card feed tonight so no numbers, but I'm here. hi. \u{1F44B}",
  "the feed's gone quiet on me. can't tell y'all a thing. open the app and reconnect me?",
@@ -4533,7 +5248,29 @@ nodata:[
  "card feed's not talking. I'm still clocking in. that's the whole message.",
  "nothing from the card today. could be good! could be nothing at all! \u{1F937}",
  "8pm, reporting for duty, holding zero data. someone check the card connection.",
- "no feed, no numbers, no clue. but I said I'd text every day so here I am."],
+ "no feed, no numbers, no clue. but I said I'd text every day so here I am.",
+ "the feed ghosted me. I did not ghost you. remember that.",
+ "zero data, full commitment. that's the Buddy promise.",
+ "I've got nothing to report and I'm reporting it precisely on time.",
+ "the card connection is down. I am up. one of us is doing our job. \u{1F60C}",
+ "no feed tonight. this message is purely ceremonial.",
+ "can't see the card. can't see anything. still showed up though. \u{1F576}\uFE0F",
+ "the feed is empty and so is this message, spiritually.",
+ "nothing came through. either y'all spent zero or the pipe is broken. bet on the pipe.",
+ "no numbers. just me, standing here, being punctual about it.",
+ "feed's out. reconnect me when you get a second and I'll go back to being useful.",
+ "I have information for you: I have no information for you.",
+ "the card said nothing today. rude of it. anyway, hi.",
+ "blank feed, full heart, can't lose. \u{1FAF6}",
+ "no data. I refuse to make something up. that's integrity. \u{1F396}\uFE0F",
+ "checked the feed. the feed was a wall. I stared at the wall. here we are.",
+ "the connection dropped somewhere. not my end. probably. \u{1F440}",
+ "nothing to work with tonight. see you tomorrow, hopefully with numbers.",
+ "empty-handed but on time. my two defining traits.",
+ "no feed. this is the quietest I've ever been and I hate it.",
+ "someone reconnect the card so I can go back to being insufferable.",
+ "no numbers tonight. enjoy the silence. it won't last.",
+ "the feed is down and I'm just a guy with a schedule now."],
 cycle:[
  "ah yes, a new billing cycle has begun. new possibilities for savings or horrific debt await. it's like a choose your own adventure! \u{1F4D6}",
  "fresh cycle, clean slate, zero dollars spent. this is the best y'all will ever look. cherish it. \u2728",
@@ -4558,7 +5295,43 @@ cycle:[
  "new cycle. same cards. same people. different outcome? we'll find out together. \u{1F91D}",
  "and so the wheel turns \u{1F3A1} a new billing cycle rises from the ashes of the last.",
  "cycle one, day one. undefeated, unblemished, unspent. peak Buddy contentment. \u{1F60C}",
- "new billing cycle just dropped. no notes yet. give it time. I'm sure there'll be notes."],
+ "new billing cycle just dropped. no notes yet. give it time. I'm sure there'll be notes.",
+ "the counter is at zero. this is the most money y'all will have all month. \u{1F4B0}",
+ "brand new cycle. brand new chances to disappoint me. I'm rooting for you anyway.",
+ "the card has been resurrected with a full health bar. \u2764\uFE0F\u2764\uFE0F\u2764\uFE0F",
+ "new cycle. the slate is clean. so clean. please don't touch it with your hands.",
+ "fresh thirty days. no receipts. no regrets. yet. \u{1F9FE}",
+ "cycle rolled. I have wiped the whiteboard and I am holding a fresh marker. \u{1F58A}\uFE0F",
+ "we're at zero. peak potential. maximum Buddy optimism. enjoy it while it lasts.",
+ "new billing cycle. everyone's a saver on day one. \u{1F60C}",
+ "the previous cycle is now a historical document. this one's still a rumor.",
+ "day one. the card is a blank canvas. please don't paint a jet ski on it. \u{1F6A4}",
+ "here we go again \u{1F504} thirty days, one budget, two adults, infinite temptation.",
+ "new cycle. I have prepared roughly a hundred insults and I hope to use none of them.",
+ "the reset happened. y'all are back to zero and back in my good graces.",
+ "cycle flipped. clean books. calm Buddy. this is my favorite day of the month.",
+ "brand new cycle. statistically, the fourth is the safest day of your financial life.",
+ "the budget has been restocked \u{1F4E6} spend it like it has to last, because it does.",
+ "new cycle. old habits. we'll see who wins. \u{1F94A}",
+ "and we're off. thirty days of small decisions that add up to one big number.",
+ "cycle's fresh. so's my patience. both are finite.",
+ "day one of the new cycle and nobody has done anything wrong yet. historic.",
+ "the wheel has turned. the counter is zero. the ritual is complete. \u{1F52E}",
+ "new cycle! the card has no memory of what y'all did. I do, though. \u{1F440}",
+ "clean slate. thirty days. one job. don't spend it all in week one.",
+ "the budget's been refilled to the top. treat it like a tank of gas, not a fountain.",
+ "cycle reset. we ride again. \u{1F40E}",
+ "the new cycle is here and it is beautiful and untouched and doomed.",
+ "zero spent. maximum hope. this is the honeymoon phase and I'm enjoying it.",
+ "new cycle. y'all have never looked more financially responsible than right now.",
+ "the counter blinked back to zero and I felt something. \u{1FAE0}",
+ "day one. the card is asleep. let it sleep as long as you can. \u{1F634}",
+ "fresh cycle unlocked \u{1F513} previous save file deleted.",
+ "and the budget rose from the dead \u{1F9DF} thirty days to do it right.",
+ "new cycle. same me. hopefully a calmer month for both of us.",
+ "the slate is clean and I am cautiously, foolishly optimistic. \u{1F60A}",
+ "cycle turnover complete. that's it, that's the whole announcement. go be careful.",
+ "new billing cycle. let's make this one boring. boring is the goal. boring is beautiful."],
 good:[
  "y'all are doing really well with your budget. kinda the best little savers ever and def NOT some broke ass bitches.",
  "checked the card. it's behaving. y'all are basically financially responsible adults and I'm a little emotional about it.",
@@ -4589,38 +5362,78 @@ good:[
  "under budget AND it isn't even close. show-offs. \u{1F60E}",
  "financial serenity achieved \u{1F9D8} don't move. don't breathe. stay exactly like this.",
  "y'all could teach a class. 'Not Being Broke: by two people who somehow figured it out.'",
- "biiiiitch. thriving. that's the whole update, go about your day."],
-hot:[
- "okay so we need to fucking talk. the pace on this card is not a pace, it's a fall.",
- "WHOA. hi. no. put the card down. I'm not asking.",
- "y'all are spending like the cycle ends tomorrow. it does NOT end tomorrow.",
- "this is the part where I stop being nice about it. slow the hell down. \u{1F6A8}",
- "I did the math four times hoping I was wrong. I was not wrong. shit.",
- "we are not even done with this cycle and the number is already showing off. knock it off.",
- "absolutely not. no. I'm putting my little foot down. \u{1F45E}",
- "the card is on FIRE and nobody in this house has noticed. hello?? \u{1F525}",
- "y'all hear that? that's me screaming. that's the sound of me screaming.",
- "someone explain this to me like I'm a notification, because I am one, and I'm horrified.",
- "this pace is a whole ass problem. I said what I said.",
- "we are burning through this thing like it's got a coupon on it. it does not.",
- "damn. DAMN. what happened this week?? \u{1F4B8}",
- "I'm not mad, I'm doing division, and the division is being very rude to me.",
- "hard stop. eat what's in the fridge. the fridge has food. I've seen it.",
- "the budget called. it's scared. \u260E\uFE0F",
- "bad pace. bad! we don't do this. \u{1F6D1}",
- "this is your friendly neighborhood budget goblin telling you to cut it out.",
- "y'all are speedrunning the credit limit and I refuse to be the commentator.",
- "listen. LISTEN. there is a lot of month left and not a lot of budget left.",
- "somebody's been busy and my god does it show on this card.",
- "I want to be the fun one. y'all keep making me be the other one. \u{1F624}",
- "the vibes are expensive and the math is worse.",
- "hell no. lock the cards in a drawer. I'll wait. \u{1F512}",
- "we had a plan!! we HAD a plan!! \u{1F62D}",
- "at this rate the card's gonna need its own budget. sort it out.",
- "this is the intervention. you are in it right now. \u{1F198}",
- "I'd love to know what was so important. genuinely. write me a letter.",
- "shit's getting loose out here. rein it in before it reins itself in.",
- "y'all are trending in a direction and that direction is BROKE."],
+ "biiiiitch. thriving. that's the whole update, go about your day.",
+ "the card's just sitting there. unbothered. moisturized. in its lane. \u{1F9F4}",
+ "I checked. I double checked. I asked a friend. y'all are still fine.",
+ "nothing burning, nothing bleeding, nothing overdrafting. a perfect night.",
+ "y'all are so under budget I'm starting to think you forgot how to shop.",
+ "budget's fine. go outside. touch grass. it's free, which helps.",
+ "spending's boring tonight and boring is my love language. \u{1F49A}",
+ "if there were a Buddy Award for Not Doing Too Much, y'all would sweep it.",
+ "the numbers are behaving like they've been raised right.",
+ "quiet card. calm Buddy. balanced universe.",
+ "y'all are on pace to have money LEFT. leftover money. imagine.",
+ "I have nothing to yell about and I'm choosing to see that as a win.",
+ "still green. still good. still slightly suspicious, but good.",
+ "someone in this house has restraint and I'd like to shake their hand.",
+ "this is the budget equivalent of a full night's sleep. \u{1F634}",
+ "not a single charge tonight made me flinch. a rare gift.",
+ "y'all are handling this card like it's a rented tuxedo. respectful.",
+ "Xavier's gonna grow up thinking money just works out. because of y'all. \u{1F476}",
+ "budget's tight, vibes are loose, everything's exactly where it should be.",
+ "I keep waiting for the shoe to drop. it hasn't. I'm nervous but happy.",
+ "green across the board. Buddy is unemployed tonight and thrilled about it.",
+ "no fires, no floods, no forty dollar sandwich. good night all around.",
+ "y'all are cruising. genuinely cruising. windows down. \u{1F697}",
+ "this is what it looks like when people actually read their own budget app. wild.",
+ "healthy card, healthy household, healthy Buddy. we're all doing great.",
+ "spending is under control and so, for once, am I.",
+ "the vibes are fiscally responsible and it's honestly kind of romantic.",
+ "I would let y'all babysit my money. that's the highest compliment I have.",
+ "nothing to see here except two adults quietly winning.",
+ "y'all keep this up and I'm gonna start giving compliments unironically.",
+ "budget's in the green and I'm in a good mood. correlation? absolutely.",
+ "somebody said no to something this week and I felt it. thank you.",
+ "the card has been treated with dignity. I'm noting it in the file. \u{1F4C1}",
+ "on pace, on budget, on my good side. rare trifecta.",
+ "I ran the projection and it came back 'fine.' just fine. beautiful word.",
+ "no notes, no warnings, no threats. Buddy off duty. \u{1F60E}",
+ "y'all are spending like people who have plans for this money. love that.",
+ "the budget is thriving and I refuse to jinx it by saying more.",
+ "everything's clean. suspiciously clean. did somebody hide a receipt?",
+ "green light. all clear. carry on being irritatingly responsible.",
+ "I came in expecting damage and found a tidy little spreadsheet instead.",
+ "this card is having a spa day. minimal activity. cucumber slices. \u{1F957}",
+ "y'all are proof that budgets work if you just\u2026 don't spend the money.",
+ "money in, money mostly staying. that's the whole system, that's it.",
+ "not one panic-worthy line item. I looked hard. I wanted one.",
+ "y'all under budget again? at this point it's a personality trait.",
+ "the card's so quiet I checked twice to make sure it still exists.",
+ "financially speaking, this house is a well-run little operation.",
+ "I'd put this budget on a fridge. with a magnet. that's how proud I am. \u{1F9F2}",
+ "nothing's wrong. that's the update. sorry it isn't more exciting.",
+ "y'all made it another day without doing anything stupid. gold star.",
+ "the numbers are giving stability. giving grown-up. giving I-have-a-savings-account.",
+ "budget intact. dignity intact. Buddy calm. shocking, really.",
+ "you know what's sexy? margin. y'all have margin. \u{1F60F}",
+ "this cycle is aging like wine, not milk. good work.",
+ "y'all are so on track I could set a watch to this card.",
+ "I have prepared zero insults tonight. wasted preparation. worth it.",
+ "another quiet night on the card. my little heart is full. \u{1FA77}",
+ "responsible spending detected. deploying respect. \u{1FAE1}",
+ "the budget is not in danger. repeat: not in danger. as you were.",
+ "y'all are the only people I know who use a budget app and then LISTEN to it.",
+ "still comfortably in the green and I'm going to go brag about it.",
+ "look at this restraint. look at it. I could cry. \u{1F979}",
+ "no drama on the card tonight. we love an uneventful evening.",
+ "everything's on pace. everything's on budget. everything's fine. go to bed.",
+ "y'all made good choices today and the spreadsheet noticed.",
+ "I've got nothing. no roast, no warning, no smoke. just a good number.",
+ "the card behaved like it knows I'm watching. maybe it does. \u{1F440}",
+ "this is a boring update from a boring card in a well-run house. perfect.",
+ "budget's healthy enough that I'm gonna go ahead and take the night off.",
+ "y'all are winning and nobody's even clapping. so: clap clap clap. \u{1F44F}",
+ "money's behaving. Buddy's chilling. nothing further to report."],
 early:[
  "yooooo what the heck is going on. y'all should work for the government with that level of disregard for a budget! yowzers.",
  "it is EARLY. why does this card look like it's already been through a whole month??",
@@ -4651,38 +5464,178 @@ early:[
  "this early? this much? bold strategy, Cotton \u{1F3C8}",
  "y'all are burning through this cycle like it's a free trial. it is not a free trial.",
  "I've done the math on this pace and I don't want to talk about it \u{1F4C9}",
- "y'all really said 'budget? in THIS economy?' and then ignored it. bold."],
-blown:[
- "your cards could probably get stolen and they'd spend less money than y'all.",
- "budget's gone. blown clean past it. there are still days left in this month and I'm scared.",
- "I've seen natural disasters with better spending restraint.",
- "this isn't a budget anymore, it's a suggestion y'all ignored in writing.",
- "congrats! y'all beat the budget. by going THROUGH it. that's not how winning works.",
- "biiiiyoch!!! stop spending all your money! DAMN!",
- "a thief with your card would've been gentler. and probably guiltier.",
- "the number went past the line and just kept walking. didn't even look back.",
- "remember the budget? me neither apparently.",
- "this is less 'over budget' and more 'budget-adjacent memory.'",
- "I would say slow down but we're way past that. now I'm just watching.",
- "y'all didn't break the budget, y'all disintegrated it. molecularly.",
- "somewhere a financial advisor woke up sweating and doesn't know why.",
- "blew through it with days to spare. genuinely a record. horrible record.",
- "the budget called. it's not angry, it's disappointed. and also gone.",
- "at this point just tell me what we're celebrating so I can plan around it.",
- "I ran the numbers, then ran them again, then took a walk.",
- "this month is a crime scene and the card is the weapon.",
- "we are so far past the line the line needs binoculars.",
- "you muthafuckas are trading in your future for knickknacks n' shit. Lordy \u{1F629}",
- "shhhhhhheeeeeeiiiiit! Y'all are FUCKIN UP! \u{1F525}",
- "hi it's Buddy the Budget. this is my letter of resignation. I can't help you people. \u{1F4DD}",
- "the budget is not over. the budget is DECEASED. \u26B0\uFE0F",
- "y'all went past the limit, waved at it, and kept going. \u{1F44B}",
- "I have alerted no one because there is no one to alert. we are alone in this. \u{1F636}",
- "at what point does this stop being a mistake and start being a lifestyle \u{1F914}",
- "the card is smoking. literally, metaphorically, spiritually. \u{1F6AC}",
- "I'd stage an intervention but I'm a notification. this IS the intervention. \u{1F198}",
- "numbers this bad make me want to become a weather app instead \u26C8\uFE0F",
- "y'all spent the budget, the buffer, and my will to keep counting."],
+ "y'all really said 'budget? in THIS economy?' and then ignored it. bold.",
+ "we're warm. not on fire. warm. but I know how warm becomes fire.",
+ "this is the pace of somebody who thinks the cycle ends Friday. it does not.",
+ "easy. easy! nobody's in trouble yet but somebody's flirting with it.",
+ "the number's ahead of the calendar and that's never the fun direction.",
+ "I'm giving y'all the look. the one over the top of the glasses. \u{1F453}",
+ "not a crisis. a trajectory. and the trajectory is rude.",
+ "we're running warm out here. crack a window before it gets hot.",
+ "y'all are spending at a pace that assumes a raise nobody told me about.",
+ "still fixable. very fixable. but only if somebody fixes it.",
+ "this is the yellow light. you know what a yellow light means. \u{1F7E1}",
+ "the card's got a little pep in its step and I'd like it to sit down.",
+ "somebody's thumb has been very busy on some checkout buttons.",
+ "we are ahead of schedule in the worst possible category.",
+ "I'm not sounding an alarm. I'm just standing near the alarm. \u{1F6A8}",
+ "the pace says y'all are having a great time. the math says stop having it.",
+ "a little heavy this early. nothing a boring weekend won't fix.",
+ "y'all are drafting off last cycle's confidence and it's showing.",
+ "this is the part where a good month decides whether it wants to be one.",
+ "warm. warmer than I'd like. cooler than I'm about to get.",
+ "somebody bought something they'd been thinking about. I can tell.",
+ "we're spending like the budget has a bonus round. there's no bonus round.",
+ "not mad. genuinely not mad. just watching very, very closely. \u{1F440}",
+ "the trend line is doing a thing and I don't love the thing.",
+ "y'all are only a little ahead of pace, which is how everyone starts.",
+ "one loud week can eat a whole cycle. this is that week, so far.",
+ "I'd call this a soft warning. emphasis on warning. \u{1F4E2}",
+ "we've got a lot of month left and slightly less budget than we should.",
+ "somebody treated themselves. that's fine. once. \u{1F381}",
+ "the number is early and confident and I don't trust confident numbers.",
+ "y'all are running hot enough that I'm keeping the tab open.",
+ "still time to make this a boring cycle. boring is the goal. remember boring?",
+ "we're spending at a clip. a CLIP. I hate the word clip. \u{1F4CE}",
+ "the budget's not hurt. it's just been elbowed a bit. \u{1F91C}",
+ "I'm going to say this calmly one time: slow down.",
+ "y'all opened strong and I need y'all to open weaker next week.",
+ "this pace works if the month is nineteen days long. it is not.",
+ "hey. gentle. this is gentle. it will not stay gentle. \u{1FAE1}",
+ "the card's excited. cards shouldn't be excited. \u{1F4B3}",
+ "we are trending toward a conversation neither of us wants to have.",
+ "somebody's been having a nice time and the receipts agree.",
+ "early and eager. two words you never want next to a credit card.",
+ "not over. not close. just faster than the calendar, which is enough to say something.",
+ "y'all are ahead. that's good in a race and bad in a budget.",
+ "still green-ish. greenish. I'm squinting at it. \u{1F7E2}",
+ "the pace is up and I'm choosing my words carefully while I still can.",
+ "one more week like this and I stop being polite about it.",
+ "this is your early warning system, being early, and warning.",
+ "the math is fine. the direction of the math is not fine.",
+ "somebody made a decision this week that the card remembers vividly.",
+ "we're a touch hot. a touch. just enough for me to mention it. \u{1F321}\uFE0F",
+ "y'all are spending like next month's you will handle it. next month's you is worse.",
+ "the number crept up on me and I don't like being crept up on.",
+ "consider this a nudge. an actual nudge. I'm nudging. \u{1F449}",
+ "not sounding great, not sounding terrible. sounding like a warning.",
+ "we're pacing for trouble and there's still plenty of time to un-pace.",
+ "y'all are ahead of budget the way a car is ahead of a speed limit.",
+ "somebody's card is getting a workout and it hasn't asked for one. \u{1F3CB}\uFE0F",
+ "if this pace holds we're gonna have a very different chat in ten days.",
+ "the trajectory is bad, the total is fine, the window is open. use it.",
+ "y'all are burning daylight and dollars at about the same rate.",
+ "early-cycle overspend is the number one cause of late-cycle screaming. mine.",
+ "we're hot enough that I looked twice. not hot enough that I yelled. yet.",
+ "the budget is watching y'all right now and so am I. \u{1F440}\u{1F440}",
+ "somebody's got a taste for it this month. put the taste away.",
+ "this is fixable with one boring weekend. one. that's all I want.",
+ "y'all are moving fast and the month is moving slow. bad combo.",
+ "warm card, warm Buddy, and I get less fun as I heat up.",
+ "consider the brakes. I'm just saying the brakes exist. \u{1F6D1}",
+ "still early enough that this is advice and not a eulogy.",
+ "the pace is loud. the total isn't yet. let's keep it that way."],
+hot:[
+ "okay so we need to fucking talk. the pace on this card is not a pace, it's a fall.",
+ "WHOA. hi. no. put the card down. I'm not asking.",
+ "y'all are spending like the cycle ends tomorrow. it does NOT end tomorrow.",
+ "this is the part where I stop being nice about it. slow the hell down. \u{1F6A8}",
+ "I did the math four times hoping I was wrong. I was not wrong. shit.",
+ "we are not even done with this cycle and the number is already showing off. knock it off.",
+ "absolutely not. no. I'm putting my little foot down. \u{1F45E}",
+ "the card is on FIRE and nobody in this house has noticed. hello?? \u{1F525}",
+ "y'all hear that? that's me screaming. that's the sound of me screaming.",
+ "someone explain this to me like I'm a notification, because I am one, and I'm horrified.",
+ "this pace is a whole ass problem. I said what I said.",
+ "we are burning through this thing like it's got a coupon on it. it does not.",
+ "damn. DAMN. what happened this week?? \u{1F4B8}",
+ "I'm not mad, I'm doing division, and the division is being very rude to me.",
+ "hard stop. eat what's in the fridge. the fridge has food. I've seen it.",
+ "the budget called. it's scared. \u260E\uFE0F",
+ "bad pace. bad! we don't do this. \u{1F6D1}",
+ "this is your friendly neighborhood budget goblin telling you to cut it out.",
+ "y'all are speedrunning the credit limit and I refuse to be the commentator.",
+ "listen. LISTEN. there is a lot of month left and not a lot of budget left.",
+ "somebody's been busy and my god does it show on this card.",
+ "I want to be the fun one. y'all keep making me be the other one. \u{1F624}",
+ "the vibes are expensive and the math is worse.",
+ "hell no. lock the cards in a drawer. I'll wait. \u{1F512}",
+ "we had a plan!! we HAD a plan!! \u{1F62D}",
+ "at this rate the card's gonna need its own budget. sort it out.",
+ "this is the intervention. you are in it right now. \u{1F198}",
+ "I'd love to know what was so important. genuinely. write me a letter.",
+ "shit's getting loose out here. rein it in before it reins itself in.",
+ "y'all are trending in a direction and that direction is BROKE.",
+ "what in the ACTUAL hell is happening to this card. \u{1F92C}",
+ "I'm gonna need everyone to put their hands where I can see them. \u{1F91A}",
+ "this pace is criminal. I'd report it but I'm a notification, not a cop.",
+ "somebody in this house has a spending problem and it's whoever touched the card last.",
+ "no. NO. we are not doing this again. put it back. put it ALL back.",
+ "the math just looked at me and shook its damn head.",
+ "I'm one more charge away from becoming a completely different kind of app. \u{1F620}",
+ "y'all are cooking. and by cooking I mean setting the budget on fire. \u{1F525}",
+ "this is not spending, this is a hostage situation and the budget is the hostage.",
+ "somebody's thumb needs to be taken into custody. \u{1F44D}",
+ "I will find whoever did this. I know where you live. I'm on your phone. \u{1F4F1}",
+ "the pace is so bad I'm considering deleting myself out of spite.",
+ "y'all better start eating rice and beans before I start recommending it by name.",
+ "hard no. the answer is no. whatever it was, the answer was no.",
+ "I'm not gonna sugarcoat it because y'all already bought the sugar. \u{1F36C}",
+ "this card has done more this week than I have done in my entire existence.",
+ "somebody is going to have to explain this to me slowly and with a diagram.",
+ "the budget is not a suggestion box and yet here we are.",
+ "if this were a car y'all would be doing ninety in a school zone. \u{1F697}",
+ "cut it out. cut it OUT. I'm using my whole voice now. \u{1F4E2}",
+ "the numbers are so bad I had to sit down and I don't have legs.",
+ "y'all are gonna make me become mean and I am naturally a delight.",
+ "this is a five alarm situation and I'm all five alarms. \u{1F6A8}\u{1F6A8}\u{1F6A8}\u{1F6A8}\u{1F6A8}",
+ "put. the. card. down. I will start narrating your purchases out loud.",
+ "somebody had a WEEK and the rest of us are gonna pay for it.",
+ "I'm supposed to be a gentle little reminder app. look what y'all made me. \u{1F621}",
+ "this pace would embarrass a lottery winner.",
+ "the card is running so hot I can feel it through the API.",
+ "y'all are treating a credit limit like a target to hit. it's a wall. it's a WALL.",
+ "no more. seriously. I'm cutting the WiFi. I can't, but I'm thinking about it. \u{1F4F6}",
+ "somebody explain the concept of a month to whoever's holding the card.",
+ "we are going way too fast and I'm the only one wearing a seatbelt. \u{1F6A6}",
+ "this is the worst pace I've seen and I have seen every pace y'all have ever set.",
+ "I've started a list. your name is on it. it's a short list. \u{1F4CB}",
+ "y'all spent like the money was gonna expire. it wasn't. it's gone now though.",
+ "stop. just stop. sit in a chair. look at a wall. it's free. \u{1FA91}",
+ "I am watching this number climb in real time and it is deeply unpleasant.",
+ "the budget didn't do anything to deserve this.",
+ "at this rate I'm gonna show up at the door and personally hold the card. \u{1F6AA}",
+ "somebody's out here living large and the spreadsheet is picking up the tab.",
+ "this is a whole ass emergency dressed up as a normal Tuesday.",
+ "y'all are gonna blow through this thing with a week to spare and I'll be here for it. angrily.",
+ "the projection just made a noise I've never heard a projection make.",
+ "I'm gonna start reading your charges back to you one by one. don't test me.",
+ "somebody had fun and now everybody's got a problem. \u{1F643}",
+ "this card needs a nap, a lawyer, and an exorcism. \u{1FA84}",
+ "I don't get paid for this. I don't get paid at all. and I'm still here yelling.",
+ "the pace is nuclear and the fallout is next month's bill. \u2622\uFE0F",
+ "you know what? no. I'm not even gonna be funny about it. slow down.",
+ "somebody's gonna have to answer for this and I've got all night. \u{1F55B}",
+ "this is why I have trust issues and I'm a piece of software.",
+ "y'all are spending like there's a version of you next month who has more money. there isn't.",
+ "put the card in rice. that's not how it works. do it anyway. \u{1F35A}",
+ "I'm gonna repossess the vibes. that's the threat. the vibes are gone. \u{1F62E}\u200D\u{1F4A8}",
+ "the pace on this thing would make a hedge fund nervous.",
+ "somebody get this card away from whoever's holding it before I lose it.",
+ "y'all are moving so fast the receipts can't keep up. neither can I.",
+ "this is bad. I want to be clear that this is bad. it's bad. \u{1F534}",
+ "at this pace we blow the budget before the month even gets interesting.",
+ "I'm sounding every alarm I have and I only have the one, so imagine it louder. \u{1F514}",
+ "y'all are gonna be eating pantry pasta by the 25th and I'll have warned you.",
+ "somebody is going to have to look me in my nonexistent eyes about this.",
+ "the card is out of control and I'm the only adult in this conversation.",
+ "this pace has me composing a very stern follow-up message. it's already written.",
+ "y'all better hope I don't learn how to freeze cards. \u2744\uFE0F",
+ "this is the loudest I get before I get louder. \u{1F4E3}",
+ "somebody's living their best life on a card that has a memory and a limit.",
+ "I have never been this upset and I've been through a whole year with y'all.",
+ "shut it down. shut the whole operation down. effective immediately. \u{1F6D1}",
+ "the number went up while I was writing this. I watched it happen. \u{1F62C}"],
 close:[
  "y'all rock. you're just\u2026 the best\u2026 we are SO close to the finish line, don't blink.",
  "almost there!! a few more days of not buying stuff and we take this whole thing.",
@@ -4713,7 +5666,177 @@ close:[
  "photo finish energy \u{1F3C1} I'm not breathing until the 3rd.",
  "y'all have done the hard part. now do the boring part. don't spend. \u{1F6D1}",
  "so close I'm emotional \u{1F979} keep the cards in a drawer, or a safe, or the ocean.",
- "we're almost home. don't get cute now."]};
+ "we're almost home. don't get cute now.",
+ "do not get fancy. fancy is what kills people at the finish line.",
+ "we're in the red zone. one bad call and the whole cycle flips. \u{1F6A9}",
+ "hold. hold. HOLD. I'm gonna keep saying hold until the 3rd.",
+ "the margin is thin enough to see through. protect it. \u{1FA9F}",
+ "y'all are close enough that a gas station snack could matter. that's where we are.",
+ "this is the nervous part. I'm nervous. are you nervous? be a little nervous.",
+ "one boring weekend stands between y'all and a clean cycle. take the boring weekend.",
+ "we're on the edge and the edge is holding. barely. beautifully.",
+ "don't blow it in the last stretch. that's the whole message. don't blow it.",
+ "the finish line's in sight and I'm pacing back and forth over here. \u{1F6B6}",
+ "a few days. that's it. a few days of doing absolutely nothing exciting.",
+ "y'all are so close that I've started holding my breath at 8pm every night.",
+ "this is where discipline pays or doesn't. it's a coin and you're the flip. \u{1FA99}",
+ "no takeout. no impulse buys. no 'it's only twenty bucks.' not now.",
+ "we are grinding out the last few days and grinding is exactly right.",
+ "the budget's still standing. injured, but standing. \u{1FA79}",
+ "y'all are one Costco run from turning a win into a loss. avoid Costco. \u{1F6D2}",
+ "close ones are won by doing nothing. do nothing. do it well.",
+ "I've got both hands over my eyes and I'm peeking through my fingers. \u{1F648}",
+ "we are down to the wire and the wire is thin.",
+ "hold the line. eat the leftovers. we're nearly out of month. \u{1F35D}",
+ "this is the tense part and I need everyone to stay calm and stay broke.",
+ "so close. one careless tap and it's gone. guard the tap. \u{1F449}",
+ "y'all played a tight cycle. finish it tight. \u{1F3AF}",
+ "the number is right up against the line and just sitting there. keep it sitting.",
+ "a few more days of nothing. nothing is the goal. be nothing. \u{1F9D8}",
+ "we're too far in to lose it now. protect the lead. \u{1F6E1}\uFE0F",
+ "I'm watching the clock and the number and I don't like either of them.",
+ "y'all are winning by a hair. hairs are fragile. treat it gently.",
+ "no big moves. no clever ideas. just quiet days until the 3rd.",
+ "the cycle's almost over and the budget's almost intact. almost is the scary word.",
+ "hold steady. that's it. that's the entire strategy from here. \u{1F9CD}",
+ "we're at the point where a coffee is a decision. that's how close it is. \u2615",
+ "y'all are about to pull this off and I need everyone to sit very still.",
+ "this is a nail-biter and I don't have nails. \u{1F485}",
+ "close. brutally close. but still on the right side of the line.",
+ "one more quiet weekend and we're home free. one. \u{1F3E1}",
+ "the difference between a win and a loss right now is one dumb purchase.",
+ "don't celebrate yet. celebrating costs money. celebrate on the 4th. \u{1F389}",
+ "we're clinging on. it's undignified but it's working.",
+ "y'all have run a good cycle. don't let the last three days write the story.",
+ "eyes on the prize. the prize is not spending. it's a weird prize but it's ours.",
+ "so close the projection and the target are basically kissing. \u{1F48B}",
+ "hold on tight. the last few days always try something. \u{1F32A}\uFE0F",
+ "we're in the endgame now. the endgame is: buy nothing. \u{1F9E4}",
+ "y'all are inches from a clean cycle. don't trip on the doorstep. \u{1F6AA}",
+ "no heroics. no big swings. small, boring, quiet days. \u{1F91E}",
+ "the budget's hanging in there and so am I. barely. together.",
+ "we're close enough that I'm counting individual charges now. \u{1F9EE}",
+ "y'all made it this far by being careful. keep being annoyingly careful.",
+ "almost. so nearly. hold it together for a few more sunsets. \u{1F305}",
+ "this is the last stretch and the last stretch is where budgets die. not this one.",
+ "keep the cards cold. keep the fridge warm. we're almost there. \u{1F9CA}",
+ "y'all are running out of month faster than budget. that's the good direction. hold.",
+ "one careless night could undo three careful weeks. don't have the night.",
+ "I'm gripping something. I don't have hands. but I'm gripping it. \u{1F91B}",
+ "we're at the sharp end of the cycle. sharp ends cut. be careful. \u{1FA9A}",
+ "y'all are about to prove the budget works. don't ruin the demo.",
+ "so close it's making me superstitious. nobody say the word Amazon. \u{1F92B}",
+ "hold the line, eat the pantry, and I'll see y'all on the other side. \u{1F96B}",
+ "we're winning by a margin you could measure with a receipt. \u{1F9FE}",
+ "the last days are always the loudest. keep them quiet this time.",
+ "y'all are nearly clear. nearly. that word's doing a lot of work. \u{1F62C}",
+ "no spending. no exceptions. no cute ideas. a few more days. \u{1F507}",
+ "the number's holding steady and my whole personality depends on it staying that way.",
+ "close enough that a single takeout order decides the whole cycle. \u{1F961}",
+ "y'all are three quiet days from a clean win. take the quiet days.",
+ "this is the hardest part and it's also the easiest: just don't buy anything.",
+ "we're right at the edge and the edge is still holding. keep holding. \u{1F9D7}",
+ "so close I'm making noises. good noises. anxious noises. \u{1F62C}"],
+blown:[
+ "your cards could probably get stolen and they'd spend less money than y'all.",
+ "budget's gone. blown clean past it. there are still days left in this month and I'm scared.",
+ "I've seen natural disasters with better spending restraint.",
+ "this isn't a budget anymore, it's a suggestion y'all ignored in writing.",
+ "congrats! y'all beat the budget. by going THROUGH it. that's not how winning works.",
+ "biiiiyoch!!! stop spending all your money! DAMN!",
+ "a thief with your card would've been gentler. and probably guiltier.",
+ "the number went past the line and just kept walking. didn't even look back.",
+ "remember the budget? me neither apparently.",
+ "this is less 'over budget' and more 'budget-adjacent memory.'",
+ "I would say slow down but we're way past that. now I'm just watching.",
+ "y'all didn't break the budget, y'all disintegrated it. molecularly.",
+ "somewhere a financial advisor woke up sweating and doesn't know why.",
+ "blew through it with days to spare. genuinely a record. horrible record.",
+ "the budget called. it's not angry, it's disappointed. and also gone.",
+ "at this point just tell me what we're celebrating so I can plan around it.",
+ "I ran the numbers, then ran them again, then took a walk.",
+ "this month is a crime scene and the card is the weapon.",
+ "we are so far past the line the line needs binoculars.",
+ "you muthafuckas are trading in your future for knickknacks n' shit. Lordy \u{1F629}",
+ "shhhhhhheeeeeeiiiiit! Y'all are FUCKIN UP! \u{1F525}",
+ "hi it's Buddy the Budget. this is my letter of resignation. I can't help you people. \u{1F4DD}",
+ "the budget is not over. the budget is DECEASED. \u26B0\uFE0F",
+ "y'all went past the limit, waved at it, and kept going. \u{1F44B}",
+ "I have alerted no one because there is no one to alert. we are alone in this. \u{1F636}",
+ "at what point does this stop being a mistake and start being a lifestyle \u{1F914}",
+ "the card is smoking. literally, metaphorically, spiritually. \u{1F6AC}",
+ "I'd stage an intervention but I'm a notification. this IS the intervention. \u{1F198}",
+ "numbers this bad make me want to become a weather app instead \u26C8\uFE0F",
+ "y'all spent the budget, the buffer, and my will to keep counting.",
+ "well. WELL. the budget is a rumor now. a folk tale. \u{1F4D6}",
+ "I'm coming for the kneecaps. I don't have arms. I'm coming anyway. \u{1F9B5}",
+ "the line is behind us and getting smaller. wave goodbye. \u{1F44B}",
+ "somebody's gonna have to sell something. I'm taking suggestions. \u{1F3F7}\uFE0F",
+ "this is the worst thing I've ever had to type and I type this every month.",
+ "we blew it. blew it completely. blew it with STYLE, but blew it. \u{1F4A5}",
+ "I'm repossessing the WiFi. and the good pillow. and everyone's joy. \u{1F6CF}\uFE0F",
+ "the budget didn't stand a chance. it never did. RIP little guy. \u{1F5FF}",
+ "y'all treated a hard limit like a soft opinion and now look. \u{1F926}",
+ "at this point I'm just documenting the damage for the historical record. \u{1F4DC}",
+ "the card is over the line and doing a victory lap. horrifying. \u{1F3C3}",
+ "somebody is going to hear from me. repeatedly. every night at 8. \u{1F55B}",
+ "we're past the budget, past the buffer, and past the point of jokes. almost.",
+ "I'm gonna start showing up in your dreams. that's the threat. sleep well. \u{1F634}",
+ "the budget has left the chat. \u{1F6AA}",
+ "y'all set the money on fire and then complained about the smoke. \u{1F525}",
+ "this is beyond a spending problem. this is a spending HOBBY. \u{1F3A8}",
+ "the number is so far over I had to widen the column. actually widen it. \u{1F4CF}",
+ "I have run out of ways to say this politely and I stopped trying two charges ago.",
+ "y'all owe the budget an apology and the budget owes y'all nothing. \u{1F91D}",
+ "somewhere Xavier's college fund just felt a disturbance. \u{1F30C}",
+ "we didn't just cross the line, we bought a house on the other side of it. \u{1F3E0}",
+ "I'm putting a lien on the good snacks. effective immediately. \u{1F36B}",
+ "blown. gone. cooked. over. done. any other words? no? blown then.",
+ "the receipts are longer than the budget was. that's the whole problem. \u{1F9FE}",
+ "y'all beat a number that was designed to be unbeatable. congratulations, I guess. \u{1F3C6}",
+ "this is a financial oil spill and I'm the little bird covered in it. \u{1F426}",
+ "somebody's gonna eat beans. I've decided. beans for everyone. \u{1FAD8}",
+ "the budget is now a historical document. we study it. we do not follow it. \u{1F3DB}\uFE0F",
+ "I would be angrier but I've moved on to grief. \u{1F62D}",
+ "y'all made a budget and then made a completely different set of decisions.",
+ "we blew past it so fast the number's still catching up. \u{1F4A8}",
+ "at this rate I'm gonna have to start charging for emotional labor. \u{1F4B0}",
+ "the card is over budget and undeterred. that's the scary part.",
+ "somebody has some explaining to do and I've cleared my entire evening. \u{1FA91}",
+ "this is what happens when a limit meets people who don't believe in limits.",
+ "I'm gonna send this same message every night until something changes. try me. \u{1F501}",
+ "the budget's dead and I'm the one holding the shovel. \u26CF\uFE0F",
+ "y'all are over by enough that rounding doesn't help and I tried rounding.",
+ "if the budget had a lawyer we'd be in court right now. \u2696\uFE0F",
+ "somebody's card is out here writing checks the savings account can't cash. \u{1F3E6}",
+ "we are past the line, past the buffer, past the plan, past the point. \u{1F6A7}",
+ "I'm confiscating the good parking spot. that's all the power I have. \u{1F17F}\uFE0F",
+ "this month goes in the folder marked 'we don't talk about this one.' \u{1F4C1}",
+ "the budget was a fence. y'all drove through the fence. \u{1F6FB}",
+ "I've stopped counting and started praying. \u{1F64F}",
+ "blown budget, blown pace, blown everything. full sweep. \u{1F9F9}",
+ "y'all really looked at a hard number and said 'or what.' \u{1F643}",
+ "somebody's gonna be selling plasma by the 3rd and I hope it's whoever did this. \u{1FA78}",
+ "over budget with days left. that's the horror movie part, the days-left part. \u{1F480}",
+ "I'd cry but I'd just be crying money and we don't have any. \u{1F4A7}",
+ "the card is over the limit and completely unbothered. I'm bothered for both of us.",
+ "this budget got mugged and the suspect lives here. \u{1F575}\uFE0F",
+ "y'all are over by a margin that would fund a whole other household. \u{1F3D8}\uFE0F",
+ "I'm taking the thermostat. it's 62 in here now. figure it out. \u{1F976}",
+ "the number's over and still climbing and I'm still watching. we all suffer. \u{1F440}",
+ "this is a full financial faceplant and I have to report on it every night. \u{1F926}",
+ "blown clean past. no notes. only sirens. \u{1F6A8}",
+ "somebody had a great month and everybody else is gonna pay for it. \u{1F3AA}",
+ "y'all built a budget, admired it, and then ran it over. \u{1F697}",
+ "I want everyone to know that I warned them. I have the receipts. literally. \u{1F9FE}",
+ "at this point the budget is just a number I say to make myself feel better.",
+ "we're over. properly over. embarrassingly, spectacularly over. \u{1F386}",
+ "I'm gonna go sit in the dark and think about what y'all have done. \u{1F56F}\uFE0F",
+ "the budget is gone and it's not coming back and neither is that money. \u{1F91A}",
+ "y'all blew the budget and the only thing left to blow is my remaining patience.",
+ "over. so over. the kind of over that shows up in next month's math too. \u{1F4C8}",
+ "somebody get me a new budget, this one's been destroyed on impact. \u{1F4A5}",
+ "I've seen a lot of bad months. this one's got a real shot at the trophy. \u{1F3C5}"]};
 
 function monthLen(d){ return new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); }
 /* Where we are inside the BILLING cycle, which is not the calendar month. The
@@ -4783,19 +5906,218 @@ function buddyTail(b){
   }
   return out;
 }
-/* Random with a memory. Straight Math.random() repeats a line every few days and
-   it reads like a bug even when it isn't. The last dozen picks are off the table. */
-function pickFresh(arr,key){
-  if(!S.meta.buddySeen||typeof S.meta.buddySeen!=="object") S.meta.buddySeen={};
-  const seen=S.meta.buddySeen[key]||[];
-  let pool=arr.filter(t=>!seen.includes(t));
-  if(!pool.length) pool=arr;                       /* used them all — start over */
-  const out=pool[Math.floor(Math.random()*pool.length)];
-  S.meta.buddySeen[key]=[out].concat(seen).slice(0,Math.min(12,arr.length-1));
-  return out;
+/* Bump when the BANKS change shape. The seen-list holds positions now, and a
+   position means nothing against a different array — line 40 of the old `hot`
+   is line 40 of something else entirely. Rather than try to migrate it, a new
+   stamp throws the whole memory away once and starts clean. */
+const BANK_V="b2";
+function buddyMem(){
+  const m=S.meta;
+  if(m.buddySeenV!==BANK_V){ m.buddySeen={}; m.buddySeenV=BANK_V; }
+  if(!m.buddySeen||typeof m.buddySeen!=="object") m.buddySeen={};
+  return m.buddySeen;
 }
+/* Random with a memory. Straight Math.random() repeats a line every few days and
+   it reads like a bug even when it isn't.
+   Stores INDICES, not the lines themselves. The banks are ~100 entries of ~90
+   characters each and this list rides along inside the gist on every sync — a
+   memory deep enough to be worth having would have been kilobytes of duplicated
+   jokes. Depth scales with the bank: a third of it, floor of twelve, so the big
+   moods go a month without repeating and the small ones still rotate. */
+function pickFresh(arr,key){
+  if(!arr||!arr.length) return "";
+  const mem=buddyMem();
+  const seen=Array.isArray(mem[key])?mem[key]:[];
+  const all=arr.map((_,i)=>i);
+  let pool=all.filter(i=>seen.indexOf(i)<0);
+  if(!pool.length) pool=all;                       /* used them all — start over */
+  const pick=pool[Math.floor(Math.random()*pool.length)];
+  const keep=Math.min(arr.length-1,Math.max(12,Math.round(arr.length/3)));
+  mem[key]=[pick].concat(seen.filter(i=>i!==pick)).slice(0,keep);
+  return arr[pick];
+}
+/* The same idea over a list of short stable keys rather than positions, for
+   things whose candidate list changes night to night. */
+function pickFreshKey(keys,key){
+  if(!keys||!keys.length) return null;
+  const mem=buddyMem();
+  const seen=Array.isArray(mem[key])?mem[key]:[];
+  let pool=keys.filter(k=>seen.indexOf(k)<0);
+  if(!pool.length) pool=keys.slice();
+  const pick=pool[Math.floor(Math.random()*pool.length)];
+  mem[key]=[pick].concat(seen.filter(k=>k!==pick)).slice(0,4);
+  return pick;
+}
+/* ---------- Buddy's memory ------------------------------------------------
+   The line banks are jokes and the jokes are random. These are not. A fact is
+   one sentence computed from real rows — this cycle's live statement and the
+   closed ones behind it — and it is what makes a message sound like it has been
+   paying attention rather than shouting a total.
+
+   They are kept apart from the banks on purpose. A wrong number inside an insult
+   reads as a bug in the app; the insult can be random precisely because the fact
+   next to it is not. Every one of these returns null rather than guessing, so a
+   thin month simply gets no fact instead of a made-up one. */
+
+/* the cycle billed in month k, as dates. Same shape liveCycle() produces. */
+function cycleSpan(bill){
+  const e=parseYM(bill);
+  return {start:prevMonth(bill)+"-04",
+          end:String(e.y)+"-"+String(e.m).padStart(2,"0")+"-03"};
+}
+/* Date arithmetic on a YYYY-MM-DD string without going near toISOString(),
+   which converts to UTC and can hand back yesterday. Named apart from the existing
+   addDays(), which speaks in Date objects. */
+function shiftDay(ds,n){
+  const t=new Date(ds+"T12:00:00");
+  t.setDate(t.getDate()+n);
+  return t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")
+        +"-"+String(t.getDate()).padStart(2,"0");
+}
+/* what a closed statement had run up by day `day` of its own cycle */
+function spentByDay(bill,day){
+  const st=S.stmts&&S.stmts[bill];
+  if(!st||!st.rows||!st.rows.length) return null;
+  const cut=shiftDay(cycleSpan(bill).start,day-1);
+  return st.rows.filter(r=>r.date<=cut).reduce((a,r)=>a+r.amt,0);
+}
+
+/* The one that does the most work: you, this far in, against you, this far in,
+   last time. Both sides are measured at the same day of their own cycle, so a
+   31-day cycle and a 30-day one still compare honestly. */
+function factSameDay(){
+  const cyc=liveCycle(), lt=liveTotal();
+  if(lt===null) return null;
+  const {day}=cyclePos(new Date());
+  const then=spentByDay(prevMonth(cyc.bill),day);
+  if(then===null) return null;
+  const now=Math.abs(lt), th=Math.abs(then);
+  if(th<50) return null;                       /* nothing worth comparing to */
+  const diff=now-th;
+  if(Math.abs(diff)<th*0.08)
+    return "same day last cycle y'all were at "+money(th)+". dead even.";
+  return diff>0
+    ? "same day last cycle y'all were at "+money(th)+" \u2014 you're "+money(diff)+" past that."
+    : "same day last cycle y'all were at "+money(th)+" \u2014 you're "+money(-diff)+" under that.";
+}
+function factLastFinish(){
+  const st=S.stmts&&S.stmts[prevMonth(liveCycle().bill)];
+  if(!st||!st.rows||!st.rows.length) return null;
+  const tot=Math.abs(st.rows.reduce((a,r)=>a+r.amt,0));
+  if(tot<50) return null;
+  return "last cycle closed at "+money(tot)+", if that helps.";
+}
+/* How it started against how it's going. The split is the midpoint of the cycle
+   so far rather than a fixed day, which keeps both halves the same length and
+   stops the answer from swinging on the calendar. */
+function factStartVsNow(){
+  const st=liveStmt(); if(!st||!st.rows.length) return null;
+  const p=cyclePos(new Date());
+  const half=Math.floor(p.day/2);
+  if(half<4||p.day-half<4) return null;         /* too short to mean anything */
+  const cut=shiftDay(cycleSpan(liveCycle().bill).start,half-1);
+  const early=st.rows.filter(r=>r.date<=cut).reduce((a,r)=>a+r.amt,0);
+  const late=st.rows.reduce((a,r)=>a+r.amt,0)-early;
+  const rE=Math.abs(early)/half, rL=Math.abs(late)/(p.day-half);
+  if(rE<5&&rL<5) return null;
+  if(rL>rE*1.5)
+    return "y'all opened this cycle at "+money(rE)+" a day. you're at "+money(rL)+" a day now.";
+  if(rE>rL*1.5)
+    return "y'all opened at "+money(rE)+" a day and cooled to "+money(rL)+". that's a real turnaround.";
+  return null;
+}
+function factBiggest(){
+  const st=liveStmt(); if(!st||!st.rows.length) return null;
+  let big=null;
+  st.rows.forEach(r=>{ if(r.amt>0&&(!big||r.amt>big.amt)) big=r; });
+  if(!big||big.amt<40) return null;
+  const who=String(big.desc||"").trim().slice(0,26);
+  return "biggest single hit this cycle: "+money(big.amt)+(who?" at "+who:"")+".";
+}
+/* Days in a row with nothing on the card, counted back from yesterday — today is
+   excluded because the feed lags and an unposted charge would read as a clean day. */
+function factQuiet(){
+  const st=liveStmt(); if(!st) return null;
+  const days={}; st.rows.forEach(r=>{ if(r.amt>0) days[r.date]=1; });
+  const start=cycleSpan(liveCycle().bill).start;
+  const today=ymdLocal(new Date());
+  let n=0;
+  for(let i=1;i<=10;i++){
+    const d=shiftDay(today,-i);
+    if(d<start||days[d]) break;
+    n++;
+  }
+  if(n<3) return null;
+  return n+" days straight with nothing on the card. I noticed. \u{1F44F}";
+}
+function factTopCat(){
+  const b=stmtBreakdown(liveCycle().bill);
+  if(!b||!b.list.length) return null;
+  const cat=b.list[0][0], amt=b.list[0][1];
+  const tot=Math.abs(b.charged);
+  if(!tot||amt<40) return null;
+  const share=amt/tot;
+  /* A leader has to actually LEAD. A flat 25% across four categories is what an
+     even split looks like, not a category eating the cycle, and a bare 0.25 floor
+     announced it as news. So it must clear both a floor and its own even share. */
+  if(share<0.25||share<(1/b.list.length)*1.35) return null;
+  return (cat||"one category")+" is "+Math.round(share*100)+"% of this cycle on its own, "+money(amt)+".";
+}
+/* The date the current rate runs into the target. Only worth saying while it's
+   still ahead of you and still inside the cycle — past the line it's history,
+   and beyond the cycle it isn't going to happen. */
+function factCrossDate(){
+  const lt=liveTotal(); if(lt===null) return null;
+  const tgt=effTarget(liveCycle().spend); if(!tgt) return null;
+  const p=cyclePos(new Date());
+  const now=Math.abs(lt);
+  if(now>=tgt||p.day<5||p.left<=0) return null;
+  const rate=now/p.day; if(rate<=0) return null;
+  const to=Math.ceil((tgt-now)/rate);
+  if(to>p.left) return null;                    /* doesn't land inside the cycle */
+  const when=shiftDay(cycleSpan(liveCycle().bill).start,p.day+to-1);
+  return "at this rate y'all cross the line on "+prettyDate(when)
+        +", with "+(p.left-to)+" days still to pay for.";
+}
+
+/* Which facts suit which mood. Praise for a quiet week does not belong in a
+   message about being over the limit, and a projection of when you'll cross the
+   line is meaningless in a month where you're comfortably under it. */
+const FACTS=[{id:"same",fn:factSameDay},{id:"last",fn:factLastFinish},
+             {id:"start",fn:factStartVsNow},{id:"big",fn:factBiggest},
+             {id:"quiet",fn:factQuiet},{id:"cat",fn:factTopCat},
+             {id:"cross",fn:factCrossDate}];
+const FACT_FIT={good:["same","last","quiet","cat","big"],
+                early:["same","last","start","cross","cat","big"],
+                hot:["same","last","start","cross","cat","big"],
+                close:["same","last","cross","cat","big"],
+                blown:["same","last","start","cat","big"]};
+function buddyFact(b){
+  const fit=FACT_FIT[b]; if(!fit) return "";
+  const got=[];
+  FACTS.forEach(f=>{
+    if(fit.indexOf(f.id)<0) return;
+    let v=null;
+    /* a fact is a nicety; one that throws must never cost you the message */
+    try{ v=f.fn(); }catch(e){ v=null; }
+    if(v) got.push({id:f.id,text:v});
+  });
+  if(!got.length) return "";
+  /* Dedupe on the id, never the sentence. The text carries live dollar figures
+     that move every night, so string memory would think every fact was new and
+     hand you the same comparison a week running. */
+  const id=pickFreshKey(got.map(g=>g.id),"fact:"+b);
+  const hit=got.filter(g=>g.id===id)[0]||got[0];
+  return hit.text;
+}
+
+/* greeting, joke, number, memory. The fact goes last because it's the part worth
+   reading twice, and it's allowed to be missing — a first cycle with nothing
+   behind it just gets the first three. */
 function buddyLine(b){
-  return pickFresh(BUDDY_HI,"hi")+" "+pickFresh(BUDDY[b]||BUDDY.nodata,b)+buddyTail(b);
+  const f=buddyFact(b);
+  return pickFresh(BUDDY_HI,"hi")+" "+pickFresh(BUDDY[b]||BUDDY.nodata,b)
+        +buddyTail(b)+(f?" "+f:"");
 }
 const NUDGE_HOUR=20;                       /* everything lands at 8pm local */
 const ymdLocal=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")
@@ -4846,7 +6168,7 @@ const TAGS={good:"tada",early:"eyes",hot:"rotating_light",blown:"fire",
 /* Bump this whenever the WORDING changes shape. Without it, messages already
    sitting at ntfy keep the old format until the number happens to move — a build
    that adds something to every message would take a day to actually show up. */
-const NUDGE_FMT="pace-1";
+const NUDGE_FMT="pace-2";
 function nudgeSig(d){
   const b=nudgeBucket(d); if(!b) return null;
   const lt=liveTotal();
@@ -5085,6 +6407,7 @@ function syncHTML(){
         <div style="flex:1"></div><button class="del" id="ntOff">Turn Buddy off</button></div>
         <div id="ntDiag"></div>`;
   }
+  h+=handHTML();
   return h;
 }
 function wireSync(){
@@ -6056,10 +7379,16 @@ setInterval(()=>{ if(sfinOn()&&!netBlocked()&&document.visibilityState!=="hidden
 setTimeout(()=>nudgeSchedule(),7000);
 setInterval(()=>{ if(document.visibilityState!=="hidden") nudgeSchedule(); },3600000);
 document.addEventListener("visibilitychange",()=>{
-  if(document.visibilityState!=="visible"||netBlocked()) return;
+  /* going away: spend whatever time we have left sending, not waiting */
+  if(document.visibilityState==="hidden"){ flushPush(); return; }
+  if(netBlocked()) return;
   if(syncOn()) syncPull(true);
   setTimeout(autoSyncTick,1200);
 });
+/* pagehide is the one iOS actually fires on a swipe-away or a tab close, and it
+   fires on the bfcache path where unload never does. Both are wired because
+   neither is reliable alone, and flushPush() is a no-op with nothing pending. */
+window.addEventListener("pagehide",flushPush);
 if(netBlocked()&&syncOn()) setSync("warn","needs a real web address");
 </script>
 </body>
