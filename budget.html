@@ -137,6 +137,14 @@ body.fitOn .navarr{display:none}
   .acch .accl{font-size:10px;letter-spacing:.1em}
   .accb{padding:10px}
 }
+/* The consent box. Deliberately not styled to look like a toggle that might
+   already be on — it has to read as something you actively did. */
+.okbox{display:flex;gap:9px;align-items:flex-start;margin:10px 0 4px;
+  padding:11px 12px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel);cursor:pointer}
+.okbox input{margin:2px 0 0;flex:none;width:16px;height:16px;accent-color:var(--cyan)}
+.okbox span{font-size:11.5px;line-height:1.5;color:var(--dim)}
+.okbox a{color:var(--cyan)}
 .handbox{border:1px solid var(--line2);border-radius:5px;padding:10px 12px;margin:10px 0}
 .handhead{display:flex;align-items:baseline;gap:10px;font-size:11px;
   letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
@@ -819,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v93";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v95";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3215,6 +3223,51 @@ function newAccts(){
 function setAcctRole(id,role){
   S.meta.acct=S.meta.acct||{}; S.meta.acct[id]=role; save();
 }
+/* ---------- SMS recipients ------------------------------------------------
+   A carrier reviewer reads the registration and then, if anything looks thin,
+   goes looking for the screen it describes. So the screen has to exist and work
+   the way the paperwork says: the field starts empty, the consent box starts
+   unchecked, and nothing is saved until somebody ticks it themselves. That last
+   part is a rejection code of its own — 30925, opt-in must be unchecked by
+   default — and it is cheap to simply be true.
+
+   The sentence below is duplicated in the campaign registration and on the
+   published terms page. Change it here and change it in both. */
+const SMS_DISCLOSURE="Household Budget will send you one budget summary text per day. "
+  +"Up to 1 msg/day. Msg & data rates may apply. Reply HELP for help, STOP to cancel.";
+/* Where the published policy lives. Update this if the page moves. */
+const SMS_TERMS_URL="https://raw.githack.com/jtull1983/Budget/main/privacy.html";
+
+function smsList(){
+  if(!Array.isArray(S.meta.sms)) S.meta.sms=[];
+  return S.meta.sms;
+}
+/* US ten digits, or eleven starting with 1, normalised to E.164. Anything else
+   is refused rather than half-accepted: a number that looks saved but cannot be
+   dialled is worse than one that was turned down out loud. */
+function smsNorm(v){
+  const d=String(v||"").replace(/[^0-9]/g,"");
+  if(d.length===10) return "+1"+d;
+  if(d.length===11&&d[0]==="1") return "+"+d;
+  return null;
+}
+function smsPretty(e164){
+  const d=String(e164||"").replace(/[^0-9]/g,"").slice(-10);
+  return d.length===10?"("+d.slice(0,3)+") "+d.slice(3,6)+"-"+d.slice(6):e164;
+}
+/* The consent record is the evidence. Storing when it was given, and the exact
+   wording that was on screen at the time, is what makes it possible to answer a
+   carrier audit with something other than a shrug. */
+function smsAdd(num){
+  const e=smsNorm(num); if(!e) return null;
+  const list=smsList();
+  if(list.some(x=>x.num===e)) return e;
+  list.push({num:e,at:new Date().toISOString(),consent:SMS_DISCLOSURE});
+  save(); return e;
+}
+function smsDel(num){
+  S.meta.sms=smsList().filter(x=>x.num!==num); save();
+}
 function bankRows(){ return (S.bank&&Array.isArray(S.bank.rows))?S.bank.rows:[]; }
 /* v67 — savings is gone. The account role, its pane, its labels and its rows were
    all removed at the owner's request; it comes back later on different rules.
@@ -3532,6 +3585,16 @@ function wireAcct(){
         const anyBank=(S.meta.acctList||[]).some(a=>acctRole(a.id)==="bank");
         if(!anyBank){ delete S.meta.liveBalance; S.bank=null; S.hits={}; }
       }
+      /* v94 — THE BUG. Filing an account as an asset saved the role and
+         re-rendered, but never rebuilt S.meta.assets, which is the snapshot both
+         the header pill and the Assets pane read. The figure only recomputed on
+         the weekly reading or when a hand-entered account was saved. So if it
+         was ever wrong — say the roles came back unfiled because the account ids
+         changed on the bridge — re-filing every account by hand did not put it
+         right, and there was nothing the user could do from the screen to fix
+         it. It recomputes here now, on the one action that most obviously
+         changes what the assets are. */
+      reReadAssets();
       save(); render();
       toast(b.dataset.role==="bank"?"Reading balance and transactions from that one"
            :b.dataset.role==="card"?"Feeding the credit-card row"
@@ -4351,6 +4414,27 @@ function liveLoanHTML(){
   });
   return h;
 }
+function wireSMS(){
+  const num=document.getElementById("smsNum");
+  const box=document.getElementById("smsOK");
+  const add=document.getElementById("smsAdd");
+  if(add) add.onclick=()=>{
+    /* Both conditions, and the box is never ticked for them. Refusing out loud
+       beats saving something that will never receive anything. */
+    if(!box||!box.checked) return toast("Tick the box first — that's the bit that counts");
+    const e=smsNorm(num&&num.value);
+    if(!e) return toast("That doesn't look like a US mobile number");
+    smsAdd(e); render(); openDrawer("sync");
+    toast("Added — texts start once the carrier review clears");
+  };
+  document.querySelectorAll("[data-sms] .smsDel").forEach(b=>{
+    b.onclick=()=>{
+      const n=b.closest("[data-sms]").dataset.sms;
+      if(!confirm("Stop sending the nightly text to "+smsPretty(n)+"?")) return;
+      smsDel(n); render(); openDrawer("sync"); toast("Stopped");
+    };
+  });
+}
 function wireLiveLoan(){
   const num=v=>{ const n=parseFloat(String(v||"").replace(/[^0-9.\-]/g,"")); return isFinite(n)?n:0; };
   document.querySelectorAll("[data-lid]").forEach(box=>{
@@ -4363,10 +4447,20 @@ function wireLiveLoan(){
   });
 }
 function wireAssets(){
-  /* Nothing to wire. The two buttons that lived here — "I need to change
-     something" and the counted-in-the-total toggle — were removed in v88.
-     Loans are always counted; the flag is healed on open for anyone whose saved
-     state still has it switched off, since there is no longer a way back on. */
+  /* The two buttons that lived here — "I need to change something" and the
+     counted-in-the-total toggle — were removed in v88. Loans are always counted;
+     the flag is healed below for anyone whose saved state still has it off. */
+
+  /* v94 — a second belt for the same bug fixed in wireAcct. The Assets figure is
+     a snapshot, and one taken before the account list was last refreshed is
+     describing a set of accounts that may no longer be the ones on the token.
+     Opening the pane is the moment somebody is actually looking at the number,
+     so it is the moment to rebuild it rather than show them a stale one. Guarded
+     on the two timestamps so it fires once and cannot loop. */
+  const snap=S.meta.assets;
+  if(snap&&S.meta.acctListAt&&(!snap.at||snap.at<S.meta.acctListAt)){
+    reReadAssets(); save(); render(); openDrawer("assets"); return;
+  }
   if(S.meta.assetsLoan===false){
     S.meta.assetsLoan=true;
     retotalAssets(); save(); render(); openDrawer("assets");
@@ -6652,20 +6746,38 @@ function syncHTML(){
         <div id="ntDiag"></div>`;
   }
 
-  /* Nothing here is wired to anything. It is a placeholder on purpose: the
-     registration takes days to weeks and the app has no Twilio code in it yet. */
-  const tw=`<div class="flag"><div class="ft">Not built yet</div><div class="fb">
-      Nothing on this tab does anything. It's here so the paperwork and the code
-      aren't waiting on each other.</div></div>
-    <div class="hint">Sending a text through Twilio needs three things that don't
-      exist yet: <b>A2P 10DLC registration</b>, which US carriers require and which
-      takes days to weeks to clear; a Cloudflare Worker to send on a schedule,
-      because a phone that's asleep can't send its own 8pm nudge; and a decision
-      about length — Buddy runs about 300 characters, which is three SMS segments
-      and three times the per-message cost.</div>
-    <div class="hint"><b>Unregistered messages are filtered silently, not
-      rejected</b>, so the failure mode is texts that simply never arrive. ntfy
-      keeps running until this clears.</div>`;
+  /* The opt-in screen the registration describes. Adding a number here is the
+     consent; the Worker reads this list out of the gist and sends to whatever is
+     in it. Nothing is sent until the campaign clears carrier review. */
+  const sms=smsList();
+  let tw=`<div class="hint">One text a night at 8pm, the same summary Buddy posts
+      to ntfy. Each person adds their own number on their own phone — that is what
+      counts as agreeing to it.</div>`;
+  if(sms.length){
+    tw+=`<div class="sh" style="margin-top:14px">Getting the nightly text</div>`;
+    sms.forEach(r=>{
+      tw+=`<div class="handbox" data-sms="${r.num}">
+        <div class="handhead"><b>${smsPretty(r.num)}</b>
+          <span class="gn">added ${r.at?fmtDate(r.at.slice(0,10)):"—"}</span></div>
+        <div class="crow"><button class="del smsDel">Stop texts to this number</button></div>
+      </div>`;
+    });
+  }
+  tw+=`<div class="sh" style="margin-top:14px">Add this phone</div>
+    <div class="fg"><div class="f"><label>Mobile number</label>
+      <input id="smsNum" inputmode="tel" placeholder="(301) 555-0123" value=""></div></div>
+    <label class="okbox"><input type="checkbox" id="smsOK">
+      <span>${SMS_DISCLOSURE}
+        <a href="${SMS_TERMS_URL}" target="_blank" rel="noopener">Terms and privacy policy</a>.</span></label>
+    <div class="crow"><button class="mini" id="smsAdd">Add this number</button></div>
+    <div class="hint">Reply <b>STOP</b> to any message to cancel, or use the button
+      above. Reply <b>HELP</b> for contact details.</div>`;
+  tw+=`<div class="flag"><div class="ft">Not sending yet</div><div class="fb">
+      US carriers require the number to be registered before it can text you, and
+      that review is still running. Unregistered messages are filtered silently
+      rather than rejected, so the failure mode is texts that never arrive —
+      which is why nothing is switched on until it clears. ntfy keeps running in
+      the meantime.</div></div>`;
 
   let comms="";
   comms+=accSec("ntfy","ntfy (legacy)",
@@ -6804,6 +6916,7 @@ function wireSync(){
   wireAcct();
   wireHand();          /* v87 — these buttons rendered dead from v84 until now */
   wireLiveLoan();      /* v88 — moved out of the Assets pane */
+  wireSMS();           /* v95 */
   /* Folds are toggled in place rather than by re-rendering the panel: a redraw
      would throw away a half-typed token. */
   document.querySelectorAll("#dbody .acch").forEach(hd=>{
