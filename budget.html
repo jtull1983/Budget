@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v95";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v98";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3199,6 +3199,51 @@ function acctRole(id){
   return "new";
 }
 /* a first guess, offered but never applied on its own */
+/* ---------- roles surviving an id change ----------------------------------
+   What you file an account as is stored against the id the bridge gives it. Some
+   institutions keep those stable and some do not: Capital One and Navy Federal
+   held theirs across pulls while every Fidelity account came back with a new one
+   overnight, which orphaned all five roles at once and dropped the Assets figure
+   to nothing. Nobody touched anything — it happened while the app was shut.
+
+   An id is not a name. The organisation and the account name are what a person
+   would use to recognise it, and those did not change. So when an account
+   arrives with an id that has never been filed, its role is carried across from
+   the account that shares its name.
+
+   Two accounts can legitimately share a name — two Traditional IRAs at the same
+   broker, which is exactly what is in this household. So the rule is: carry the
+   role over when the matching old accounts all agreed on what they were. If they
+   disagreed, do nothing and let it be filed by hand, because guessing between
+   ASSET and IGNORE on a real balance is how a total silently goes wrong. */
+function acctFp(a){
+  return String(a&&a.org||"").trim().toLowerCase()+"|"+String(a&&a.name||"").trim().toLowerCase();
+}
+function acctReseat(prev){
+  const roles=S.meta.acct=S.meta.acct||{};
+  const now=S.meta.acctList||[];
+  const was={};
+  (prev||[]).forEach(a=>{
+    const r=roles[String(a.id)];
+    if(!r||r==="new") return;
+    (was[acctFp(a)]=was[acctFp(a)]||[]).push({id:String(a.id),role:r});
+  });
+  /* an id still present in the new list has not moved and must keep its own */
+  const held={}; now.forEach(a=>{ held[String(a.id)]=1; });
+  let moved=0;
+  now.forEach(a=>{
+    const id=String(a.id);
+    if(roles[id]) return;
+    const cands=(was[acctFp(a)]||[]).filter(c=>!held[c.id]);
+    if(!cands.length) return;
+    /* all of them said the same thing, so which one it was does not matter */
+    if(!cands.every(c=>c.role===cands[0].role)) return;
+    roles[id]=cands[0].role;
+    const used=cands.shift(); delete roles[used.id];
+    moved++;
+  });
+  return moved;
+}
 function acctGuess(a){
   const bal=Number(a.balance);
   const n=(a.name||"").toLowerCase();
@@ -3298,6 +3343,73 @@ function txRows(){
 }
 function txFor(k){ return txRows().filter(t=>String(t.date).slice(0,7)===k); }
 function txTag(t){ return (S.tag&&S.tag[TXSIG(t)])||{}; }
+
+/* ---------- re-attaching what the bank moved ------------------------------
+   A transaction is identified by its date, its exact amount, and the first 24
+   characters of its description. Everything you decide about it — the name you
+   gave it, the budget line you sat it against, the rule it belongs to — is filed
+   under that composite key.
+
+   All three of those change underneath you. A pending charge posts a day later
+   under a new date. The description gets rewritten from ACH DEBIT PENDING to the
+   merchant. A fuel hold settles at a different amount. When any one shifts, the
+   key no longer matches, the decision is orphaned, and the row comes back looking
+   like you never touched it.
+
+   The bridge sends no stable id — there is a comment in the pull saying so — so
+   the row cannot simply be followed. This finds an orphan a new home instead, and
+   is deliberately conservative about it: a wrong adoption puts your name on
+   somebody else's charge, which is worse than making you name it twice.
+
+   Two passes. The first re-attaches rows whose text still matches and only the
+   date or the amount moved. The second handles a rewritten description, and only
+   fires when exactly one candidate fits — one plausible answer is a match, two is
+   a guess. */
+const TXSLIP=5;              /* days a posting date may move */
+function txHeal(){
+  const tags=S.tag||{};
+  const rows=txRows();
+  const live={}; rows.forEach(t=>{ live[TXSIG(t)]=t; });
+
+  /* a tag worth rescuing is one that carries a decision, not an empty shell */
+  const meaty=g=>!!(g&&(g.label||g.rule||g.transfer||g.ccpay));
+  const orphans=Object.keys(tags).filter(k=>!live[k]&&meaty(tags[k]));
+  if(!orphans.length) return 0;
+
+  /* rows that have no decision of their own are the only ones open to adoption */
+  const free=rows.filter(t=>!meaty(tags[TXSIG(t)]));
+  const parse=k=>{ const p=String(k).split("|");
+    return {date:p[0],amt:p[1],txt:p.slice(2).join("|")}; };
+  const dayGap=(a,b)=>Math.abs((Date.parse(a+"T00:00:00")-Date.parse(b+"T00:00:00"))/864e5);
+
+  let moved=0;
+  orphans.forEach(old=>{
+    const o=parse(old);
+    const near=free.filter(t=>dayGap(t.date,o.date)<=TXSLIP&&!meaty(tags[TXSIG(t)]));
+    /* same words, the date or the amount moved */
+    let hit=near.filter(t=>normTxt(t.desc).slice(0,24)===o.txt);
+    /* the description was rewritten: only act on a single candidate */
+    if(!hit.length){
+      const same=near.filter(t=>Number(t.amt).toFixed(2)===o.amt);
+      if(same.length===1) hit=same;
+    }
+    if(hit.length!==1) return;
+    const t=hit[0], now=TXSIG(t);
+    if(now===old||meaty(tags[now])) return;
+
+    tags[now]=tags[old]; delete tags[old];
+    /* an assignment points at the transaction by signature, and a hit records the
+       one it settled against. Both have to follow the tag or the line goes back to
+       showing a prediction next to a charge that already happened. */
+    Object.keys(S.assign||{}).forEach(k=>{ if(S.assign[k]===old) S.assign[k]=now; });
+    Object.keys(S.hits||{}).forEach(k=>{
+      const h=S.hits[k];
+      if(h&&h.sig===old){ h.sig=now; h.date=t.date; h.amt=t.amt; h.desc=t.desc; }
+    });
+    moved++;
+  });
+  return moved;
+}
 /* A transfer is read every time. The tag on this one transaction wins; failing
    that, a merchant you have already called a transfer keeps its successors out
    of the merchant-name store rather than answering for them. */
@@ -5371,12 +5483,15 @@ async function sfinPull(quiet){
     const startMs=new Date(c.start+"T00:00:00").getTime();
     const rows=[], seen={};
     /* remember what's on the token so the roles can be set without another call */
+    const acctWas=(S.meta.acctList||[]).slice();
     S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
       name:a.name||"Account", org:(a.org&&(a.org.name||a.org.domain))||"",
       balance:Number(a.balance)}));
     /* when these balances were actually fetched — the weekly reading refuses to
        stamp last week's numbers as this week's */
     S.meta.acctListAt=Date.now();
+    /* before anything reads a role: carry them across any ids that changed */
+    if(acctReseat(acctWas)) reReadAssets();
     const bankRowsNew=[]; let bankBal=null;
     (j.accounts||[]).forEach(a=>{
       const role=acctRole(String(a.id||a.name));
@@ -5428,6 +5543,9 @@ async function sfinPull(quiet){
       });
       merged.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
       S.bank={at:Date.now(), rows:merged};
+      /* The pull is the moment rows get revised, so it is the moment to put the
+         decisions back on them. */
+      txHeal();
     }
     /* a filed statement is the real thing — never overwrite one */
     const held=S.stmts[c.bill];
@@ -7094,12 +7212,25 @@ function crumbs(){
 }
 /* one month: every category in it */
 function monthHTML(){
-  const y=YEAR, tx=cardTx(y,null,nav.month), cats=catsOf(tx);
-  const tot=tx.reduce((a,r)=>a+r.amt,0), mx=Math.max(...cats.map(c=>Math.abs(c[1])),1);
+  const y=YEAR, tx=cardTx(y,null,nav.month);
+  /* v98 — credits used to be netted into whichever category the original charge
+     was in, so a $50 return just quietly made Shopping look $50 smaller. Nothing
+     was lost, but nothing was visible either: you could not tell a thrifty month
+     from a month with a big refund in it. Charges drive the category bars now and
+     money coming back gets a bar of its own at the foot of the list. */
+  const charges=tx.filter(r=>r.amt>0), backs=tx.filter(r=>r.amt<0);
+  const cats=catsOf(charges);
+  const gross=charges.reduce((a,r)=>a+r.amt,0);
+  const back=backs.reduce((a,r)=>a+r.amt,0);        /* negative */
+  const tot=gross+back;
+  const mx=Math.max(...cats.map(c=>Math.abs(c[1])),Math.abs(back),1);
   const bill=nextMonth(nav.month), lc=liveCycle();
   let h=crumbs()+`<div class="flag"><div class="ft">${prettySpend(nav.month)} spending</div>
-    <div class="fb"><b>${money(tot)}</b> across <b>${tx.length}</b> charges,
-    in <b>${cats.length}</b> categories.
+    <div class="fb"><b>${money(gross)}</b> across <b>${charges.length}</b> charges,
+    in <b>${cats.length}</b> categories.${backs.length
+      ? ` <b>${money(-back)}</b> came back in ${backs.length}
+          ${backs.length===1?"credit":"credits"}, so <b>${money(tot)}</b> net.`
+      : ""}
     <div class="gn" style="margin-top:5px">${nav.month===lc.spend
       ? `Still filling — this is the ${lc.start} to ${lc.end} cycle, and it lands on the
          <b>${prettySpend(bill)}</b> bill.`
@@ -7118,6 +7249,16 @@ function monthHTML(){
       <div class="bar" style="height:5px;background:#26343b;border-radius:3px;margin-bottom:7px;overflow:hidden;width:100%">
       <i style="display:block;height:100%;width:${(Math.abs(v)/mx*100).toFixed(1)}%;background:${CATCOLOR[c]||"var(--teal)"}"></i></div></button>`;
   });
+  /* Money coming back, at the foot and in its own colour. Not a category — it is
+     the opposite of one — so it does not open a category view. */
+  if(backs.length)
+    h+=`<div class="catrow" style="opacity:.95">
+      <div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;color:var(--dim);width:100%">
+        <span style="color:var(--teal);font-weight:600">Credits &amp; returns
+          <span style="color:var(--dimmer);font-weight:400">\u00b7 ${backs.length}</span></span>
+        <b style="color:var(--teal)">${money(back)}</b></div>
+      <div class="bar" style="height:5px;background:#26343b;border-radius:3px;margin-bottom:7px;overflow:hidden;width:100%">
+      <i style="display:block;height:100%;width:${(Math.abs(back)/mx*100).toFixed(1)}%;background:var(--teal)"></i></div></div>`;
   return h;
 }
 /* every charge in the month, newest first, grouped by the day it landed */
