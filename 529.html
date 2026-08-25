@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>529 Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,700;1,400&family=Roboto+Mono:wght@400;500;700&family=Zilla+Slab:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#11161A;
+  --card:#1A2228;
+  --card-2:#212B32;
+  --ink:#E4EAE8;
+  --ink-2:#9AA8A4;
+  --ink-3:#6C7B78;
+  --rule:#2B363D;
+  --rule-2:#212A30;
+  --seed:#7FA9D9;
+  --in:#5FBF8F;
+  --out:#D9A441;
+  --paid:#C486AC;
+  --warn:#E4785F;
+  --ok:#5FBF8F;
+  --r:4px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg)}
+body{
+  color:var(--ink);
+  font-family:"Public Sans",system-ui,-apple-system,sans-serif;
+  font-size:15px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  padding:0 0 64px;
+}
+.num{font-family:"Roboto Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.wrap{max-width:1040px;margin:0 auto;padding:0 18px}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:2px solid var(--rule);margin-bottom:22px;padding:22px 0 12px}
+.masthead-row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+h1{font-family:"Zilla Slab",Georgia,serif;font-weight:700;font-size:27px;line-height:1;margin:0;letter-spacing:-.01em}
+.masthead .sub{color:var(--ink-3);font-size:12.5px;margin-top:5px;letter-spacing:.02em}
+.yearpick{display:flex;align-items:center;gap:2px;border:1px solid var(--rule);background:var(--card);border-radius:var(--r)}
+.yearpick button{background:none;border:0;padding:7px 11px;cursor:pointer;color:var(--ink-2);font-size:15px;line-height:1}
+.yearpick button:hover{color:var(--ink)}
+.yearpick .y{padding:6px 8px;font-weight:700;font-size:15px;min-width:56px;text-align:center}
+
+/* ---------- hero flow ---------- */
+.flow{display:grid;grid-template-columns:1fr 26px 1fr 26px 1fr 26px 1fr;align-items:stretch;margin-bottom:8px}
+.stage{background:var(--card);border:1px solid var(--rule);border-radius:var(--r);padding:15px 15px 13px;display:flex;flex-direction:column;min-width:0}
+.stage .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+.stage .big{font-size:26px;font-weight:500;margin:9px 0 2px;line-height:1}
+.stage .note{font-size:12.5px;color:var(--ink-2);margin-top:auto;padding-top:9px}
+.stage.s-paidin{border-top:3px solid var(--seed)}
+.stage.s-paidin .big{color:var(--seed)}
+.stage.s-in{border-top:3px solid var(--in)}
+.stage.s-in .big{color:var(--in)}
+.stage.s-out{border-top:3px solid var(--out)}
+.stage.s-out .big{color:var(--out)}
+.stage.s-paid{border-top:3px solid var(--paid)}
+.stage.s-paid .big{color:var(--paid)}
+.arrow{display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:19px}
+
+/* ---------- cap ruler ---------- */
+.cap{background:var(--card);border:1px solid var(--rule);border-top:0;border-radius:0 0 var(--r) var(--r);padding:16px 15px 14px;margin:-1px 0 22px}
+.cap-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.cap-title{font-family:"Zilla Slab",Georgia,serif;font-size:16px;font-weight:600}
+.cap-title small{font-family:"Public Sans",sans-serif;font-weight:400;color:var(--ink-3);font-size:12px;display:block;letter-spacing:.01em;margin-top:2px}
+.cap-remain{font-size:13px;color:var(--ink-2);text-align:right}
+.cap-remain b{display:block;font-size:20px;color:var(--ink);font-weight:500}
+.ruler{position:relative;height:34px;border:1px solid var(--rule);border-radius:2px;background:var(--bg);overflow:hidden}
+.ruler::before{content:"";position:absolute;inset:0;
+  background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),var(--rule) calc(10% - 1px),var(--rule) 10%)}
+.ruler .seg{position:absolute;top:0;bottom:0;background:var(--out);border-right:1px solid var(--card);z-index:1}
+.ruler .seg.over{background:var(--warn)}
+.ticks{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;color:var(--ink-3)}
+.ticks span:nth-child(even){visibility:hidden}
+@media(min-width:560px){.ticks span:nth-child(even){visibility:visible}}
+
+/* ---------- reconcile ---------- */
+.recon{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--rule);border-left:3px solid var(--ink-3);background:var(--card);border-radius:var(--r);padding:13px 15px;margin-bottom:26px;font-size:13.5px;line-height:1.5}
+.recon.flag{border-left-color:var(--warn)}
+.recon.clear{border-left-color:var(--ok)}
+.recon .mk{font-weight:700;font-size:15px;line-height:1.35;flex:0 0 auto}
+.recon.flag .mk{color:var(--warn)}
+.recon.clear .mk{color:var(--ok)}
+.recon b{font-weight:700}
+
+/* ---------- sections ---------- */
+section{margin-bottom:30px}
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-bottom:1px solid var(--rule);padding-bottom:6px}
+h2{font-family:"Zilla Slab",Georgia,serif;font-size:17px;font-weight:600;margin:0}
+.sec-head .hint{font-size:12px;color:var(--ink-3)}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+thead th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:700;padding:9px 8px;border-bottom:1px solid var(--rule);white-space:nowrap}
+tbody td{padding:9px 8px;border-bottom:1px solid var(--rule-2);vertical-align:middle}
+tbody tr:hover{background:var(--card)}
+td.r,th.r{text-align:right}
+td.amt{font-family:"Roboto Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
+td.dt{font-family:"Roboto Mono",monospace;color:var(--ink-2);white-space:nowrap}
+tfoot td{padding:10px 8px;border-top:2px solid var(--rule);font-weight:700;font-size:13.5px}
+.rowact{background:none;border:0;color:var(--ink-3);cursor:pointer;padding:2px 5px;font-size:13px;border-radius:2px}
+.rowact:hover{color:var(--warn);background:var(--card-2)}
+.tag{display:inline-block;font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;
+  padding:2px 6px;border-radius:2px;border:1px solid currentColor;white-space:nowrap}
+.tag.k12{color:var(--out)}
+.tag.college{color:var(--in)}
+.tag.other{color:var(--ink-3)}
+.tag.pending{color:var(--seed)}
+.queue tr.pend td{background:rgba(127,169,217,.06)}
+.diag{margin-top:14px;font-size:12px;color:var(--ink-2);font-family:"Roboto Mono",monospace;line-height:1.7}
+.diag .zero{color:var(--warn)}
+.diag .hdr{font-family:"Public Sans",sans-serif;font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:700;margin-bottom:6px}
+.sf-err{margin-top:12px;border-left:3px solid var(--warn);background:rgba(228,120,95,.08);
+  padding:10px 13px;font-size:12.5px;color:var(--ink);border-radius:2px;line-height:1.5}
+.empty{padding:24px 8px;color:var(--ink-3);font-size:13.5px;border-bottom:1px solid var(--rule-2);line-height:1.6}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;border-bottom:1px solid var(--rule)}
+.tabs button{background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;
+  padding:9px 14px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink-3)}
+.tabs button:hover{color:var(--ink)}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--out)}
+.tabs .count{font-family:"Roboto Mono",monospace;font-size:11px;color:var(--ink-3);margin-left:5px}
+
+/* ---------- accounts ---------- */
+.accts{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:11px;margin-top:14px}
+.acct{background:var(--card);border:1px solid var(--rule);border-radius:var(--r);padding:13px 14px;position:relative}
+.acct h3{margin:0;font-size:14px;font-weight:700;padding-right:22px}
+.acct .who{font-size:11.5px;color:var(--ink-3);margin-top:2px;letter-spacing:.02em}
+.acct .linkline{font-size:11.5px;color:var(--ink-3);margin-top:3px;font-family:"Roboto Mono",monospace}
+.acct .linkline .live{color:var(--in);font-weight:700;font-family:"Public Sans",sans-serif;
+  font-size:10px;letter-spacing:.07em;text-transform:uppercase}
+.orig{color:var(--ink-3);opacity:.85}
+.map-head{margin-top:16px;padding-top:13px;border-top:1px solid var(--rule);
+  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:700}
+.acct dl{margin:11px 0 0;display:grid;grid-template-columns:1fr auto;gap:5px 10px;font-size:12.5px}
+.acct dt{color:var(--ink-2);margin:0}
+.acct dd{margin:0;text-align:right;font-family:"Roboto Mono",monospace;font-variant-numeric:tabular-nums}
+.acct .net{border-top:1px solid var(--rule);padding-top:7px;margin-top:3px;font-weight:700}
+.acct .del{position:absolute;top:9px;right:9px}
+
+/* ---------- simplefin ---------- */
+/* ---------- version + masthead tools ---------- */
+.ver{font-family:"Roboto Mono",monospace;font-size:11.5px;font-weight:500;color:var(--ink-3);
+  letter-spacing:0;vertical-align:middle;padding:2px 6px;border:1px solid var(--rule);border-radius:2px;margin-left:7px}
+.masthead-tools{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.drawer-trigger{display:inline-flex;align-items:center;gap:7px}
+.badge{background:var(--out);color:#141A12;font-family:"Roboto Mono",monospace;font-size:10px;
+  font-weight:700;border-radius:9px;padding:1px 6px}
+
+/* ---------- drawer ---------- */
+.drawer-scrim{position:fixed;inset:0;background:rgba(5,8,10,.62);z-index:40}
+.drawer{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--card);
+  border-bottom:1px solid var(--rule);box-shadow:0 18px 40px rgba(0,0,0,.55);
+  max-height:88vh;overflow-y:auto;padding:0 0 22px;animation:slidedown .18s ease}
+@keyframes slidedown{from{transform:translateY(-16px);opacity:.3}to{transform:translateY(0);opacity:1}}
+.drawer-head{display:flex;justify-content:space-between;align-items:center;
+  padding:18px 0 12px;border-bottom:1px solid var(--rule);margin-bottom:14px}
+.drawer-head h2{font-size:18px}
+.drawer .close{font-size:15px;padding:5px 9px}
+.drawer-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.drawer-actions select{font-size:12px;padding:6px 8px}
+.status{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink-2);flex-wrap:wrap;margin-bottom:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);flex:0 0 auto}
+.dot.on{background:var(--in)}
+.dot.err{background:var(--warn)}
+.maprow{display:grid;grid-template-columns:1fr 190px;gap:10px;align-items:center;
+  padding:10px 0;border-bottom:1px solid var(--rule-2)}
+.maprow:last-of-type{border-bottom:0}
+.maprow .nm{font-size:13.5px;font-weight:600;min-width:0}
+.maprow .org{font-size:11.5px;color:var(--ink-3);font-family:"Roboto Mono",monospace}
+.maprow select{width:100%}
+.sf-note{font-size:12px;color:var(--ink-3);line-height:1.55;margin-top:11px}
+
+/* ---------- review queue ---------- */
+.queue{border:1px solid var(--out);border-radius:var(--r);background:var(--card);margin-top:14px;overflow:hidden}
+.queue-head{padding:12px 15px;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;
+  align-items:center;gap:12px;flex-wrap:wrap}
+.queue-head h3{margin:0;font-family:"Zilla Slab",serif;font-size:15px;font-weight:600}
+.queue-head .sub{font-size:12px;color:var(--ink-3);margin-top:2px}
+.queue table{font-size:13px}
+.queue thead th,.queue tbody td{padding-left:15px;padding-right:15px}
+.queue select{font-size:12px;padding:5px 7px}
+.queue input[type=checkbox]{width:15px;height:15px;accent-color:var(--out)}
+.queue-foot{padding:12px 15px;border-top:1px solid var(--rule);display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------- controls ---------- */
+.btn{font-family:inherit;font-size:13px;font-weight:600;padding:8px 14px;border-radius:var(--r);
+  border:1px solid var(--out);background:var(--out);color:#141A12;cursor:pointer}
+.btn:hover{filter:brightness(1.09)}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn.ghost:hover{border-color:var(--ink-2);filter:none}
+.btn.sm{padding:6px 11px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+
+select,input[type=text],input[type=number],input[type=date],input[type=password]{
+  font-family:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--rule);
+  border-radius:var(--r);background:var(--bg);color:var(--ink)}
+input[type=number],input[type=date]{font-family:"Roboto Mono",monospace}
+textarea{font-family:"Roboto Mono",monospace;font-size:12px;padding:9px 10px;border:1px solid var(--rule);
+  border-radius:var(--r);background:var(--bg);color:var(--ink);width:100%;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--out);outline-offset:1px;border-color:var(--out)}
+
+dialog{border:1px solid var(--rule);border-radius:var(--r);background:var(--card);color:var(--ink);
+  padding:0;max-width:460px;width:calc(100% - 32px);box-shadow:0 20px 50px rgba(0,0,0,.6)}
+dialog::backdrop{background:rgba(5,8,10,.7)}
+.dlg-head{padding:16px 20px 12px;border-bottom:1px solid var(--rule)}
+.dlg-head h3{margin:0;font-family:"Zilla Slab",serif;font-size:17px;font-weight:600}
+.dlg-body{padding:16px 20px}
+.dlg-foot{padding:12px 20px 16px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+.field input,.field select{width:100%}
+.field .help{font-size:11.5px;color:var(--ink-3);margin-top:4px;line-height:1.45}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+
+footer{border-top:1px solid var(--rule);padding-top:14px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
+footer b{color:var(--ink-2)}
+.savestate{float:right;font-family:"Roboto Mono",monospace;font-size:11px}
+
+:focus-visible{outline:2px solid var(--out);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+@media(max-width:640px){
+  .flow{grid-template-columns:1fr}
+  .stage{border-radius:0}
+  .flow .stage:first-child{border-radius:var(--r) var(--r) 0 0}
+  .stage+.arrow{height:26px;margin:-1px 0}
+  .arrow span{display:block;transform:rotate(90deg)}
+  .flow .stage:last-child{border-bottom:0;border-radius:0}
+  h1{font-size:23px}
+  .stage .big{font-size:25px}
+  .two{grid-template-columns:1fr}
+  .maprow{grid-template-columns:1fr}
+  thead th:nth-child(4),tbody td:nth-child(4){display:none}
+  .queue thead th:nth-child(4),.queue tbody td:nth-child(4){display:table-cell}
+}
+</style>
+</head>
+<body>
+
+<!-- BANK DRAWER -->
+<div class="drawer-scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="Banking connection">
+  <div class="wrap">
+    <div class="drawer-head">
+      <h2>Banking</h2>
+      <button class="rowact close" id="closeDrawer" aria-label="Close">&#10005;</button>
+    </div>
+    <div class="status">
+      <span class="dot" id="sfDot"></span>
+      <span id="sfStatus">Not connected.</span>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn sm" id="sfConnect">Connect</button>
+      <select id="sfRange">
+        <option value="90">Last 90 days</option>
+        <option value="180">Last 6 months</option>
+        <option value="365">Last 12 months</option>
+        <option value="730">Last 2 years</option>
+      </select>
+      <button class="btn ghost sm" id="sfPull" disabled>Pull transactions</button>
+      <span style="flex:1"></span>
+      <button class="btn ghost sm" id="sfForget" hidden>Disconnect</button>
+    </div>
+    <div id="sfMap"></div>
+    <div id="sfDiag"></div>
+    <div class="sf-note" id="sfNote">
+      Paste a SimpleFIN setup token to see your accounts. Nothing gets imported until you tell each account what it is. The Bridge caps each request at a 90-day window, so longer ranges are fetched in chunks against a daily request budget.
+    </div>
+
+    <div class="map-head" style="margin-top:22px">Sync across devices</div>
+    <div class="status" style="margin-top:12px">
+      <span class="dot" id="syncDot"></span>
+      <span id="syncStatus">Not syncing.</span>
+    </div>
+    <div class="two" style="max-width:560px">
+      <div class="field">
+        <label>Gist ID</label>
+        <input type="text" id="gistId" placeholder="42e13d9a23\u2026" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>GitHub token</label>
+        <input type="password" id="gistToken" placeholder="ghp_\u2026" autocomplete="off">
+      </div>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn sm" id="syncSave">Save and push</button>
+      <button class="btn ghost sm" id="syncPull">Pull from gist</button>
+      <span style="flex:1"></span>
+      <button class="btn ghost sm" id="syncForget" hidden>Stop syncing</button>
+    </div>
+    <div class="sf-note">
+      Needs a classic token with only the <b>gist</b> scope. The token is stored on this device and is never written into the gist itself. Changes push automatically a few seconds after you make them.
+    </div>
+  </div>
+</aside>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="masthead-row">
+    <div>
+      <h1>529 Ledger <span class="ver" id="ver">v5</span></h1>
+      <div class="sub">Contributions in &middot; withdrawals out &middot; tuition paid</div>
+    </div>
+    <div class="masthead-tools">
+      <button class="btn ghost sm drawer-trigger" id="openDrawer" aria-expanded="false" aria-controls="drawer">
+        <span class="dot" id="sfDotMini"></span> Banking
+        <span class="badge" id="drawerBadge" hidden>0</span>
+      </button>
+      <div class="yearpick">
+        <button id="yPrev" aria-label="Previous year">&#8592;</button>
+        <span class="y num" id="yLabel">2026</span>
+        <button id="yNext" aria-label="Next year">&#8594;</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="flow">
+  <div class="stage s-paidin">
+    <div class="eyebrow">Paid into the 529s</div>
+    <div class="big num" id="hPaidIn">&mdash;</div>
+    <div class="note" id="hPaidInNote">&nbsp;</div>
+  </div>
+  <div class="arrow"><span>&#10230;</span></div>
+  <div class="stage s-in">
+    <div class="eyebrow">In the 529s</div>
+    <div class="big num" id="hInBal">&mdash;</div>
+    <div class="note" id="hInNote">Connect an account to start.</div>
+  </div>
+  <div class="arrow"><span>&#10230;</span></div>
+  <div class="stage s-out">
+    <div class="eyebrow">Withdrawn, not yet spent</div>
+    <div class="big num" id="hHeld">&mdash;</div>
+    <div class="note" id="hHeldNote">&nbsp;</div>
+  </div>
+  <div class="arrow"><span>&#10230;</span></div>
+  <div class="stage s-paid">
+    <div class="eyebrow">Paid to school</div>
+    <div class="big num" id="hPaid">&mdash;</div>
+    <div class="note" id="hPaidNote">&nbsp;</div>
+  </div>
+</div>
+
+<div class="cap">
+  <div class="cap-head">
+    <div class="cap-title">K&#8211;12 withdrawal cap
+      <small id="capSub">Per beneficiary, per calendar year</small>
+    </div>
+    <div class="cap-remain">still available
+      <b class="num" id="capLeft">$20,000</b>
+    </div>
+  </div>
+  <div class="ruler" id="ruler"></div>
+  <div class="ticks" id="ticks"></div>
+</div>
+
+<div class="recon" id="recon">
+  <span class="mk">&mdash;</span>
+  <div id="reconText">Nothing recorded yet.</div>
+</div>
+
+<!-- REVIEW QUEUE -->
+<div id="queueBox"></div>
+
+<!-- ACCOUNTS -->
+<section>
+  <div class="sec-head">
+    <h2>Accounts</h2>
+    <span class="hint">529 plans and the account withdrawals land in</span>
+  </div>
+  <div class="accts" id="accts"></div>
+  <div class="toolbar">
+    <button class="btn ghost sm" data-add="acct529">Add a 529 manually</button>
+    <button class="btn ghost sm" data-add="acctCash">Add a receiving account</button>
+  </div>
+</section>
+
+<!-- LEDGER -->
+<section>
+  <div class="sec-head">
+    <h2>Ledger</h2>
+    <span class="hint" id="ledgerHint">Showing 2026</span>
+  </div>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="contributions" aria-selected="true">Contributions <span class="count" id="cCon">0</span></button>
+    <button role="tab" data-tab="distributions" aria-selected="false">Withdrawals <span class="count" id="cDis">0</span></button>
+    <button role="tab" data-tab="tuition" aria-selected="false">Tuition <span class="count" id="cTui">0</span></button>
+  </div>
+  <table id="ledger"><thead></thead><tbody></tbody><tfoot></tfoot></table>
+  <div class="toolbar">
+    <button class="btn" id="addEntry">Add entry</button>
+    <button class="btn ghost sm" id="btnExport">Export JSON</button>
+    <button class="btn ghost sm" id="btnImport">Import JSON</button>
+    <input type="file" id="fileIn" accept="application/json,.json" hidden>
+  </div>
+</section>
+
+<footer>
+  <span class="savestate" id="saveState">&nbsp;</span>
+  <b>How the cap works:</b> the limit applies to withdrawals used for K&#8211;12 tuition, per beneficiary, per calendar year &mdash; counted on the date money leaves the 529, not the date tuition is paid.
+  Withdrawals and the expenses they cover should land in the same calendar year.
+  Mark a withdrawal <em>College / other qualified</em> to keep it off the ruler.
+  Maryland's state-tax treatment of K&#8211;12 withdrawals is worth confirming separately; this file tracks the federal cap only.
+</footer>
+
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <div class="dlg-head"><h3 id="dlgTitle">Add entry</h3></div>
+    <div class="dlg-body" id="dlgBody"></div>
+    <div class="dlg-foot">
+      <button class="btn ghost" value="cancel" type="submit" formnovalidate>Cancel</button>
+      <button class="btn" value="save" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+/* ============================================================
+   STORAGE — local cache + GitHub Gist as the shared copy
+   ============================================================ */
+const KEY = 'ledger529:v2';
+let storageOK = true;
+let pushTimer = null;
+
+async function loadState(){
+  try{
+    const r = await window.storage.get(KEY);
+    if(r && r.value) return JSON.parse(r.value);
+  }catch(e){}
+  return null;
+}
+async function saveState(opts){
+  S.sync.rev = (S.sync.rev||0) + 1;
+  try{
+    await window.storage.set(KEY, JSON.stringify(S));
+    storageOK = true; flash('saved');
+  }catch(e){
+    storageOK = false; flash('not saved locally \u2014 export to keep');
+  }
+  if(S.sync.gistId && S.sync.token && !(opts&&opts.noPush)) queuePush();
+}
+function flash(msg){
+  const el = document.getElementById('saveState');
+  el.textContent = msg;
+  el.style.color = storageOK ? 'var(--ink-3)' : 'var(--warn)';
+  if(storageOK) setTimeout(()=>{ if(el.textContent===msg) el.textContent='\u00A0'; },1600);
+}
+
+/* ---- gist ---- */
+const GIST_FILE = '529-ledger.json';
+
+function payload(){
+  const {token, ...syncSafe} = S.sync;          // never write the token to the gist
+  return JSON.stringify(Object.assign({}, S, {sync: syncSafe}), null, 2);
+}
+function weight(o){
+  return (o.contributions||[]).length + (o.distributions||[]).length +
+         (o.tuition||[]).length + (o.accounts529||[]).length + (o.accountsCash||[]).length;
+}
+
+async function gistApi(method, path, body){
+  const res = await fetch('https://api.github.com'+path, {
+    method,
+    headers:{
+      'Authorization':'Bearer '+S.sync.token,
+      'Accept':'application/vnd.github+json',
+      'X-GitHub-Api-Version':'2022-11-28'
+    },
+    body: body?JSON.stringify(body):undefined
+  });
+  if(res.status===401 || res.status===403) throw new Error('GitHub rejected the token (check the gist scope)');
+  if(res.status===404) throw new Error('Gist not found \u2014 check the ID, and that the token can see it');
+  if(!res.ok) throw new Error('GitHub returned '+res.status);
+  return res.json();
+}
+
+async function gistRead(){
+  const g = await gistApi('GET','/gists/'+S.sync.gistId);
+  const f = g.files && (g.files[GIST_FILE] || g.files[Object.keys(g.files)[0]]);
+  if(!f) return null;
+  let text = f.content;
+  if(f.truncated && f.raw_url){ text = await (await fetch(f.raw_url)).text(); }
+  try{ return JSON.parse(text); }catch(e){ throw new Error('The gist does not contain valid ledger JSON'); }
+}
+
+async function gistWrite(){
+  await gistApi('PATCH','/gists/'+S.sync.gistId,{files:{[GIST_FILE]:{content:payload()}}});
+  S.sync.lastSync = new Date().toISOString();
+}
+
+function queuePush(){
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(()=>{ pushGist(true).catch(()=>{}); }, 2500);
+}
+
+/* Guarded push. This is the step that ate the budget app once:
+   a device holding almost nothing overwrote the good copy. */
+async function pushGist(silent){
+  if(!S.sync.gistId || !S.sync.token) return;
+  syncSet('','Syncing\u2026');
+  let remote=null;
+  try{ remote = await gistRead(); }
+  catch(e){ syncSet('err','Sync failed: '+e.message); return; }
+
+  if(remote){
+    const rRev = (remote.sync&&remote.sync.rev)||0;
+    const rW = weight(remote), lW = weight(S);
+
+    if(rRev > (S.sync.rev||0) && rW > lW){
+      syncSet('err','The gist is newer and has more entries. Pull before pushing.');
+      if(!silent) alert('The copy in the gist is newer than this device and has '+rW+
+        ' entries against your '+lW+'. Nothing was overwritten. Use Pull from gist to take the newer copy.');
+      return;
+    }
+    if(lW < rW - 2){
+      const ok = !silent && confirm('This device has '+lW+' entries; the gist has '+rW+
+        '. Pushing replaces the gist with the smaller copy. Continue?');
+      if(!ok){
+        syncSet('err','Push held back \u2014 this device has fewer entries than the gist.');
+        return;
+      }
+    }
+  }
+  try{
+    await gistWrite();
+    syncSet('on','Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}));
+    try{ await window.storage.set(KEY, JSON.stringify(S)); }catch(e){}
+    renderSync();
+  }catch(e){ syncSet('err','Sync failed: '+e.message); }
+}
+
+async function pullGist(){
+  if(!S.sync.gistId || !S.sync.token) return;
+  syncSet('','Pulling\u2026');
+  try{
+    const remote = await gistRead();
+    if(!remote){ syncSet('err','That gist has no ledger file yet. Push first.'); return; }
+    const rW=weight(remote), lW=weight(S);
+    if(lW > rW && !confirm('This device has '+lW+' entries; the gist has '+rW+
+      '. Pulling replaces what is here. Continue?')){ syncSet('on','Pull cancelled.'); return; }
+    const keep = Object.assign({}, S.sync);          // token and ids stay on this device
+    S = Object.assign(structuredClone(BLANK), remote);
+    S.sync = Object.assign(keep, {rev:(remote.sync&&remote.sync.rev)||0, lastSync:new Date().toISOString()});
+    render();
+    await saveState({noPush:true});
+    syncSet('on','Pulled from gist.');
+    renderSync();
+  }catch(e){ syncSet('err','Pull failed: '+e.message); }
+}
+
+/* ============================================================
+   STATE  (empty by default)
+   ============================================================ */
+const uid = () => Math.random().toString(36).slice(2,9);
+
+const BLANK = {
+  capPerYear:20000,
+  accounts529:[],
+  accountsCash:[],
+  contributions:[],
+  distributions:[],
+  tuition:[],
+  simplefin:{ accessUrl:'', lastPull:'', roles:{} },   // roles: sfAccountId -> {role, localId}
+  pending:[],
+  dismissed:[],                                         // sfIds the user chose not to file
+  sync:{ gistId:'', token:'', rev:0, lastSync:'' }
+};
+
+let S = structuredClone(BLANK);
+let YEAR = new Date().getFullYear();
+let TAB = 'contributions';
+let sfAccounts = [];      // last fetched raw SimpleFIN accounts
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+const money  = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{maximumFractionDigits:0});
+const money2 = n => (n<0?'-':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const yearOf = d => d ? +d.slice(0,4) : 0;
+const fmtDate = d => { if(!d) return ''; const p=d.split('-'); return p[1]+'/'+p[2]+'/'+p[0].slice(2); };
+const sum = (a,f=x=>x.amount) => a.reduce((s,r)=>s+(+f(r)||0),0);
+const acct529  = id => S.accounts529.find(a=>a.id===id);
+const acctCash = id => S.accountsCash.find(a=>a.id===id);
+const nameOf   = id => (acct529(id)||acctCash(id)||{name:''}).name;
+const inYear   = (a,y) => a.filter(r=>yearOf(r.date)===y);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today = () => new Date().toISOString().slice(0,10);
+const tsToDate = t => new Date(t*1000).toISOString().slice(0,10);
+
+function allSfIds(){
+  const s = new Set();
+  [...S.contributions,...S.distributions,...S.tuition].forEach(r=>{ if(r.sfId) s.add(r.sfId); });
+  S.pending.forEach(p=>s.add(p.sfId));
+  (S.dismissed||[]).forEach(id=>s.add(id));
+  return s;
+}
+
+/* ============================================================
+   MATH
+   ============================================================ */
+function totals(){
+  const y = YEAR;
+  const conAll=sum(S.contributions), disAll=sum(S.distributions);
+  const disY=sum(inYear(S.distributions,y)), tuiY=sum(inYear(S.tuition,y));
+
+  const withVal = S.accounts529.filter(a=>a.marketValue!=null && a.marketValue!=='');
+  const usingValue = S.accounts529.length>0 && withVal.length===S.accounts529.length;
+  const inBalance = usingValue ? sum(withVal,a=>a.marketValue) : conAll-disAll;
+  const noBasis = !usingValue && conAll===0 && disAll===0;
+
+  const held = Math.max(0, disAll - sum(S.tuition.filter(t=>t.sourceId && acctCash(t.sourceId))));
+
+  const k12 = inYear(S.distributions,y).filter(d=>d.purpose==='k12');
+  const byBen={};
+  k12.forEach(d=>{
+    const b=(acct529(d.accountId)||{}).beneficiary || 'Unassigned';
+    (byBen[b]=byBen[b]||[]).push(d);
+  });
+  const bens=Object.keys(byBen);
+  const primary = bens[0] || (S.accounts529[0]||{}).beneficiary || 'Unassigned';
+  const capUsed = sum(byBen[primary]||[]);
+
+  return {conAll,disAll,disY,tuiY,inBalance,usingValue,noBasis,held,
+          k12:byBen[primary]||[],capUsed,capLeft:S.capPerYear-capUsed,primary,bens};
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function render(){
+  const t = totals();
+  document.getElementById('yLabel').textContent = YEAR;
+  document.getElementById('ledgerHint').textContent = 'Showing '+YEAR;
+
+  const conY=sum(inYear(S.contributions,YEAR));
+  const nCon=inYear(S.contributions,YEAR).length;
+  document.getElementById('hPaidIn').textContent = nCon ? money(conY) : '\u2014';
+  document.getElementById('hPaidInNote').textContent = nCon
+    ? YEAR+' contributions, across '+nCon+' deposit'+(nCon===1?'':'s')+'.'
+    : 'No '+YEAR+' contributions recorded.';
+
+  document.getElementById('hInBal').textContent = t.noBasis ? '\u2014' : money(t.inBalance);
+  document.getElementById('hInNote').textContent = t.noBasis
+    ? (S.accounts529.length ? 'No contributions or balances logged yet.' : 'Connect a 529, or add one manually below.')
+    : (t.usingValue
+        ? 'Latest balance across '+S.accounts529.length+' account'+(S.accounts529.length===1?'':'s')+'.'
+        : money(t.conAll)+' contributed, '+money(t.disAll)+' withdrawn, all time.');
+
+  document.getElementById('hHeld').textContent = t.disAll===0 ? '\u2014' : money(t.held);
+  document.getElementById('hHeldNote').textContent = t.disAll===0
+    ? 'No withdrawals recorded.'
+    : (t.held>0
+        ? '529 money sitting in '+(S.accountsCash.map(a=>a.name).join(', ')||'your receiving account')+' that has not gone to tuition yet.'
+        : 'Every dollar withdrawn is matched to a tuition payment.');
+
+  const nTui = inYear(S.tuition,YEAR).length;
+  document.getElementById('hPaid').textContent = nTui? money(t.tuiY) : '\u2014';
+  document.getElementById('hPaidNote').textContent = nTui
+    ? YEAR+' tuition, across '+nTui+' payment'+(nTui===1?'':'s')+'.'
+    : 'No '+YEAR+' tuition recorded.';
+
+  document.getElementById('capSub').textContent = t.bens.length>1
+    ? 'Showing '+t.primary+', 1 of '+t.bens.length+' beneficiaries'
+    : 'For '+t.primary+', in '+YEAR;
+  const cl=document.getElementById('capLeft');
+  cl.textContent = money(Math.max(0,t.capLeft));
+  cl.style.color = t.capLeft<0 ? 'var(--warn)' : '';
+
+  const ruler=document.getElementById('ruler'); ruler.innerHTML='';
+  let cursor=0;
+  t.k12.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(d=>{
+    const l=Math.min(100,cursor/S.capPerYear*100);
+    const w=Math.min(100-l,d.amount/S.capPerYear*100);
+    if(w<=0){cursor+=d.amount;return;}
+    const seg=document.createElement('div');
+    seg.className='seg'+(cursor+d.amount>S.capPerYear?' over':'');
+    seg.style.left=l+'%'; seg.style.width=w+'%';
+    seg.title=fmtDate(d.date)+' \u2014 '+money2(d.amount);
+    ruler.appendChild(seg); cursor+=d.amount;
+  });
+
+  const ticks=document.getElementById('ticks'); ticks.innerHTML='';
+  for(let i=0;i<=10;i++){
+    const s=document.createElement('span');
+    s.textContent = i===0?'$0':(i===10?money(S.capPerYear):'$'+(S.capPerYear/10*i/1000)+'k');
+    ticks.appendChild(s);
+  }
+
+  const rec=document.getElementById('recon'), rt=document.getElementById('reconText'), mk=rec.querySelector('.mk');
+  const gap=t.tuiY-t.disY;
+  rec.className='recon';
+  if(!inYear(S.tuition,YEAR).length && !inYear(S.distributions,YEAR).length){
+    mk.textContent='\u2014'; rt.textContent='Nothing recorded for '+YEAR+' yet.';
+  } else if(gap>0.5){
+    rec.classList.add('flag'); mk.textContent='!';
+    rt.innerHTML='You paid <b>'+money2(t.tuiY)+'</b> in '+YEAR+' tuition but withdrew only <b>'+money2(t.disY)+
+      '</b> from the 529s. <b>'+money2(gap)+'</b> of tuition has not been reimbursed, and you have <b>'+
+      money(Math.max(0,t.capLeft))+'</b> of K\u201312 room left this year. Reimburse before December 31 or that room is gone.';
+  } else if(gap<-0.5){
+    rec.classList.add('flag'); mk.textContent='!';
+    rt.innerHTML='You withdrew <b>'+money2(t.disY)+'</b> in '+YEAR+' against only <b>'+money2(t.tuiY)+
+      '</b> of recorded tuition. <b>'+money2(-gap)+'</b> is unmatched \u2014 either a payment is missing, or it needs a qualified expense in '+YEAR+'.';
+  } else {
+    rec.classList.add('clear'); mk.textContent='\u2713';
+    rt.innerHTML='Withdrawals and tuition match for '+YEAR+' at <b>'+money2(t.tuiY)+'</b>.';
+  }
+
+  renderSf(); renderSync(); renderQueue(); renderAccounts(); renderLedger();
+}
+
+function linkLine(a){
+  if(!a.sfId) return '';
+  const renamed = a.sfName && a.sfName!==a.name;
+  return '<div class="linkline"><span class="live">linked</span> '+esc(a.institution||'bank')+
+    (renamed?' \u00B7 <span class="orig">'+esc(a.sfName)+'</span>':'')+'</div>';
+}
+
+function renderAccounts(){
+  const box=document.getElementById('accts'); box.innerHTML='';
+  S.accounts529.forEach(a=>{
+    const con=sum(S.contributions.filter(r=>r.accountId===a.id));
+    const dis=sum(S.distributions.filter(r=>r.accountId===a.id));
+    const val=(a.marketValue!=null&&a.marketValue!=='')?+a.marketValue:null;
+    const el=document.createElement('div'); el.className='acct';
+    el.innerHTML='<button class="rowact del" data-del="acct529" data-id="'+a.id+'" title="Remove">\u00D7</button>'+
+      '<h3>'+esc(a.name)+'</h3>'+
+      '<div class="who">529 \u00B7 owner '+esc(a.owner||'\u2014')+' \u00B7 for '+esc(a.beneficiary||'\u2014')+'</div>'+
+      linkLine(a)+
+      '<dl><dt>Contributed</dt><dd>'+money(con)+'</dd>'+
+      '<dt>Withdrawn</dt><dd>'+money(dis)+'</dd>'+
+      '<dt class="net">'+(val!=null?'Balance':'Net in')+'</dt><dd class="net">'+money(val!=null?val:con-dis)+'</dd></dl>'+
+      '<div class="toolbar" style="margin-top:10px"><button class="btn ghost sm" data-edit="acct529" data-id="'+a.id+'">Rename &amp; edit</button></div>';
+    box.appendChild(el);
+  });
+  S.accountsCash.forEach(a=>{
+    const inf=sum(S.distributions.filter(d=>d.destId===a.id));
+    const out=sum(S.tuition.filter(t=>t.sourceId===a.id));
+    const el=document.createElement('div'); el.className='acct';
+    el.innerHTML='<button class="rowact del" data-del="acctCash" data-id="'+a.id+'" title="Remove">\u00D7</button>'+
+      '<h3>'+esc(a.name)+'</h3>'+
+      '<div class="who">Receiving account</div>'+
+      linkLine(a)+
+      '<dl><dt>In from 529s</dt><dd>'+money(inf)+'</dd>'+
+      '<dt>Out to tuition</dt><dd>'+money(out)+'</dd>'+
+      '<dt class="net">529 money left</dt><dd class="net">'+money(inf-out)+'</dd></dl>'+
+      '<div class="toolbar" style="margin-top:10px"><button class="btn ghost sm" data-edit="acctCash" data-id="'+a.id+'">Rename</button></div>';
+    box.appendChild(el);
+  });
+  if(!S.accounts529.length && !S.accountsCash.length){
+    box.innerHTML='<div class="empty">No accounts yet. Open <strong>Banking</strong> up top to connect and label your accounts, or add one by hand.</div>';
+  }
+}
+
+const COLS={
+  contributions:[['Date','dt'],['Account',''],['Note',''],['Amount','r']],
+  distributions:[['Date','dt'],['From 529',''],['Landed in',''],['Use',''],['Amount','r']],
+  tuition:[['Date','dt'],['Paid from',''],['Note',''],['Amount','r']]
+};
+
+function renderLedger(){
+  document.getElementById('cCon').textContent=inYear(S.contributions,YEAR).length;
+  document.getElementById('cDis').textContent=inYear(S.distributions,YEAR).length;
+  document.getElementById('cTui').textContent=inYear(S.tuition,YEAR).length;
+
+  const table=document.getElementById('ledger'), cols=COLS[TAB];
+  table.tHead.innerHTML='<tr>'+cols.map(c=>'<th class="'+(c[1]==='r'?'r':'')+'">'+c[0]+'</th>').join('')+'<th class="r"></th></tr>';
+  const rows=inYear(S[TAB],YEAR).slice().sort((a,b)=>b.date.localeCompare(a.date));
+  const tb=table.tBodies[0]; tb.innerHTML='';
+
+  if(!rows.length){
+    tb.innerHTML='<tr><td class="empty" colspan="'+(cols.length+1)+'">Nothing recorded in '+YEAR+'.</td></tr>';
+  }
+  rows.forEach(r=>{
+    let cells;
+    if(TAB==='contributions'){
+      cells='<td class="dt">'+fmtDate(r.date)+'</td><td>'+esc(nameOf(r.accountId)||'\u2014')+'</td>'+
+            '<td>'+esc(r.note)+'</td><td class="amt r" style="color:var(--in)">'+money2(r.amount)+'</td>';
+    } else if(TAB==='distributions'){
+      const p=r.purpose||'other', label=p==='k12'?'K\u201312':(p==='college'?'College':'Other');
+      cells='<td class="dt">'+fmtDate(r.date)+'</td><td>'+esc(nameOf(r.accountId)||'\u2014')+'</td>'+
+            '<td>'+esc(nameOf(r.destId)||'\u2014')+'</td><td><span class="tag '+p+'">'+label+'</span></td>'+
+            '<td class="amt r" style="color:var(--out)">'+money2(r.amount)+'</td>';
+    } else {
+      cells='<td class="dt">'+fmtDate(r.date)+'</td><td>'+esc(nameOf(r.sourceId)||'Other')+'</td>'+
+            '<td>'+esc(r.note)+'</td><td class="amt r" style="color:var(--paid)">'+money2(r.amount)+'</td>';
+    }
+    const tr=document.createElement('tr');
+    tr.innerHTML=cells+'<td class="r"><button class="rowact" data-edit="'+TAB+'" data-id="'+r.id+'" title="Edit">\u270E</button>'+
+      '<button class="rowact" data-del="'+TAB+'" data-id="'+r.id+'" title="Delete">\u00D7</button></td>';
+    tb.appendChild(tr);
+  });
+  table.tFoot.innerHTML='<tr><td colspan="'+(cols.length-1)+'">'+YEAR+' total</td>'+
+    '<td class="amt r">'+money2(sum(rows))+'</td><td></td></tr>';
+}
+
+/* ============================================================
+   SIMPLEFIN
+   ============================================================ */
+function sfSet(state,msg){
+  const cls='dot'+(state==='on'?' on':state==='err'?' err':'');
+  document.getElementById('sfDot').className=cls;
+  const mini=document.getElementById('sfDotMini');
+  if(mini) mini.className=cls;
+  document.getElementById('sfStatus').textContent=msg;
+}
+
+function syncSet(state,msg){
+  const cls='dot'+(state==='on'?' on':state==='err'?' err':'');
+  const d=document.getElementById('syncDot'); if(d) d.className=cls;
+  const s=document.getElementById('syncStatus'); if(s) s.textContent=msg;
+}
+
+function renderSync(){
+  const on = !!(S.sync.gistId && S.sync.token);
+  document.getElementById('gistId').value = S.sync.gistId||'';
+  document.getElementById('gistToken').value = S.sync.token||'';
+  document.getElementById('syncForget').hidden = !on;
+  document.getElementById('syncPull').disabled = !on;
+  const st=document.getElementById('syncStatus');
+  if(!on) syncSet('','Not syncing.');
+  else if(st && (st.textContent==='Not syncing.'||st.textContent==='')){
+    syncSet('on', S.sync.lastSync ? 'Last synced '+new Date(S.sync.lastSync).toLocaleString('en-US',
+      {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}) : 'Connected, not pushed yet.');
+  }
+}
+
+function localFor(sfid){
+  return S.accounts529.find(a=>a.sfId===sfid) || S.accountsCash.find(a=>a.sfId===sfid) || null;
+}
+
+function renderSf(){
+  const linked = !!S.simplefin.accessUrl;
+  document.getElementById('sfConnect').textContent = linked ? 'Reconnect' : 'Connect';
+  document.getElementById('sfPull').disabled = !linked;
+  document.getElementById('sfForget').hidden = !linked;
+  if(linked && !document.getElementById('sfStatus').textContent.startsWith('Could')){
+    sfSet('on','Connected.'+(S.simplefin.lastPull?' Last pull '+fmtDate(S.simplefin.lastPull)+'.':' Not pulled yet.'));
+  } else if(!linked){
+    sfSet('','Not connected.');
+  }
+
+  const badge=document.getElementById('drawerBadge');
+  badge.hidden = !S.pending.length;
+  badge.textContent = S.pending.length;
+
+  const box=document.getElementById('sfMap');
+  if(!sfAccounts.length){ box.innerHTML=''; return; }
+  box.innerHTML = '<div class="map-head">What is each account?</div>' +
+    sfAccounts.map(a=>{
+      const r=(S.simplefin.roles[a.id]||{}).role||'ignore';
+      const mine=localFor(a.id);
+      const label = mine && mine.name!==a.name ? mine.name : a.name;
+      const orig  = mine && mine.name!==a.name ? ' \u00B7 <span class="orig">'+esc(a.name)+'</span>' : '';
+      return '<div class="maprow"><div class="nm">'+esc(label)+
+        '<div class="org">'+esc((a.org&&(a.org.name||a.org.domain))||'')+
+        (a.balance!=null?' \u00B7 '+money2(+a.balance):'')+orig+'</div></div>'+
+        '<select data-role="'+esc(a.id)+'">'+
+        '<option value="ignore"'+(r==='ignore'?' selected':'')+'>Ignore</option>'+
+        '<option value="529"'+(r==='529'?' selected':'')+'>529 plan</option>'+
+        '<option value="cash"'+(r==='cash'?' selected':'')+'>Receiving account</option>'+
+        '</select></div>';
+    }).join('');
+  document.getElementById('sfNote').innerHTML =
+    'Withdrawals and contributions come from the 529 side. Tuition payments come from the receiving account and always land in review before they hit the ledger \u2014 nothing is filed automatically. Rename accounts down in <b>Accounts</b>; the bank link is kept.';
+
+  renderDiag();
+}
+
+function renderDiag(){
+  const box=document.getElementById('sfDiag');
+  if(!box) return;
+  let html='';
+  if(sfErrors.length){
+    html += '<div class="sf-err"><b>The bank reported a problem:</b><br>'+
+            sfErrors.map(e=>esc(typeof e==='string'?e:JSON.stringify(e))).join('<br>')+
+            '<br>Transactions from that institution may be incomplete until it reconnects.</div>';
+  }
+  if(sfDiag.length){
+    html += '<div class="diag"><div class="hdr">What came back on the last pull</div>'+
+      sfDiag.map(d=>{
+        const mine=localFor(d.id);
+        const label=mine?mine.name:d.name;
+        const zero=d.n===0;
+        return '<div'+(zero?' class="zero"':'')+'>'+esc(label)+' \u2014 '+d.n+' txn'+(d.n===1?'':'s')+
+          (d.pend?' ('+d.pend+' pending)':'')+
+          (d.n?' \u00B7 '+fmtDate(d.first)+' to '+fmtDate(d.last):' \u00B7 nothing returned')+
+          '</div>';
+      }).join('')+'</div>';
+  }
+  box.innerHTML=html;
+}
+
+async function sfFetch(path){
+  const u = new URL(S.simplefin.accessUrl);
+  const auth = btoa(decodeURIComponent(u.username)+':'+decodeURIComponent(u.password));
+  u.username=''; u.password='';
+  const base = u.toString().replace(/\/$/,'');
+  const res = await fetch(base+path,{headers:{Authorization:'Basic '+auth}});
+  if(!res.ok) throw new Error('SimpleFIN returned '+res.status);
+  return res.json();
+}
+
+async function sfClaim(token){
+  let claimUrl;
+  try{ claimUrl = atob(token.trim()); }
+  catch(e){ throw new Error('That does not look like a setup token.'); }
+  if(!/^https?:\/\//.test(claimUrl)) throw new Error('That does not look like a setup token.');
+  const res = await fetch(claimUrl,{method:'POST'});
+  if(!res.ok) throw new Error('The token was rejected \u2014 it may already have been claimed.');
+  return (await res.text()).trim();
+}
+
+/* Bridge caps each /accounts request at a 90-day window and silently
+   truncates anything wider, so longer ranges are chunked.
+   Two things bite here:
+   - end-date is EXCLUSIVE ("before, but not on"), and banks often stamp
+     posted at the end of the posting day, so the newest window has to
+     reach past now or today's activity falls outside it.
+   - the Bridge asks that windows overlap ~5 days so nothing slips
+     between them. Dedup is by transaction id, so overlap costs nothing. */
+const DAY=86400, SPAN=90*DAY, OVERLAP=5*DAY, LEAD=2*DAY;
+let sfErrors=[];
+let sfDiag=[];
+
+async function sfLoadWindow(startTs,endTs){
+  const data = await sfFetch('/accounts?start-date='+startTs+'&end-date='+endTs+'&pending=1');
+  if(data.errors && data.errors.length) sfErrors=sfErrors.concat(data.errors);
+  return data.accounts||[];
+}
+
+function sfWindows(days){
+  const now=Math.floor(Date.now()/1000);
+  const end=now+LEAD, from=now-(days||90)*DAY;
+  const spans=[];
+  let e=end;
+  while(e>from && spans.length<12){
+    const s=Math.max(from,e-SPAN);
+    spans.push([s,e]);
+    if(s<=from) break;
+    e=s+OVERLAP;
+  }
+  return spans.reverse();
+}
+
+async function sfLoadAccounts(days,onStep){
+  const spans=sfWindows(days);
+  const merged=new Map();
+  sfErrors=[];
+  for(let i=0;i<spans.length;i++){
+    if(onStep) onStep(i+1,spans.length);
+    const accts=await sfLoadWindow(spans[i][0],spans[i][1]);
+    accts.forEach(a=>{
+      const cur=merged.get(a.id);
+      if(!cur){
+        merged.set(a.id,Object.assign({},a,{transactions:(a.transactions||[]).slice()}));
+      } else {
+        const seen=new Set(cur.transactions.map(t=>t.id));
+        (a.transactions||[]).forEach(t=>{ if(!seen.has(t.id)) cur.transactions.push(t); });
+        if(a.balance!=null) cur.balance=a.balance;
+      }
+    });
+  }
+  sfAccounts=[...merged.values()];
+  sfDiag = sfAccounts.map(a=>{
+    const tx=a.transactions||[];
+    const ds=tx.map(t=>tsToDate(t.posted||t.transacted_at||0)).filter(d=>d>'1971').sort();
+    return {id:a.id,name:a.name,n:tx.length,
+            pend:tx.filter(t=>t.pending).length,
+            first:ds[0]||'',last:ds[ds.length-1]||''};
+  });
+  return spans.length;
+}
+
+function linkLocalAccounts(){
+  sfAccounts.forEach(a=>{
+    const r=S.simplefin.roles[a.id];
+    if(!r || r.role==='ignore') return;
+    const inst=(a.org&&(a.org.name||a.org.domain))||'';
+    if(r.role==='529'){
+      let local = S.accounts529.find(x=>x.id===r.localId) || S.accounts529.find(x=>x.sfId===a.id);
+      if(!local){
+        local={id:uid(),name:a.name,owner:'',beneficiary:'',marketValue:null,valueAsOf:'',
+               sfId:a.id,sfName:a.name,institution:inst};
+        S.accounts529.push(local);
+      }
+      r.localId=local.id;
+      local.sfId=a.id; local.sfName=a.name; local.institution=inst;   // your name stays yours
+      if(a.balance!=null){ local.marketValue=+a.balance; local.valueAsOf=today(); }
+    } else {
+      let local = S.accountsCash.find(x=>x.id===r.localId) || S.accountsCash.find(x=>x.sfId===a.id);
+      if(!local){
+        local={id:uid(),name:a.name,sfId:a.id,sfName:a.name,institution:inst};
+        S.accountsCash.push(local);
+      }
+      r.localId=local.id;
+      local.sfId=a.id; local.sfName=a.name; local.institution=inst;
+    }
+  });
+}
+
+function buildQueue(){
+  const seen = allSfIds();
+  const added = [];
+  sfAccounts.forEach(a=>{
+    const r=S.simplefin.roles[a.id];
+    if(!r || r.role==='ignore') return;
+    (a.transactions||[]).forEach(tx=>{
+      const sfId = a.id+':'+tx.id;
+      if(seen.has(sfId)) return;
+      const amt = +tx.amount;
+      let kind;
+      if(r.role==='529')      kind = amt<0 ? 'distributions' : 'contributions';
+      else                    kind = amt<0 ? 'tuition' : 'skip';
+      added.push({
+        sfId, kind,
+        date: tsToDate(tx.posted||tx.transacted_at||Math.floor(Date.now()/1000)),
+        amount: Math.abs(amt),
+        desc: tx.description||tx.payee||'',
+        role: r.role, localId: r.localId,
+        isPending: !!tx.pending,
+        purpose: 'k12'
+      });
+    });
+  });
+  S.pending = S.pending.concat(added).sort((a,b)=>b.date.localeCompare(a.date));
+  return added.length;
+}
+
+function renderQueue(){
+  const box=document.getElementById('queueBox');
+  if(!S.pending.length){ box.innerHTML=''; return; }
+  const rows = S.pending.map((p,i)=>{
+    const cashOpts = S.accountsCash.map(c=>'<option value="'+c.id+'"'+(p.destId===c.id||p.sourceId===c.id?' selected':'')+'>'+esc(c.name)+'</option>').join('');
+    let extra='';
+    if(p.kind==='distributions'){
+      extra='<select data-q="purpose" data-i="'+i+'">'+
+        '<option value="k12"'+(p.purpose==='k12'?' selected':'')+'>K\u201312</option>'+
+        '<option value="college"'+(p.purpose==='college'?' selected':'')+'>College</option>'+
+        '<option value="other"'+(p.purpose==='other'?' selected':'')+'>Non-qualified</option></select>';
+    }
+    return '<tr'+(p.isPending?' class="pend"':'')+'>'+
+      '<td><input type="checkbox" data-q="pick" data-i="'+i+'"'+((p.kind==='skip'||p.isPending)?'':' checked')+'></td>'+
+      '<td class="dt">'+fmtDate(p.date)+'</td>'+
+      '<td>'+esc(p.desc)+(p.isPending?' <span class="tag pending">pending</span>':'')+'</td>'+
+      '<td><select data-q="kind" data-i="'+i+'">'+
+        '<option value="contributions"'+(p.kind==='contributions'?' selected':'')+'>Contribution</option>'+
+        '<option value="distributions"'+(p.kind==='distributions'?' selected':'')+'>Withdrawal</option>'+
+        '<option value="tuition"'+(p.kind==='tuition'?' selected':'')+'>Tuition</option>'+
+        '<option value="skip"'+(p.kind==='skip'?' selected':'')+'>Skip</option>'+
+      '</select> '+extra+'</td>'+
+      '<td class="amt r">'+money2(p.amount)+'</td></tr>';
+  }).join('');
+
+  box.innerHTML='<div class="queue"><div class="queue-head"><div><h3>Review before filing</h3>'+
+    '<div class="sub">'+S.pending.length+' transaction'+(S.pending.length===1?'':'s')+' from your linked accounts. Nothing is counted until you file it.'+
+    (S.pending.some(p=>p.isPending)?' Rows marked <b>pending</b> have not cleared the bank \u2014 they are left unchecked because the amount can still change, and filing one now can duplicate it when it posts.':'')+
+    '</div></div></div>'+
+    '<table><thead><tr><th></th><th>Date</th><th>Description</th><th>File as</th><th class="r">Amount</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table>'+
+    '<div class="queue-foot"><button class="btn sm" id="qFile">File selected</button>'+
+    '<button class="btn ghost sm" id="qClear">Discard all</button></div></div>';
+}
+
+/* ============================================================
+   DIALOG
+   ============================================================ */
+const dlg=document.getElementById('dlg');
+let editing=null;
+
+const opts=(list,sel,blank)=> (blank?'<option value="">'+blank+'</option>':'')+
+  list.map(a=>'<option value="'+a.id+'"'+(a.id===sel?' selected':'')+'>'+esc(a.name)+'</option>').join('');
+
+function openDialog(kind,id){
+  editing={kind,id};
+  const body=document.getElementById('dlgBody'), title=document.getElementById('dlgTitle');
+  const rec = id && S[kind] ? S[kind].find(r=>r.id===id) : null;
+
+  if(kind==='sfToken'){
+    title.textContent='Connect SimpleFIN';
+    body.innerHTML='<div class="field"><label>Setup token</label>'+
+      '<textarea name="token" rows="4" required placeholder="Paste the setup token from SimpleFIN Bridge"></textarea>'+
+      '<div class="help">A one-time token from bridge.simplefin.org. It gets exchanged for an access URL stored in this file only. Tokens can only be claimed once \u2014 if this fails, generate a new one.</div></div>';
+  }
+  else if(kind==='acct529'){
+    const a=S.accounts529.find(x=>x.id===id);
+    title.textContent=a?'Edit '+a.name:'Add a 529 account';
+    body.innerHTML='<div class="field"><label>What you call it</label><input name="name" required value="'+esc(a?a.name:'')+'"></div>'+
+      (a&&a.sfId?'<div class="field"><div class="help">Linked to <b>'+esc(a.sfName||'')+'</b> at '+esc(a.institution||'your bank')+
+        '. Renaming only changes the label here \u2014 the bank link stays.</div></div>':'')+
+      '<div class="two"><div class="field"><label>Owner</label><input name="owner" value="'+esc(a?a.owner:'')+'"></div>'+
+      '<div class="field"><label>Beneficiary</label><input name="beneficiary" value="'+esc(a?a.beneficiary:'')+'"></div></div>'+
+      '<div class="two"><div class="field"><label>Current balance</label><input name="marketValue" type="number" step="0.01" value="'+(a&&a.marketValue!=null?a.marketValue:'')+'"></div>'+
+      '<div class="field"><label>As of</label><input name="valueAsOf" type="date" value="'+esc(a?a.valueAsOf:'')+'"></div></div>'+
+      '<div class="field"><div class="help">The beneficiary drives the cap \u2014 each one gets their own $20,000 a year.</div></div>';
+  }
+  else if(kind==='acctCash'){
+    const a=S.accountsCash.find(x=>x.id===id);
+    title.textContent=a?'Rename '+a.name:'Add a receiving account';
+    body.innerHTML='<div class="field"><label>What you call it</label><input name="name" required value="'+esc(a?a.name:'')+'"></div>'+
+      '<div class="field"><div class="help">'+
+        (a&&a.sfId
+          ? 'Linked to <b>'+esc(a.sfName||'')+'</b> at '+esc(a.institution||'your bank')+'. Renaming only changes the label here \u2014 the bank link stays, so future pulls still land in this account.'
+          : 'Where 529 withdrawals land before tuition gets paid.')+
+      '</div></div>';
+  }
+  else if(kind==='contributions'){
+    title.textContent=rec?'Edit contribution':'Add a contribution';
+    body.innerHTML='<div class="two"><div class="field"><label>Date</label><input name="date" type="date" required value="'+(rec?rec.date:today())+'"></div>'+
+      '<div class="field"><label>Amount</label><input name="amount" type="number" step="0.01" required value="'+(rec?rec.amount:'')+'"></div></div>'+
+      '<div class="field"><label>Into which 529</label><select name="accountId" required>'+opts(S.accounts529,rec?rec.accountId:'')+'</select></div>'+
+      '<div class="field"><label>Note</label><input name="note" value="'+esc(rec?rec.note:'')+'"></div>';
+  }
+  else if(kind==='distributions'){
+    title.textContent=rec?'Edit withdrawal':'Add a withdrawal';
+    body.innerHTML='<div class="two"><div class="field"><label>Date out</label><input name="date" type="date" required value="'+(rec?rec.date:today())+'"></div>'+
+      '<div class="field"><label>Amount</label><input name="amount" type="number" step="0.01" required value="'+(rec?rec.amount:'')+'"></div></div>'+
+      '<div class="field"><label>Out of which 529</label><select name="accountId" required>'+opts(S.accounts529,rec?rec.accountId:'')+'</select></div>'+
+      '<div class="field"><label>Landed in</label><select name="destId">'+opts(S.accountsCash,rec?rec.destId:'','Somewhere else')+'</select></div>'+
+      '<div class="field"><label>What it is for</label><select name="purpose">'+
+        '<option value="k12"'+(!rec||rec.purpose==='k12'?' selected':'')+'>K\u201312 tuition \u2014 counts against the cap</option>'+
+        '<option value="college"'+(rec&&rec.purpose==='college'?' selected':'')+'>College / other qualified</option>'+
+        '<option value="other"'+(rec&&rec.purpose==='other'?' selected':'')+'>Non-qualified</option></select></div>'+
+      '<div class="field"><label>Note</label><input name="note" value="'+esc(rec?rec.note:'')+'"></div>';
+  }
+  else if(kind==='tuition'){
+    title.textContent=rec?'Edit tuition payment':'Add a tuition payment';
+    body.innerHTML='<div class="two"><div class="field"><label>Date paid</label><input name="date" type="date" required value="'+(rec?rec.date:today())+'"></div>'+
+      '<div class="field"><label>Amount</label><input name="amount" type="number" step="0.01" required value="'+(rec?rec.amount:'')+'"></div></div>'+
+      '<div class="field"><label>Paid from</label><select name="sourceId">'+opts(S.accountsCash,rec?rec.sourceId:'','Other account \u2014 not 529 money')+'</select>'+
+      '<div class="help">Pick the receiving account when 529 money paid it. Anything else counts as out of pocket and shows as reimbursable.</div></div>'+
+      '<div class="field"><label>Note</label><input name="note" value="'+esc(rec?rec.note:'')+'"></div>';
+  }
+
+  dlg.showModal();
+  const f=body.querySelector('input,select,textarea'); if(f) f.focus();
+}
+
+document.getElementById('dlgForm').addEventListener('submit', async e=>{
+  const btn=e.submitter;
+  if(!btn||btn.value!=='save'){ editing=null; return; }
+  const f=new FormData(e.target), g=k=>(f.get(k)||'').toString().trim();
+  const {kind,id}=editing; editing=null;
+
+  if(kind==='sfToken'){
+    sfSet('','Connecting\u2026');
+    try{
+      const url = await sfClaim(g('token'));
+      S.simplefin.accessUrl = url;
+      await sfLoadAccounts(90);
+      sfSet('on','Connected. Now tell it what each account is.');
+      render(); await saveState();
+    }catch(err){
+      sfSet('err','Could not connect: '+err.message);
+      renderSf();
+    }
+    return;
+  }
+  if(kind==='acct529'){
+    const prev=S.accounts529.find(a=>a.id===id)||{};
+    const rec={id:id||uid(),name:g('name')||'529',owner:g('owner'),beneficiary:g('beneficiary'),
+      marketValue:g('marketValue')===''?null:+g('marketValue'),valueAsOf:g('valueAsOf'),
+      sfId:prev.sfId, sfName:prev.sfName, institution:prev.institution};
+    const i=S.accounts529.findIndex(a=>a.id===id);
+    if(i>=0) S.accounts529[i]=rec; else S.accounts529.push(rec);
+  }
+  else if(kind==='acctCash'){
+    const i=S.accountsCash.findIndex(a=>a.id===id);
+    if(i>=0) S.accountsCash[i].name=g('name')||S.accountsCash[i].name;
+    else S.accountsCash.push({id:uid(),name:g('name')||'Savings'});
+  }
+  else {
+    const base={id:id||uid(),date:g('date'),amount:+g('amount')||0,note:g('note')};
+    if(kind==='contributions') base.accountId=g('accountId');
+    if(kind==='distributions'){ base.accountId=g('accountId'); base.destId=g('destId'); base.purpose=g('purpose')||'k12'; }
+    if(kind==='tuition') base.sourceId=g('sourceId');
+    const arr=S[kind], i=arr.findIndex(r=>r.id===id);
+    if(i>=0){ base.sfId=arr[i].sfId; arr[i]=base; } else arr.push(base);
+    if(base.date) YEAR=yearOf(base.date);
+  }
+  render(); await saveState();
+});
+
+/* ============================================================
+   EVENTS
+   ============================================================ */
+/* ---------- drawer ---------- */
+const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
+const trigger=document.getElementById('openDrawer');
+function setDrawer(open){
+  drawer.hidden=!open; scrim.hidden=!open;
+  trigger.setAttribute('aria-expanded',open?'true':'false');
+  document.body.style.overflow=open?'hidden':'';
+  if(open){ const f=drawer.querySelector('button,select'); if(f) f.focus(); }
+  else trigger.focus();
+}
+trigger.onclick=()=>setDrawer(drawer.hidden);
+document.getElementById('closeDrawer').onclick=()=>setDrawer(false);
+scrim.onclick=()=>setDrawer(false);
+document.addEventListener('keydown',e=>{ if(e.key==='Escape' && !drawer.hidden) setDrawer(false); });
+
+document.getElementById('syncSave').onclick=async()=>{
+  S.sync.gistId=document.getElementById('gistId').value.trim().replace(/^.*\/([\w]+)\/?$/,'$1');
+  S.sync.token=document.getElementById('gistToken').value.trim();
+  if(!S.sync.gistId||!S.sync.token){ syncSet('err','Both the gist ID and a token are needed.'); return; }
+  renderSync();
+  await saveState({noPush:true});
+  await pushGist(false);
+};
+document.getElementById('syncPull').onclick=()=>pullGist();
+document.getElementById('syncForget').onclick=async()=>{
+  if(!confirm('Stop syncing? Your ledger stays on this device; the gist is left untouched.')) return;
+  S.sync={gistId:'',token:'',rev:S.sync.rev||0,lastSync:''};
+  renderSync(); syncSet('','Not syncing.');
+  await saveState({noPush:true});
+};
+
+document.getElementById('yPrev').onclick=()=>{YEAR--;render();};
+document.getElementById('yNext').onclick=()=>{YEAR++;render();};
+
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected','false'));
+    b.setAttribute('aria-selected','true');
+    TAB=b.dataset.tab; renderLedger();
+  };
+});
+
+document.getElementById('addEntry').onclick=()=>{
+  if(!S.accounts529.length && TAB!=='tuition'){ openDialog('acct529'); return; }
+  openDialog(TAB);
+};
+document.getElementById('sfConnect').onclick=()=>openDialog('sfToken');
+document.getElementById('sfForget').onclick=async()=>{
+  if(!confirm('Disconnect SimpleFIN? Your ledger entries stay; only the bank link is removed.')) return;
+  S.simplefin={accessUrl:'',lastPull:'',roles:{}};
+  sfAccounts=[]; sfSet('','Not connected.');
+  render(); await saveState();
+};
+document.getElementById('sfPull').onclick=async()=>{
+  const btn=document.getElementById('sfPull');
+  const days=+document.getElementById('sfRange').value||90;
+  btn.disabled=true;
+  try{
+    const calls=await sfLoadAccounts(days,(i,total)=>{
+      sfSet('','Pulling window '+i+' of '+total+'\u2026');
+    });
+    linkLocalAccounts();
+    const n=buildQueue();
+    S.simplefin.lastPull=today();
+    sfSet('on',(n?'Pulled '+n+' new transaction'+(n===1?'':'s')+' \u2014 review below.':'Pulled. Nothing new since last time.')+
+      ' Used '+calls+' of your ~24 daily requests.');
+    render(); await saveState();
+    if(n) setDrawer(false);
+  }catch(err){
+    sfSet('err','Could not pull: '+err.message);
+  }
+  btn.disabled=false;
+};
+
+document.addEventListener('change', async e=>{
+  const roleSel=e.target.closest('[data-role]');
+  if(roleSel){
+    const sfid=roleSel.dataset.role;
+    S.simplefin.roles[sfid]=Object.assign({},S.simplefin.roles[sfid],{role:roleSel.value});
+    if(roleSel.value!=='ignore') linkLocalAccounts();
+    render(); await saveState();
+    return;
+  }
+  const q=e.target.closest('[data-q]');
+  if(q){
+    const i=+q.dataset.i, p=S.pending[i];
+    if(!p) return;
+    if(q.dataset.q==='kind') p.kind=q.value;
+    if(q.dataset.q==='purpose') p.purpose=q.value;
+    if(q.dataset.q==='pick') p.picked=q.checked;
+    if(q.dataset.q==='kind'){ renderQueue(); }
+  }
+});
+
+document.addEventListener('click', async e=>{
+  const add=e.target.closest('[data-add]');
+  if(add){ openDialog(add.dataset.add); return; }
+  const ed=e.target.closest('[data-edit]');
+  if(ed){ openDialog(ed.dataset.edit,ed.dataset.id); return; }
+
+  if(e.target.id==='qFile'){
+    const picks=[...document.querySelectorAll('[data-q="pick"]')].filter(c=>c.checked).map(c=>+c.dataset.i);
+    const keep=[];
+    S.pending.forEach((p,i)=>{
+      if(!picks.includes(i)){ keep.push(p); return; }
+      if(p.kind==='skip'){ S.dismissed.push(p.sfId); return; }   // remembered, won't return
+      const base={id:uid(),date:p.date,amount:p.amount,note:p.desc,sfId:p.sfId};
+      if(p.kind==='contributions'){ base.accountId=p.localId; S.contributions.push(base); }
+      if(p.kind==='distributions'){ base.accountId=p.localId; base.purpose=p.purpose||'k12';
+        base.destId=(S.accountsCash[0]||{}).id||''; S.distributions.push(base); }
+      if(p.kind==='tuition'){ base.sourceId=p.localId; S.tuition.push(base); }
+    });
+    S.pending=keep;
+    render(); await saveState();
+    return;
+  }
+  if(e.target.id==='qClear'){
+    if(!confirm('Discard all '+S.pending.length+' transactions in review? They will not come back on the next pull.')) return;
+    S.pending.forEach(p=>{ S.dismissed.push(p.sfId); });
+    S.pending=[];
+    render(); await saveState();
+    return;
+  }
+
+  const del=e.target.closest('[data-del]');
+  if(del){
+    const k=del.dataset.del, id=del.dataset.id;
+    if(k==='acct529'){
+      const used=S.contributions.some(r=>r.accountId===id)||S.distributions.some(r=>r.accountId===id);
+      if(used && !confirm('This account has entries against it. Remove anyway? Entries stay but lose their account name.')) return;
+      S.accounts529=S.accounts529.filter(a=>a.id!==id);
+    } else if(k==='acctCash'){
+      S.accountsCash=S.accountsCash.filter(a=>a.id!==id);
+    } else {
+      if(!confirm('Delete this entry?')) return;
+      S[k]=S[k].filter(r=>r.id!==id);
+    }
+    render(); await saveState();
+  }
+});
+
+document.getElementById('btnExport').onclick=()=>{
+  const blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='529-ledger-'+today()+'.json'; a.click();
+  URL.revokeObjectURL(a.href);
+};
+document.getElementById('btnImport').onclick=()=>document.getElementById('fileIn').click();
+document.getElementById('fileIn').onchange=async e=>{
+  const file=e.target.files[0]; if(!file) return;
+  try{
+    const data=JSON.parse(await file.text());
+    if(!data||!Array.isArray(data.distributions)) throw new Error('shape');
+    S=Object.assign(structuredClone(BLANK),data);
+    render(); await saveState();
+  }catch(err){ alert('That file is not a 529 Ledger export. Pick a JSON file exported from this page.'); }
+  e.target.value='';
+};
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+(async function boot(){
+  const saved=await loadState();
+  if(saved) S=Object.assign(structuredClone(BLANK),saved);
+  const ys=new Set([new Date().getFullYear()]);
+  [...S.contributions,...S.distributions,...S.tuition].forEach(r=>{ if(r.date) ys.add(yearOf(r.date)); });
+  const list=[...ys].sort();
+  YEAR = list.includes(new Date().getFullYear()) ? new Date().getFullYear() : list[list.length-1];
+  if(S.sync.gistId && S.sync.token){
+    try{
+      const remote = await gistRead();
+      if(remote && weight(remote) >= weight(S) && ((remote.sync&&remote.sync.rev)||0) >= (S.sync.rev||0)){
+        const keep=Object.assign({},S.sync);
+        S=Object.assign(structuredClone(BLANK),remote);
+        S.sync=Object.assign(keep,{rev:(remote.sync&&remote.sync.rev)||0});
+      }
+      syncSet('on','Up to date.');
+    }catch(e){ syncSet('err','Could not reach the gist: '+e.message); }
+  }
+  if(S.simplefin.accessUrl){
+    try{ await sfLoadAccounts(90); }catch(e){ sfSet('err','Could not reach SimpleFIN: '+e.message); }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
