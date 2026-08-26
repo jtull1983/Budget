@@ -327,6 +327,17 @@ footer b{color:var(--ink-2)}
 
     </details>
 
+    <details class="fold" id="foldTx">
+    <summary>Bank transactions <span class="sum" id="txSum"></span></summary>
+    <div class="tx-controls">
+      <select id="txAcct"></select>
+      <label class="chk"><input type="checkbox" id="txUnfiled"> Only unfiled</label>
+      <span style="flex:1"></span>
+      <span class="hint" id="txCount"></span>
+    </div>
+    <table id="txTable"><thead></thead><tbody></tbody></table>
+    </details>
+
     <details class="fold" id="foldSync">
     <summary><span class="dot" id="syncDotHead"></span> Sync across devices <span class="sum" id="syncSum"></span></summary>
     <div class="status" style="margin-top:12px">
@@ -371,7 +382,7 @@ footer b{color:var(--ink-2)}
 <header class="masthead">
   <div class="masthead-row">
     <div>
-      <h1>529 Ledger <span class="ver" id="ver">v9</span></h1>
+      <h1>529 Ledger <span class="ver" id="ver">v10</span></h1>
       <div class="sub">Contributions in &middot; withdrawals out &middot; tuition paid</div>
     </div>
     <div class="masthead-tools">
@@ -447,21 +458,6 @@ footer b{color:var(--ink-2)}
     <button class="btn ghost sm" data-add="acct529">Add a 529 manually</button>
     <button class="btn ghost sm" data-add="acctCash">Add a receiving account</button>
   </div>
-</section>
-
-<!-- BANK TRANSACTIONS -->
-<section>
-  <div class="sec-head">
-    <h2>Bank transactions</h2>
-    <span class="hint">everything SimpleFIN returned, and what happened to it</span>
-  </div>
-  <div class="tx-controls">
-    <select id="txAcct"></select>
-    <label class="chk"><input type="checkbox" id="txUnfiled"> Only show ones not in the ledger</label>
-    <span style="flex:1"></span>
-    <span class="hint" id="txCount"></span>
-  </div>
-  <table id="txTable"><thead></thead><tbody></tbody></table>
 </section>
 
 <!-- LEDGER -->
@@ -866,8 +862,21 @@ function renderAccounts(){
     card(a,'acct529',val,'529'+(a.institution?' \u00B7 '+esc(a.institution):''));
   });
   S.accountsCash.filter(vis).forEach(a=>{
-    const left=sum(S.distributions.filter(d=>d.destId===a.id))-sum(S.tuition.filter(t=>t.sourceId===a.id));
-    card(a,'acctCash',left,'Receiving \u00B7 529 money left');
+    /* Lead with the actual bank balance. The old headline was
+       withdrawals-in minus tuition-out, which is a reconciliation figure,
+       not money in the account, and goes deeply negative when tuition was
+       paid from somewhere other than a 529. */
+    const inflow=sum(S.distributions.filter(d=>d.destId===a.id));
+    const outflow=sum(S.tuition.filter(t=>t.sourceId===a.id));
+    const net=inflow-outflow;
+    const known=(a.balance!=null&&a.balance!=='');
+    const amount=known?+a.balance:net;
+    let sub;
+    if(net>0.5)       sub='Receiving \u00B7 '+money(net)+' of 529 money unspent';
+    else if(net<-0.5) sub='Receiving \u00B7 '+money(-net)+' paid, not from a 529';
+    else              sub='Receiving \u00B7 all withdrawals matched';
+    if(!known) sub='Receiving \u00B7 no bank balance yet';
+    card(a,'acctCash',amount,sub);
   });
   if(!S.accounts529.length && !S.accountsCash.length){
     box.innerHTML='<div class="empty">No accounts yet. Open <strong>Banking</strong> up top to connect and label your accounts, or add one by hand.</div>';
@@ -1171,11 +1180,12 @@ function linkLocalAccounts(){
     } else {
       let local = S.accountsCash.find(x=>x.id===r.localId) || S.accountsCash.find(x=>x.sfId===a.id);
       if(!local){
-        local={id:uid(),name:a.name,sfId:a.id,sfName:a.name,institution:inst};
+        local={id:uid(),name:a.name,sfId:a.id,sfName:a.name,institution:inst,balance:null};
         S.accountsCash.push(local);
       }
       r.localId=local.id;
       local.sfId=a.id; local.sfName=a.name; local.institution=inst;
+      if(a.balance!=null){ local.balance=+a.balance; local.balanceAsOf=today(); }
     }
   });
 }
@@ -1254,23 +1264,26 @@ function filedIds(){
 function txStatus(sfId, acctId, filed){
   if(filed.has(sfId)){
     const k=filed.get(sfId);
-    return ['filed', k==='tuition'?'Filed: tuition':(k==='distributions'?'Filed: withdrawal':'Filed: contribution')];
+    return ['filed', k==='tuition'?'Tuition':(k==='distributions'?'Withdrawal':'Contribution')];
   }
   if(S.pending.some(p=>p.sfId===sfId)) return ['review','In review'];
   if((S.dismissed||[]).includes(sfId)) return ['dismissed','Dismissed'];
-  const role=(S.simplefin.roles[acctId]||{}).role||'ignore';
-  if(role==='ignore') return ['ignored','Account not labeled'];
-  return ['none','Not imported'];
+  return ['none','Not filed'];
 }
 
 function renderTx(){
   const sel=document.getElementById('txAcct');
   const table=document.getElementById('txTable');
-  const ids=Object.keys(S.tx||{});
+  /* Only accounts you actually labeled. An ignored account's transactions
+     are noise here \u2014 that is what ignoring it meant. */
+  const ids=Object.keys(S.tx||{}).filter(id=>((S.simplefin.roles[id]||{}).role||'ignore')!=='ignore');
+  const sumEl=document.getElementById('txSum');
+  if(sumEl) sumEl.textContent = ids.length ? ids.reduce((n,id)=>n+(S.tx[id]||[]).length,0)+' fetched' : 'none';
+
   if(!ids.length){
-    sel.innerHTML='<option>No pull yet</option>';
+    sel.innerHTML='<option>No labeled accounts</option>';
     table.tHead.innerHTML='';
-    table.tBodies[0].innerHTML='<tr><td class="empty">Nothing fetched yet. Open <strong>Banking</strong> and pull transactions.</td></tr>';
+    table.tBodies[0].innerHTML='<tr><td class="empty">Label a 529 or receiving account above, then pull.</td></tr>';
     document.getElementById('txCount').textContent='';
     return;
   }
@@ -1291,16 +1304,18 @@ function renderTx(){
   });
   if(onlyUnfiled) rows=rows.filter(r=>r.cls!=='filed');
 
-  table.tHead.innerHTML='<tr><th>Date</th><th>Description</th><th class="r">Amount</th><th>Status</th></tr>';
+  table.tHead.innerHTML='<tr><th style="width:62px">Date</th><th>Description</th>'+
+    '<th class="r" style="width:84px">Amount</th><th style="width:82px">Status</th></tr>';
   table.tBodies[0].innerHTML = rows.length ? rows.map(r=>{
     const amt=+r.t.amount;
     return '<tr><td class="dt">'+fmtDate(tsToDate(r.t.posted))+'</td>'+
-      '<td>'+esc(r.t.description)+(r.t.pending?' <span class="tag pending">pending</span>':'')+'</td>'+
+      '<td class="clip" title="'+esc(r.t.description)+'">'+esc(r.t.description)+
+      (r.t.pending?' <span class="tag pending">pend</span>':'')+'</td>'+
       '<td class="amt r" style="color:'+(amt<0?'var(--paid)':'var(--in)')+'">'+money2(amt)+'</td>'+
       '<td><span class="st st-'+r.cls+'">'+r.label+'</span></td></tr>';
   }).join('') : '<tr><td class="empty" colspan="4">Nothing to show for this account.</td></tr>';
 
-  document.getElementById('txCount').textContent = rows.length+' of '+(S.tx[cur]||[]).length+' shown';
+  document.getElementById('txCount').textContent = rows.length+' of '+(S.tx[cur]||[]).length;
 }
 
 function renderStore(){
