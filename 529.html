@@ -81,7 +81,15 @@ h1{font-family:"Zilla Slab",Georgia,serif;font-weight:700;font-size:27px;line-he
 @media(min-width:560px){.ticks span:nth-child(even){visibility:visible}}
 
 /* ---------- reconcile ---------- */
-.recon{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--rule);border-left:3px solid var(--ink-3);background:var(--card);border-radius:var(--r);padding:9px 12px;margin-bottom:16px;font-size:12.5px;line-height:1.45}
+.recon{border:1px solid var(--rule);border-left:3px solid var(--ink-3);background:var(--card);
+  border-radius:var(--r);margin-bottom:16px;font-size:12.5px;line-height:1.45}
+.recon>summary{cursor:pointer;list-style:none;padding:9px 12px;display:flex;gap:10px;align-items:center}
+.recon>summary::-webkit-details-marker{display:none}
+.recon>summary::after{content:"\25BE";margin-left:auto;color:var(--ink-3);font-size:10px;
+  transform:rotate(-90deg);transition:transform .15s;flex:0 0 auto}
+.recon[open]>summary::after{transform:rotate(0)}
+.recon>summary #reconSum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recon>div{padding:0 12px 11px 33px}
 .recon.flag{border-left-color:var(--warn)}
 .recon.clear{border-left-color:var(--ok)}
 .recon .mk{font-weight:700;font-size:15px;line-height:1.35;flex:0 0 auto}
@@ -97,6 +105,9 @@ h2{font-family:"Zilla Slab",Georgia,serif;font-size:17px;font-weight:600;margin:
 
 /* ---------- tables ---------- */
 table{width:100%;border-collapse:collapse;font-size:13.5px}
+#ledger{table-layout:fixed}
+td.clip{max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ledger td.amt{font-size:13px}
 thead th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
   color:var(--ink-3);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--rule);white-space:nowrap}
 tbody td{padding:6px 8px;border-bottom:1px solid var(--rule-2);vertical-align:middle}
@@ -146,7 +157,7 @@ tfoot td{padding:10px 8px;border-top:2px solid var(--rule);font-weight:700;font-
 .acct .hid{position:absolute;top:6px;right:43px;opacity:0}
 .acct:hover .hid,.acct:focus-within .hid{opacity:1}
 @media(hover:none){.acct .hid{opacity:.55}}
-.accts-bar{display:flex;justify-content:flex-end;margin-top:8px}
+.accts-bar{display:flex;justify-content:flex-start;margin-top:8px}
 
 .sf-err{margin-top:12px;border-left:3px solid var(--warn);background:rgba(228,120,95,.08);
   padding:10px 13px;font-size:12.5px;color:var(--ink);border-radius:2px;line-height:1.5}
@@ -268,8 +279,7 @@ footer b{color:var(--ink-2)}
   .stage .big{font-size:25px}
   .two{grid-template-columns:1fr}
   .maprow{grid-template-columns:1fr}
-  thead th:nth-child(4),tbody td:nth-child(4){display:none}
-  .queue thead th:nth-child(4),.queue tbody td:nth-child(4){display:table-cell}
+  #ledger th.sm-hide,#ledger td.sm-hide{display:none}
 }
 </style>
 </head>
@@ -353,7 +363,7 @@ footer b{color:var(--ink-2)}
 <header class="masthead">
   <div class="masthead-row">
     <div>
-      <h1>529 Ledger <span class="ver" id="ver">v7</span></h1>
+      <h1>529 Ledger <span class="ver" id="ver">v8</span></h1>
       <div class="sub">Contributions in &middot; withdrawals out &middot; tuition paid</div>
     </div>
     <div class="masthead-tools">
@@ -409,10 +419,10 @@ footer b{color:var(--ink-2)}
   <div class="ticks" id="ticks"></div>
 </div>
 
-<div class="recon" id="recon">
-  <span class="mk">&mdash;</span>
-  <div id="reconText">Nothing recorded yet.</div>
-</div>
+<details class="recon" id="recon">
+  <summary><span class="mk">&mdash;</span><span id="reconSum">Nothing recorded yet.</span></summary>
+  <div id="reconText"></div>
+</details>
 
 <!-- REVIEW QUEUE -->
 <div id="queueBox"></div>
@@ -797,24 +807,32 @@ function render(){
     ticks.appendChild(s);
   }
 
-  const rec=document.getElementById('recon'), rt=document.getElementById('reconText'), mk=rec.querySelector('.mk');
+  const rec=document.getElementById('recon'), rt=document.getElementById('reconText');
+  const rs=document.getElementById('reconSum'), mk=rec.querySelector('.mk');
   const gap=t.tuiY-t.disY;
+  const wasOpen=rec.open;
   rec.className='recon';
   if(!inYear(S.tuition,YEAR).length && !inYear(S.distributions,YEAR).length){
-    mk.textContent='\u2014'; rt.textContent='Nothing recorded for '+YEAR+' yet.';
+    mk.textContent='\u2014';
+    rs.textContent='Nothing recorded for '+YEAR+' yet.';
+    rt.innerHTML='Add withdrawals and tuition payments, or pull them from the bank, and this will reconcile them.';
   } else if(gap>0.5){
     rec.classList.add('flag'); mk.textContent='!';
+    rs.innerHTML='<b>'+money(gap)+'</b> of '+YEAR+' tuition not yet reimbursed';
     rt.innerHTML='You paid <b>'+money2(t.tuiY)+'</b> in '+YEAR+' tuition but withdrew only <b>'+money2(t.disY)+
       '</b> from the 529s. <b>'+money2(gap)+'</b> of tuition has not been reimbursed, and you have <b>'+
       money(Math.max(0,t.capLeft))+'</b> of K\u201312 room left this year. Reimburse before December 31 or that room is gone.';
   } else if(gap<-0.5){
     rec.classList.add('flag'); mk.textContent='!';
+    rs.innerHTML='<b>'+money(-gap)+'</b> withdrawn without a matching expense';
     rt.innerHTML='You withdrew <b>'+money2(t.disY)+'</b> in '+YEAR+' against only <b>'+money2(t.tuiY)+
       '</b> of recorded tuition. <b>'+money2(-gap)+'</b> is unmatched \u2014 either a payment is missing, or it needs a qualified expense in '+YEAR+'.';
   } else {
     rec.classList.add('clear'); mk.textContent='\u2713';
-    rt.innerHTML='Withdrawals and tuition match for '+YEAR+' at <b>'+money2(t.tuiY)+'</b>.';
+    rs.innerHTML='Withdrawals and tuition match at <b>'+money(t.tuiY)+'</b>';
+    rt.innerHTML='Everything withdrawn in '+YEAR+' is accounted for by a recorded tuition payment.';
   }
+  rec.open=wasOpen;
 
   renderSf(); renderSync(); renderQueue(); renderAccounts(); renderLedger(); renderTx(); renderStore();
 }
@@ -832,7 +850,7 @@ function renderAccounts(){
     const el=document.createElement('div'); el.className='acct'+(a.hide?' is-hidden':'');
     el.innerHTML='<button class="rowact del" data-del="'+kind+'" data-id="'+a.id+'" title="Remove">\u00D7</button>'+
       '<button class="rowact ren" data-edit="'+kind+'" data-id="'+a.id+'" title="Rename">\u270E</button>'+
-      '<button class="rowact hid" data-hide="'+kind+'" data-id="'+a.id+'" title="'+(a.hide?'Show':'Hide')+'">'+(a.hide?'\u25C9':'\u25CB')+'</button>'+
+      '<button class="rowact hid" data-hide="'+kind+'" data-id="'+a.id+'" title="'+(a.hide?'Un-ignore':'Ignore')+'">'+(a.hide?'\u25C9':'\u25CB')+'</button>'+
       '<h3>'+esc(a.name)+'</h3>'+
       '<div class="amt-big num">'+money(amount)+'</div>'+
       '<div class="sub-line">'+sub+'</div>';
@@ -858,15 +876,33 @@ function renderAccounts(){
   const nHid=[...S.accounts529,...S.accountsCash].filter(a=>a.hide).length;
   const bar=document.getElementById('acctsBar');
   bar.innerHTML = nHid
-    ? '<button class="btn ghost sm" id="toggleHidden">'+(S.showHidden?'Hide':'Show')+' '+nHid+' hidden</button>'
+    ? '<button class="btn ghost sm" id="toggleHidden">'+
+        (S.showHidden?'\u25BE ':'\u25B8 ')+nHid+' ignored account'+(nHid===1?'':'s')+'</button>'
     : '';
 }
 
+/* Fixed widths so the amount is never the column that gets squeezed off
+   the screen. Long fund names in the note clip to one line instead of
+   wrapping to five. */
 const COLS={
-  contributions:[['Date','dt'],['Account',''],['Note',''],['Amount','r']],
-  distributions:[['Date','dt'],['From 529',''],['Landed in',''],['Use',''],['Amount','r']],
-  tuition:[['Date','dt'],['Paid from',''],['Note',''],['Amount','r']]
+  contributions:[
+    {t:'Date',c:'dt',w:'70px'},
+    {t:'Account',w:'92px',clip:1},
+    {t:'Note',clip:1},
+    {t:'Amount',r:1,w:'92px'}],
+  distributions:[
+    {t:'Date',c:'dt',w:'70px'},
+    {t:'From 529',w:'92px',clip:1},
+    {t:'Landed in',w:'92px',clip:1,sm:1},
+    {t:'Use',w:'62px'},
+    {t:'Amount',r:1,w:'92px'}],
+  tuition:[
+    {t:'Date',c:'dt',w:'70px'},
+    {t:'Paid from',w:'92px',clip:1},
+    {t:'Note',clip:1},
+    {t:'Amount',r:1,w:'92px'}]
 };
+const cls=c=>[c.c||'',c.r?'r':'',c.clip?'clip':'',c.sm?'sm-hide':''].filter(Boolean).join(' ');
 
 function renderLedger(){
   document.getElementById('cCon').textContent=inYear(S.contributions,YEAR).length;
@@ -874,26 +910,33 @@ function renderLedger(){
   document.getElementById('cTui').textContent=inYear(S.tuition,YEAR).length;
 
   const table=document.getElementById('ledger'), cols=COLS[TAB];
-  table.tHead.innerHTML='<tr>'+cols.map(c=>'<th class="'+(c[1]==='r'?'r':'')+'">'+c[0]+'</th>').join('')+'<th class="r"></th></tr>';
+  table.tHead.innerHTML='<tr>'+cols.map(c=>
+    '<th class="'+(c.r?'r':'')+(c.sm?' sm-hide':'')+'"'+(c.w?' style="width:'+c.w+'"':'')+'>'+c.t+'</th>'
+  ).join('')+'<th class="r" style="width:52px"></th></tr>';
+
   const rows=inYear(S[TAB],YEAR).slice().sort((a,b)=>b.date.localeCompare(a.date));
   const tb=table.tBodies[0]; tb.innerHTML='';
-
   if(!rows.length){
     tb.innerHTML='<tr><td class="empty" colspan="'+(cols.length+1)+'">Nothing recorded in '+YEAR+'.</td></tr>';
   }
+  const cell=(c,val,style)=>'<td class="'+cls(c)+'"'+(style||'')+' title="'+esc(val)+'">'+esc(val)+'</td>';
+
   rows.forEach(r=>{
     let cells;
     if(TAB==='contributions'){
-      cells='<td class="dt">'+fmtDate(r.date)+'</td><td>'+esc(nameOf(r.accountId)||'\u2014')+'</td>'+
-            '<td>'+esc(r.note)+'</td><td class="amt r" style="color:var(--in)">'+money2(r.amount)+'</td>';
+      cells=cell(cols[0],fmtDate(r.date))+cell(cols[1],nameOf(r.accountId)||'\u2014')+
+            cell(cols[2],r.note||'')+
+            '<td class="amt r" style="color:var(--in)">'+money2(r.amount)+'</td>';
     } else if(TAB==='distributions'){
       const p=r.purpose||'other', label=p==='k12'?'K\u201312':(p==='college'?'College':'Other');
-      cells='<td class="dt">'+fmtDate(r.date)+'</td><td>'+esc(nameOf(r.accountId)||'\u2014')+'</td>'+
-            '<td>'+esc(nameOf(r.destId)||'\u2014')+'</td><td><span class="tag '+p+'">'+label+'</span></td>'+
+      cells=cell(cols[0],fmtDate(r.date))+cell(cols[1],nameOf(r.accountId)||'\u2014')+
+            cell(cols[2],nameOf(r.destId)||'\u2014')+
+            '<td><span class="tag '+p+'">'+label+'</span></td>'+
             '<td class="amt r" style="color:var(--out)">'+money2(r.amount)+'</td>';
     } else {
-      cells='<td class="dt">'+fmtDate(r.date)+'</td><td>'+esc(nameOf(r.sourceId)||'Other')+'</td>'+
-            '<td>'+esc(r.note)+'</td><td class="amt r" style="color:var(--paid)">'+money2(r.amount)+'</td>';
+      cells=cell(cols[0],fmtDate(r.date))+cell(cols[1],nameOf(r.sourceId)||'Other')+
+            cell(cols[2],r.note||'')+
+            '<td class="amt r" style="color:var(--paid)">'+money2(r.amount)+'</td>';
     }
     const tr=document.createElement('tr');
     tr.innerHTML=cells+'<td class="r"><button class="rowact" data-edit="'+TAB+'" data-id="'+r.id+'" title="Edit">\u270E</button>'+
