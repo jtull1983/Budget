@@ -138,6 +138,15 @@ tfoot td{padding:10px 8px;border-top:2px solid var(--rule);font-weight:700;font-
   transform:rotate(-90deg);transition:transform .15s}
 .fold[open]>summary::after{transform:rotate(0)}
 .fold>summary:hover{color:var(--out)}
+.ignored-fold{margin-top:10px;border-top:1px solid var(--rule-2)}
+.ignored-fold>summary{cursor:pointer;list-style:none;padding:10px 0;font-size:12px;
+  color:var(--ink-3);font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  display:flex;align-items:center;gap:7px}
+.ignored-fold>summary::-webkit-details-marker{display:none}
+.ignored-fold>summary::before{content:"\25B8";font-size:10px;transition:transform .15s}
+.ignored-fold[open]>summary::before{transform:rotate(90deg)}
+.ignored-fold>summary:hover{color:var(--ink)}
+.ignored-fold .maprow{opacity:.6}
 .fold .sum{font-family:"Public Sans",sans-serif;font-weight:400;font-size:11.5px;color:var(--ink-3)}
 
 .tx-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 4px}
@@ -179,7 +188,6 @@ tfoot td{padding:10px 8px;border-top:2px solid var(--rule);font-weight:700;font-
 .acct .amt-big{font-size:18px;font-weight:500;margin-top:5px;line-height:1}
 .acct .sub-line{font-size:10.5px;color:var(--ink-3);margin-top:3px;letter-spacing:.02em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.acct .needs{color:var(--out);font-weight:700}
 .acct .del{position:absolute;top:6px;right:5px;opacity:0}
 .acct .ren{position:absolute;top:6px;right:24px;opacity:0}
 .acct:hover .del,.acct:hover .ren,.acct:focus-within .del,.acct:focus-within .ren{opacity:1}
@@ -363,7 +371,7 @@ footer b{color:var(--ink-2)}
 <header class="masthead">
   <div class="masthead-row">
     <div>
-      <h1>529 Ledger <span class="ver" id="ver">v8</span></h1>
+      <h1>529 Ledger <span class="ver" id="ver">v9</span></h1>
       <div class="sub">Contributions in &middot; withdrawals out &middot; tuition paid</div>
     </div>
     <div class="masthead-tools">
@@ -409,7 +417,7 @@ footer b{color:var(--ink-2)}
 <div class="cap">
   <div class="cap-head">
     <div class="cap-title">K&#8211;12 withdrawal cap
-      <small id="capSub">Per beneficiary, per calendar year</small>
+      <small id="capSub">Across all 529 accounts, per calendar year</small>
     </div>
     <div class="cap-remain">still available
       <b class="num" id="capLeft">$20,000</b>
@@ -479,7 +487,7 @@ footer b{color:var(--ink-2)}
 <footer>
   <span class="savestate" id="saveState">&nbsp;</span>
   <span id="storeWarn"></span>
-  <b>How the cap works:</b> the limit applies to withdrawals used for K&#8211;12 tuition, per beneficiary, per calendar year &mdash; counted on the date money leaves the 529, not the date tuition is paid.
+  <b>How the cap works:</b> the limit applies to withdrawals used for K&#8211;12 tuition, per beneficiary, per calendar year &mdash; counted on the date money leaves the 529, not the date tuition is paid. Every account here is treated as feeding one beneficiary, so they share a single annual cap.
   Withdrawals and the expenses they cover should land in the same calendar year.
   Mark a withdrawal <em>College / other qualified</em> to keep it off the ruler.
   Maryland's state-tax treatment of K&#8211;12 withdrawals is worth confirming separately; this file tracks the federal cap only.
@@ -731,18 +739,13 @@ function totals(){
 
   const held = Math.max(0, disAll - sum(S.tuition.filter(t=>t.sourceId && acctCash(t.sourceId))));
 
+  /* Every 529 here funnels to one beneficiary, so K-12 withdrawals share
+     a single annual cap rather than being split per account. */
   const k12 = inYear(S.distributions,y).filter(d=>d.purpose==='k12');
-  const byBen={};
-  k12.forEach(d=>{
-    const b=(acct529(d.accountId)||{}).beneficiary || 'Unassigned';
-    (byBen[b]=byBen[b]||[]).push(d);
-  });
-  const bens=Object.keys(byBen);
-  const primary = bens[0] || (S.accounts529[0]||{}).beneficiary || 'Unassigned';
-  const capUsed = sum(byBen[primary]||[]);
+  const capUsed = sum(k12);
 
   return {conAll,disAll,disY,tuiY,inBalance,usingValue,noBasis,held,
-          k12:byBen[primary]||[],capUsed,capLeft:S.capPerYear-capUsed,primary,bens};
+          k12,capUsed,capLeft:S.capPerYear-capUsed};
 }
 
 /* ============================================================
@@ -780,9 +783,8 @@ function render(){
     ? YEAR+' tuition, across '+nTui+' payment'+(nTui===1?'':'s')+'.'
     : 'No '+YEAR+' tuition recorded.';
 
-  document.getElementById('capSub').textContent = t.bens.length>1
-    ? 'Showing '+t.primary+', 1 of '+t.bens.length+' beneficiaries'
-    : 'For '+t.primary+', in '+YEAR;
+  document.getElementById('capSub').textContent =
+    'Across all 529 accounts, in '+YEAR;
   const cl=document.getElementById('capLeft');
   cl.textContent = money(Math.max(0,t.capLeft));
   cl.style.color = t.capLeft<0 ? 'var(--warn)' : '';
@@ -861,10 +863,7 @@ function renderAccounts(){
     const con=sum(S.contributions.filter(r=>r.accountId===a.id));
     const dis=sum(S.distributions.filter(r=>r.accountId===a.id));
     const val=(a.marketValue!=null&&a.marketValue!=='')?+a.marketValue:con-dis;
-    const ben=a.beneficiary
-      ? esc(a.beneficiary)
-      : '<span class="needs">set beneficiary</span>';
-    card(a,'acct529',val,'529 \u00B7 '+ben);
+    card(a,'acct529',val,'529'+(a.institution?' \u00B7 '+esc(a.institution):''));
   });
   S.accountsCash.filter(vis).forEach(a=>{
     const left=sum(S.distributions.filter(d=>d.destId===a.id))-sum(S.tuition.filter(t=>t.sourceId===a.id));
@@ -1001,21 +1000,34 @@ function renderSf(){
 
   const box=document.getElementById('sfMap');
   if(!sfAccounts.length){ box.innerHTML=''; return; }
-  box.innerHTML = '<div class="map-head">What is each account?</div>' +
-    sfAccounts.map(a=>{
-      const r=(S.simplefin.roles[a.id]||{}).role||'ignore';
-      const mine=localFor(a.id);
-      const label = mine && mine.name!==a.name ? mine.name : a.name;
-      const orig  = mine && mine.name!==a.name ? ' \u00B7 <span class="orig">'+esc(a.name)+'</span>' : '';
-      return '<div class="maprow"><div class="nm">'+esc(label)+
-        '<div class="org">'+esc((a.org&&(a.org.name||a.org.domain))||'')+
-        (a.balance!=null?' \u00B7 '+money2(+a.balance):'')+orig+'</div></div>'+
-        '<select data-role="'+esc(a.id)+'">'+
-        '<option value="ignore"'+(r==='ignore'?' selected':'')+'>Ignore</option>'+
-        '<option value="529"'+(r==='529'?' selected':'')+'>529 plan</option>'+
-        '<option value="cash"'+(r==='cash'?' selected':'')+'>Receiving account</option>'+
-        '</select></div>';
-    }).join('');
+
+  const row=a=>{
+    const r=(S.simplefin.roles[a.id]||{}).role||'ignore';
+    const mine=localFor(a.id);
+    const label = mine && mine.name!==a.name ? mine.name : a.name;
+    const orig  = mine && mine.name!==a.name ? ' \u00B7 <span class="orig">'+esc(a.name)+'</span>' : '';
+    return '<div class="maprow"><div class="nm">'+esc(label)+
+      '<div class="org">'+esc((a.org&&(a.org.name||a.org.domain))||'')+
+      (a.balance!=null?' \u00B7 '+money2(+a.balance):'')+orig+'</div></div>'+
+      '<select data-role="'+esc(a.id)+'">'+
+      '<option value="ignore"'+(r==='ignore'?' selected':'')+'>Ignore</option>'+
+      '<option value="529"'+(r==='529'?' selected':'')+'>529 plan</option>'+
+      '<option value="cash"'+(r==='cash'?' selected':'')+'>Receiving account</option>'+
+      '</select></div>';
+  };
+
+  const isUsed = a => ((S.simplefin.roles[a.id]||{}).role||'ignore')!=='ignore';
+  const used = sfAccounts.filter(isUsed);
+  const ignored = sfAccounts.filter(a=>!isUsed(a));
+
+  box.innerHTML =
+    '<div class="map-head">What is each account?</div>' +
+    (used.length ? used.map(row).join('')
+                 : '<div class="sf-note" style="margin:10px 0 0">Nothing labeled yet. Open the list below and pick your 529s and the account tuition is paid from.</div>') +
+    (ignored.length
+      ? '<details class="ignored-fold"><summary>'+ignored.length+' ignored account'+(ignored.length===1?'':'s')+'</summary>'+
+        ignored.map(row).join('')+'</details>'
+      : '');
   document.getElementById('sfNote').innerHTML =
     'Withdrawals and contributions come from the 529 side. Tuition payments come from the receiving account and always land in review before they hit the ledger \u2014 nothing is filed automatically. Rename accounts down in <b>Accounts</b>; the bank link is kept.';
 
@@ -1149,7 +1161,7 @@ function linkLocalAccounts(){
     if(r.role==='529'){
       let local = S.accounts529.find(x=>x.id===r.localId) || S.accounts529.find(x=>x.sfId===a.id);
       if(!local){
-        local={id:uid(),name:a.name,owner:'',beneficiary:'',marketValue:null,valueAsOf:'',
+        local={id:uid(),name:a.name,marketValue:null,valueAsOf:'',
                sfId:a.id,sfName:a.name,institution:inst};
         S.accounts529.push(local);
       }
@@ -1328,11 +1340,9 @@ function openDialog(kind,id){
     body.innerHTML='<div class="field"><label>What you call it</label><input name="name" required value="'+esc(a?a.name:'')+'"></div>'+
       (a&&a.sfId?'<div class="field"><div class="help">Linked to <b>'+esc(a.sfName||'')+'</b> at '+esc(a.institution||'your bank')+
         '. Renaming only changes the label here \u2014 the bank link stays.</div></div>':'')+
-      '<div class="two"><div class="field"><label>Owner</label><input name="owner" value="'+esc(a?a.owner:'')+'"></div>'+
-      '<div class="field"><label>Beneficiary</label><input name="beneficiary" value="'+esc(a?a.beneficiary:'')+'"></div></div>'+
       '<div class="two"><div class="field"><label>Current balance</label><input name="marketValue" type="number" step="0.01" value="'+(a&&a.marketValue!=null?a.marketValue:'')+'"></div>'+
       '<div class="field"><label>As of</label><input name="valueAsOf" type="date" value="'+esc(a?a.valueAsOf:'')+'"></div></div>'+
-      '<div class="field"><div class="help">The beneficiary drives the cap \u2014 each one gets their own $20,000 a year.</div></div>';
+      '<div class="field"><div class="help">All 529s here share one annual K\u201312 cap, since everything funnels to a single beneficiary.</div></div>';
   }
   else if(kind==='acctCash'){
     const a=S.accountsCash.find(x=>x.id===id);
@@ -1398,7 +1408,7 @@ document.getElementById('dlgForm').addEventListener('submit', async e=>{
   }
   if(kind==='acct529'){
     const prev=S.accounts529.find(a=>a.id===id)||{};
-    const rec={id:id||uid(),name:g('name')||'529',owner:g('owner'),beneficiary:g('beneficiary'),
+    const rec={id:id||uid(),name:g('name')||'529',
       marketValue:g('marketValue')===''?null:+g('marketValue'),valueAsOf:g('valueAsOf'),
       sfId:prev.sfId, sfName:prev.sfName, institution:prev.institution};
     const i=S.accounts529.findIndex(a=>a.id===id);
