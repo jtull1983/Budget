@@ -118,6 +118,36 @@ tfoot td{padding:10px 8px;border-top:2px solid var(--rule);font-weight:700;font-
 .diag .zero{color:var(--warn)}
 .diag .hdr{font-family:"Public Sans",sans-serif;font-size:10.5px;letter-spacing:.09em;
   text-transform:uppercase;color:var(--ink-3);font-weight:700;margin-bottom:6px}
+.fold{border-bottom:1px solid var(--rule-2);padding:2px 0 12px}
+.fold:last-of-type{border-bottom:0}
+.fold>summary{cursor:pointer;list-style:none;padding:11px 0;font-family:"Zilla Slab",serif;
+  font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:9px}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::after{content:"\25BE";margin-left:auto;color:var(--ink-3);font-size:11px;
+  transform:rotate(-90deg);transition:transform .15s}
+.fold[open]>summary::after{transform:rotate(0)}
+.fold>summary:hover{color:var(--out)}
+.fold .sum{font-family:"Public Sans",sans-serif;font-weight:400;font-size:11.5px;color:var(--ink-3)}
+
+.tx-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 4px}
+.tx-controls select{font-size:12.5px;padding:6px 9px;max-width:260px}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);cursor:pointer}
+.chk input{accent-color:var(--out);width:14px;height:14px}
+.st{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+.st-filed{color:var(--in)}
+.st-review{color:var(--out)}
+.st-dismissed{color:var(--ink-3)}
+.st-ignored{color:var(--warn)}
+.st-none{color:var(--warn)}
+#txTable tbody{display:block;max-height:250px;overflow-y:auto}
+#txTable thead,#txTable tbody tr{display:table;width:100%;table-layout:fixed}
+
+.acct.is-hidden{opacity:.42}
+.acct .hid{position:absolute;top:6px;right:43px;opacity:0}
+.acct:hover .hid,.acct:focus-within .hid{opacity:1}
+@media(hover:none){.acct .hid{opacity:.55}}
+.accts-bar{display:flex;justify-content:flex-end;margin-top:8px}
+
 .sf-err{margin-top:12px;border-left:3px solid var(--warn);background:rgba(228,120,95,.08);
   padding:10px 13px;font-size:12.5px;color:var(--ink);border-radius:2px;line-height:1.5}
 .empty{padding:24px 8px;color:var(--ink-3);font-size:13.5px;border-bottom:1px solid var(--rule-2);line-height:1.6}
@@ -253,6 +283,8 @@ footer b{color:var(--ink-2)}
       <h2>Banking</h2>
       <button class="rowact close" id="closeDrawer" aria-label="Close">&#10005;</button>
     </div>
+    <details class="fold" id="foldBank" open>
+    <summary><span class="dot" id="sfDotHead"></span> Bank connection <span class="sum" id="sfSum"></span></summary>
     <div class="status">
       <span class="dot" id="sfDot"></span>
       <span id="sfStatus">Not connected.</span>
@@ -275,7 +307,10 @@ footer b{color:var(--ink-2)}
       Paste a SimpleFIN setup token to see your accounts. Nothing gets imported until you tell each account what it is. The Bridge caps each request at a 90-day window, so longer ranges are fetched in chunks against a daily request budget.
     </div>
 
-    <div class="map-head" style="margin-top:22px">Sync across devices</div>
+    </details>
+
+    <details class="fold" id="foldSync">
+    <summary><span class="dot" id="syncDotHead"></span> Sync across devices <span class="sum" id="syncSum"></span></summary>
     <div class="status" style="margin-top:12px">
       <span class="dot" id="syncDot"></span>
       <span id="syncStatus">Not syncing.</span>
@@ -298,8 +333,18 @@ footer b{color:var(--ink-2)}
       <button class="btn ghost sm" id="syncForget" hidden>Stop syncing</button>
     </div>
     <div class="sf-note">
-      Needs a classic token with only the <b>gist</b> scope. <b>Save credentials</b> stores them on this device without touching the gist \u2014 use it first on a new device, then <b>Pull</b>. After that, changes push automatically a few seconds after you make them.
+      Needs a classic token with only the <b>gist</b> scope. <b>Save credentials</b> stores them on this device without touching the gist &mdash; use it first on a new device, then <b>Pull</b>. After that, changes push automatically a few seconds after you make them.
     </div>
+    </details>
+
+    <details class="fold" id="foldStore">
+    <summary>Storage</summary>
+    <div class="sf-note" id="storeLine" style="margin-top:10px"></div>
+    <div class="drawer-actions" style="margin-top:10px">
+      <button class="btn ghost sm" id="btnExport2">Export JSON</button>
+      <button class="btn ghost sm" id="btnImport2">Import JSON</button>
+    </div>
+    </details>
   </div>
 </aside>
 
@@ -308,7 +353,7 @@ footer b{color:var(--ink-2)}
 <header class="masthead">
   <div class="masthead-row">
     <div>
-      <h1>529 Ledger <span class="ver" id="ver">v6</span></h1>
+      <h1>529 Ledger <span class="ver" id="ver">v7</span></h1>
       <div class="sub">Contributions in &middot; withdrawals out &middot; tuition paid</div>
     </div>
     <div class="masthead-tools">
@@ -379,10 +424,26 @@ footer b{color:var(--ink-2)}
     <span class="hint">529 plans and the account withdrawals land in</span>
   </div>
   <div class="accts" id="accts"></div>
+  <div class="accts-bar" id="acctsBar"></div>
   <div class="toolbar">
     <button class="btn ghost sm" data-add="acct529">Add a 529 manually</button>
     <button class="btn ghost sm" data-add="acctCash">Add a receiving account</button>
   </div>
+</section>
+
+<!-- BANK TRANSACTIONS -->
+<section>
+  <div class="sec-head">
+    <h2>Bank transactions</h2>
+    <span class="hint">everything SimpleFIN returned, and what happened to it</span>
+  </div>
+  <div class="tx-controls">
+    <select id="txAcct"></select>
+    <label class="chk"><input type="checkbox" id="txUnfiled"> Only show ones not in the ledger</label>
+    <span style="flex:1"></span>
+    <span class="hint" id="txCount"></span>
+  </div>
+  <table id="txTable"><thead></thead><tbody></tbody></table>
 </section>
 
 <!-- LEDGER -->
@@ -432,38 +493,59 @@ footer b{color:var(--ink-2)}
    STORAGE — local cache + GitHub Gist as the shared copy
    ============================================================ */
 const KEY = 'ledger529:v2';
+const CRED_KEY = 'ledger529:cred';        // tiny, written separately, never bundled
 let storageOK = true;
+let lastWrite = '';
 let pushTimer = null;
 
 /* window.storage only exists inside Claude's sandbox. Served from a real
-   URL there is no such object, so every save used to fail into a catch
-   and the whole ledger died on refresh. Detect once, fall back to
-   localStorage, and say so out loud if neither is available. */
+   URL there is no such object, so saves used to fail into a catch and the
+   ledger died on refresh. Detect once, fall back to localStorage. */
 const LS = (()=>{ try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return localStorage; }
                   catch(e){ return null; } })();
 const CS = (typeof window!=='undefined' && window.storage && typeof window.storage.get==='function') ? window.storage : null;
 const STORE = CS ? 'sandbox' : (LS ? 'browser' : 'none');
 
-async function rawGet(){
-  if(CS){ try{ const r=await CS.get(KEY); if(r&&r.value) return r.value; }catch(e){} }
-  if(LS){ try{ return LS.getItem(KEY); }catch(e){} }
+async function rawGet(k){
+  if(CS){ try{ const r=await CS.get(k); if(r&&r.value) return r.value; }catch(e){} }
+  if(LS){ try{ return LS.getItem(k); }catch(e){} }
   return null;
 }
-async function rawSet(v){
-  if(CS){ try{ await CS.set(KEY,v); return true; }catch(e){} }
-  if(LS){ try{ LS.setItem(KEY,v); return true; }catch(e){ return false; } }
+async function rawSet(k,v){
+  if(CS){ try{ await CS.set(k,v); return true; }catch(e){} }
+  if(LS){ try{ LS.setItem(k,v); return true; }catch(e){ return false; } }
   return false;
 }
 
+/* Credentials are saved on their own. If the ledger blob ever fails to
+   write, the token still survives, so the next load can pull from the
+   gist and rebuild. That loop is what left you staring at a blank app. */
+async function saveCreds(){
+  return rawSet(CRED_KEY, JSON.stringify({
+    gistId:S.sync.gistId||'', token:S.sync.token||'',
+    accessUrl:S.simplefin.accessUrl||''
+  }));
+}
+async function loadCreds(){
+  try{
+    const v = await rawGet(CRED_KEY);
+    if(!v) return null;
+    return JSON.parse(v);
+  }catch(e){ return null; }
+}
+
 async function loadState(){
-  const v = await rawGet();
+  const v = await rawGet(KEY);
   if(!v) return null;
   try{ return JSON.parse(v); }catch(e){ return null; }
 }
 async function saveState(opts){
   S.sync.rev = (S.sync.rev||0) + 1;
-  storageOK = await rawSet(JSON.stringify(S));
+  await saveCreds();
+  storageOK = await rawSet(KEY, JSON.stringify(S));
+  lastWrite = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'});
   flash(storageOK ? 'saved' : 'NOT SAVED \u2014 export to keep');
+  renderStore();
   if(S.sync.gistId && S.sync.token && !(opts&&opts.noPush)) queuePush();
 }
 function flash(msg){
@@ -551,7 +633,7 @@ async function pushGist(silent){
   try{
     await gistWrite();
     syncSet('on','Synced '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}));
-    await rawSet(JSON.stringify(S));
+    await rawSet(KEY, JSON.stringify(S));
     renderSync();
   }catch(e){ syncSet('err','Sync failed: '+e.message); }
 }
@@ -590,7 +672,9 @@ const BLANK = {
   simplefin:{ accessUrl:'', lastPull:'', roles:{} },   // roles: sfAccountId -> {role, localId}
   pending:[],
   dismissed:[],                                         // sfIds the user chose not to file
-  sync:{ gistId:'', token:'', rev:0, lastSync:'' }
+  sync:{ gistId:'', token:'', rev:0, lastSync:'' },
+  tx:{},                                                // sfAccountId -> raw transactions, for the viewer
+  showHidden:false
 };
 
 let S = structuredClone(BLANK);
@@ -732,7 +816,7 @@ function render(){
     rt.innerHTML='Withdrawals and tuition match for '+YEAR+' at <b>'+money2(t.tuiY)+'</b>.';
   }
 
-  renderSf(); renderSync(); renderQueue(); renderAccounts(); renderLedger();
+  renderSf(); renderSync(); renderQueue(); renderAccounts(); renderLedger(); renderTx(); renderStore();
 }
 
 function linkLine(a){
@@ -745,15 +829,17 @@ function linkLine(a){
 function renderAccounts(){
   const box=document.getElementById('accts'); box.innerHTML='';
   const card=(a,kind,amount,sub)=>{
-    const el=document.createElement('div'); el.className='acct';
+    const el=document.createElement('div'); el.className='acct'+(a.hide?' is-hidden':'');
     el.innerHTML='<button class="rowact del" data-del="'+kind+'" data-id="'+a.id+'" title="Remove">\u00D7</button>'+
       '<button class="rowact ren" data-edit="'+kind+'" data-id="'+a.id+'" title="Rename">\u270E</button>'+
+      '<button class="rowact hid" data-hide="'+kind+'" data-id="'+a.id+'" title="'+(a.hide?'Show':'Hide')+'">'+(a.hide?'\u25C9':'\u25CB')+'</button>'+
       '<h3>'+esc(a.name)+'</h3>'+
       '<div class="amt-big num">'+money(amount)+'</div>'+
       '<div class="sub-line">'+sub+'</div>';
     box.appendChild(el);
   };
-  S.accounts529.forEach(a=>{
+  const vis=a=>S.showHidden||!a.hide;
+  S.accounts529.filter(vis).forEach(a=>{
     const con=sum(S.contributions.filter(r=>r.accountId===a.id));
     const dis=sum(S.distributions.filter(r=>r.accountId===a.id));
     const val=(a.marketValue!=null&&a.marketValue!=='')?+a.marketValue:con-dis;
@@ -762,13 +848,18 @@ function renderAccounts(){
       : '<span class="needs">set beneficiary</span>';
     card(a,'acct529',val,'529 \u00B7 '+ben);
   });
-  S.accountsCash.forEach(a=>{
+  S.accountsCash.filter(vis).forEach(a=>{
     const left=sum(S.distributions.filter(d=>d.destId===a.id))-sum(S.tuition.filter(t=>t.sourceId===a.id));
     card(a,'acctCash',left,'Receiving \u00B7 529 money left');
   });
   if(!S.accounts529.length && !S.accountsCash.length){
     box.innerHTML='<div class="empty">No accounts yet. Open <strong>Banking</strong> up top to connect and label your accounts, or add one by hand.</div>';
   }
+  const nHid=[...S.accounts529,...S.accountsCash].filter(a=>a.hide).length;
+  const bar=document.getElementById('acctsBar');
+  bar.innerHTML = nHid
+    ? '<button class="btn ghost sm" id="toggleHidden">'+(S.showHidden?'Hide':'Show')+' '+nHid+' hidden</button>'
+    : '';
 }
 
 const COLS={
@@ -819,14 +910,13 @@ function renderLedger(){
 function sfSet(state,msg){
   const cls='dot'+(state==='on'?' on':state==='err'?' err':'');
   document.getElementById('sfDot').className=cls;
-  const mini=document.getElementById('sfDotMini');
-  if(mini) mini.className=cls;
+  ['sfDotMini','sfDotHead'].forEach(id=>{ const el=document.getElementById(id); if(el) el.className=cls; });
   document.getElementById('sfStatus').textContent=msg;
 }
 
 function syncSet(state,msg){
   const cls='dot'+(state==='on'?' on':state==='err'?' err':'');
-  const d=document.getElementById('syncDot'); if(d) d.className=cls;
+  ['syncDot','syncDotHead'].forEach(id=>{ const el=document.getElementById(id); if(el) el.className=cls; });
   const s=document.getElementById('syncStatus'); if(s) s.textContent=msg;
 }
 
@@ -837,6 +927,8 @@ function renderSync(){
   document.getElementById('syncForget').hidden = !on;
   document.getElementById('syncPull').disabled = !on;
   document.getElementById('syncPush').disabled = !on;
+  const sum2=document.getElementById('syncSum');
+  if(sum2) sum2.textContent = on ? 'on' : 'off';
   const st=document.getElementById('syncStatus');
   if(!on) syncSet('','Not syncing.');
   else if(st && (st.textContent==='Not syncing.'||st.textContent==='')){
@@ -884,6 +976,9 @@ function renderSf(){
   document.getElementById('sfNote').innerHTML =
     'Withdrawals and contributions come from the 529 side. Tuition payments come from the receiving account and always land in review before they hit the ledger \u2014 nothing is filed automatically. Rename accounts down in <b>Accounts</b>; the bank link is kept.';
 
+  const sum1=document.getElementById('sfSum');
+  if(sum1) sum1.textContent = S.simplefin.accessUrl
+    ? (sfAccounts.length? sfAccounts.length+' accounts':'connected') : 'not connected';
   renderDiag();
 }
 
@@ -982,6 +1077,17 @@ async function sfLoadAccounts(days,onStep){
     });
   }
   sfAccounts=[...merged.values()];
+  /* Keep the raw transactions so the viewer can show what actually came
+     back, including for accounts you have not labeled. Capped per account. */
+  S.tx = S.tx || {};
+  sfAccounts.forEach(a=>{
+    S.tx[a.id] = (a.transactions||[])
+      .slice()
+      .sort((x,y)=>(y.posted||0)-(x.posted||0))
+      .slice(0,400)
+      .map(t=>({id:t.id,posted:t.posted||t.transacted_at||0,amount:t.amount,
+                description:t.description||t.payee||'',pending:!!t.pending}));
+  });
   sfDiag = sfAccounts.map(a=>{
     const tx=a.transactions||[];
     const ds=tx.map(t=>tsToDate(t.posted||t.transacted_at||0)).filter(d=>d>'1971').sort();
@@ -1080,6 +1186,77 @@ function renderQueue(){
     '<tbody>'+rows+'</tbody></table>'+
     '<div class="queue-foot"><button class="btn sm" id="qFile">File selected</button>'+
     '<button class="btn ghost sm" id="qClear">Discard all</button></div></div>';
+}
+
+function filedIds(){
+  const m=new Map();
+  ['contributions','distributions','tuition'].forEach(k=>{
+    S[k].forEach(r=>{ if(r.sfId) m.set(r.sfId,k); });
+  });
+  return m;
+}
+
+function txStatus(sfId, acctId, filed){
+  if(filed.has(sfId)){
+    const k=filed.get(sfId);
+    return ['filed', k==='tuition'?'Filed: tuition':(k==='distributions'?'Filed: withdrawal':'Filed: contribution')];
+  }
+  if(S.pending.some(p=>p.sfId===sfId)) return ['review','In review'];
+  if((S.dismissed||[]).includes(sfId)) return ['dismissed','Dismissed'];
+  const role=(S.simplefin.roles[acctId]||{}).role||'ignore';
+  if(role==='ignore') return ['ignored','Account not labeled'];
+  return ['none','Not imported'];
+}
+
+function renderTx(){
+  const sel=document.getElementById('txAcct');
+  const table=document.getElementById('txTable');
+  const ids=Object.keys(S.tx||{});
+  if(!ids.length){
+    sel.innerHTML='<option>No pull yet</option>';
+    table.tHead.innerHTML='';
+    table.tBodies[0].innerHTML='<tr><td class="empty">Nothing fetched yet. Open <strong>Banking</strong> and pull transactions.</td></tr>';
+    document.getElementById('txCount').textContent='';
+    return;
+  }
+  const cur = sel.value && ids.includes(sel.value) ? sel.value : ids[0];
+  sel.innerHTML = ids.map(id=>{
+    const mine=localFor(id);
+    const sfa=sfAccounts.find(a=>a.id===id);
+    const nm = mine?mine.name:(sfa?sfa.name:id);
+    return '<option value="'+esc(id)+'"'+(id===cur?' selected':'')+'>'+esc(nm)+' ('+(S.tx[id]||[]).length+')</option>';
+  }).join('');
+
+  const filed=filedIds();
+  const onlyUnfiled=document.getElementById('txUnfiled').checked;
+  let rows=(S.tx[cur]||[]).map(t=>{
+    const sfId=cur+':'+t.id;
+    const st=txStatus(sfId,cur,filed);
+    return {t,cls:st[0],label:st[1]};
+  });
+  if(onlyUnfiled) rows=rows.filter(r=>r.cls!=='filed');
+
+  table.tHead.innerHTML='<tr><th>Date</th><th>Description</th><th class="r">Amount</th><th>Status</th></tr>';
+  table.tBodies[0].innerHTML = rows.length ? rows.map(r=>{
+    const amt=+r.t.amount;
+    return '<tr><td class="dt">'+fmtDate(tsToDate(r.t.posted))+'</td>'+
+      '<td>'+esc(r.t.description)+(r.t.pending?' <span class="tag pending">pending</span>':'')+'</td>'+
+      '<td class="amt r" style="color:'+(amt<0?'var(--paid)':'var(--in)')+'">'+money2(amt)+'</td>'+
+      '<td><span class="st st-'+r.cls+'">'+r.label+'</span></td></tr>';
+  }).join('') : '<tr><td class="empty" colspan="4">Nothing to show for this account.</td></tr>';
+
+  document.getElementById('txCount').textContent = rows.length+' of '+(S.tx[cur]||[]).length+' shown';
+}
+
+function renderStore(){
+  const el=document.getElementById('storeLine');
+  if(!el) return;
+  let bytes=0;
+  try{ bytes=(JSON.stringify(S)||'').length; }catch(e){}
+  const where = STORE==='browser' ? 'this browser' : (STORE==='sandbox' ? 'the Claude sandbox' : 'NOWHERE');
+  el.innerHTML='Saving to <b>'+where+'</b> \u00B7 '+(bytes/1024).toFixed(1)+' KB'+
+    (lastWrite?' \u00B7 last write '+lastWrite:' \u00B7 not written yet')+
+    (STORE==='none'?' <b style="color:var(--warn)">\u2014 nothing will survive a refresh</b>':'');
 }
 
 /* ============================================================
@@ -1228,6 +1405,8 @@ document.getElementById('syncSave').onclick=async()=>{
   syncSet('on','Credentials saved on this device. Pull to load, or Push to upload.');
 };
 document.getElementById('syncPush').onclick=()=>pushGist(false);
+document.getElementById('txAcct').onchange=()=>renderTx();
+document.getElementById('txUnfiled').onchange=()=>renderTx();
 document.getElementById('syncPull').onclick=()=>pullGist();
 document.getElementById('syncForget').onclick=async()=>{
   if(!confirm('Stop syncing? Your ledger stays on this device; the gist is left untouched.')) return;
@@ -1335,6 +1514,19 @@ document.addEventListener('click', async e=>{
     return;
   }
 
+  const hid=e.target.closest('[data-hide]');
+  if(hid){
+    const list = hid.dataset.hide==='acct529' ? S.accounts529 : S.accountsCash;
+    const a=list.find(x=>x.id===hid.dataset.id);
+    if(a){ a.hide=!a.hide; render(); await saveState(); }
+    return;
+  }
+  if(e.target.id==='toggleHidden'){
+    S.showHidden=!S.showHidden; render(); await saveState(); return;
+  }
+  if(e.target.id==='btnExport2'){ document.getElementById('btnExport').click(); return; }
+  if(e.target.id==='btnImport2'){ document.getElementById('btnImport').click(); return; }
+
   const del=e.target.closest('[data-del]');
   if(del){
     const k=del.dataset.del, id=del.dataset.id;
@@ -1373,7 +1565,7 @@ document.getElementById('fileIn').onchange=async e=>{
 /* ============================================================
    BOOT
    ============================================================ */
-(async function boot(){
+(async function boot(){ try{
   if(STORE==='none'){
     document.getElementById('storeWarn').innerHTML =
       '<b style="color:var(--warn)">This browser is blocking local storage, so nothing will survive a refresh. '+
@@ -1381,6 +1573,15 @@ document.getElementById('fileIn').onchange=async e=>{
   }
   const saved=await loadState();
   if(saved) S=Object.assign(structuredClone(BLANK),saved);
+
+  /* Credentials load from their own key and win, so even a lost or
+     corrupt ledger blob can still reach the gist and rebuild. */
+  const cred=await loadCreds();
+  if(cred){
+    if(cred.gistId) S.sync.gistId=cred.gistId;
+    if(cred.token)  S.sync.token=cred.token;
+    if(cred.accessUrl) S.simplefin.accessUrl=cred.accessUrl;
+  }
   const ys=new Set([new Date().getFullYear()]);
   [...S.contributions,...S.distributions,...S.tuition].forEach(r=>{ if(r.date) ys.add(yearOf(r.date)); });
   const list=[...ys].sort();
@@ -1399,8 +1600,14 @@ document.getElementById('fileIn').onchange=async e=>{
   if(S.simplefin.accessUrl){
     try{ await sfLoadAccounts(90); }catch(e){ sfSet('err','Could not reach SimpleFIN: '+e.message); }
   }
+  renderStore();
   render();
-})();
+}catch(err){
+  const w=document.getElementById('storeWarn');
+  if(w) w.innerHTML='<b style="color:var(--warn)">Startup error: '+String(err&&err.message||err)+
+    '</b><br>Your data may still be in the gist \u2014 open Banking and press Pull.<br>';
+  try{ render(); }catch(e){}
+} })();
 </script>
 </body>
 </html>
