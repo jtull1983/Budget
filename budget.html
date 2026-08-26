@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v98";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v99";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -6900,7 +6900,13 @@ function syncHTML(){
   let comms="";
   comms+=accSec("ntfy","ntfy (legacy)",
                 ntfyOn()?(ntfy.lastSent?"on duty":"topic set"):"off",nt);
-  comms+=accSec("twilio","Twilio SMS","not built yet",tw);
+  /* v99 — this said "not built yet" long after it was built. Harmless while it
+     was only us reading it; actively misleading once the screen underneath is
+     being sent to a carrier as proof the opt-in exists. */
+  comms+=accSec("twilio","Twilio SMS",
+    sms.length
+      ? `${sms.length} number${sms.length===1?"":"s"} \u00b7 awaiting carrier review`
+      : "awaiting carrier review",tw);
   h+=accSec("comms","My communication info",
             ntfyOn()?"ntfy on · Twilio pending":"nothing set up",comms);
   return h;
