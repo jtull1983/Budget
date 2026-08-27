@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v99";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v100";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -6567,6 +6567,9 @@ async function ntfyPending(){
     try{ return JSON.parse(l); }catch(e){ return null; }
   }).filter(m=>m&&m.event==="message");
 }
+/* The comeback prefix. It rides tonight's queued message now rather than being
+   fired off the moment the app opens, so it lands at 8pm like everything else. */
+const BACK="(back at last) ";
 const TAGS={good:"tada",early:"eyes",hot:"rotating_light",blown:"fire",
             close:"crossed_fingers",cycle:"calendar",silent:"see_no_evil",
             nodata:"grey_question"};
@@ -6590,7 +6593,18 @@ function nudgeSig(d){
    that last one being the "nobody has opened this" message, which only ever
    arrives if you genuinely don't come back. Each open rewrites the ones that
    haven't fired yet, so what's pending is always as fresh as your last visit. */
+/* Two timers reach this within seconds of open: the bare setTimeout at 7s and
+   autoSyncTick, which gets here after its pulls. They used to overlap, both read
+   a stale S.meta.buddyRan, and both send. fullSync has had a `syncing` latch for
+   this exact reason; nudging is the same latch for the same reason. */
+let nudging=false;
 async function nudgeSchedule(now){
+  if(nudging) return;
+  nudging=true;
+  try{ return await nudgeRun(now); }
+  finally{ nudging=false; }
+}
+async function nudgeRun(now){
   if(!ntfyOn()||netBlocked()) return;
   if(syncOn()&&!pulledOK) return;
   const d=now||new Date(), today=ymdLocal(d);
@@ -6600,15 +6614,23 @@ async function nudgeSchedule(now){
   Object.keys(q).forEach(id=>{ if(typeof q[id]==="string") q[id]={sig:q[id]}; });
   let touched=false, failed="";
 
-  /* gone long enough that the silent message already went out? say hello properly,
-     right now, whatever the hour — that's the point of coming back. */
+  /* Gone long enough that the silent message already went out? Say hello — but
+     at 8pm, like everything else. v99 sent this the instant the app opened, which
+     is how a nudge that is supposed to land at 8pm arrived at 9:35 in the morning.
+     Before 8pm it now rides tonight's slot. After 8pm there is no slot left to
+     ride, so it still goes straight out. */
   const ran=S.meta.buddyRan;
   const gap=ran?Math.round((new Date(today)-new Date(ran))/86400000):0;
-  if(ran&&gap>=2){
-    const b=nudgeBucket(d)||"good";
-    try{ await ntfySend("(back at last) "+buddyLine(b),TAGS[b]); touched=true;
-          if(d.getHours()>=NUDGE_HOUR) S.meta.buddyDay=today; }
-    catch(e){ failed=String(e.message||e); }
+  let backNow=false;
+  if(ran&&gap>=2&&S.meta.buddyBack!==today){
+    /* Marked and saved BEFORE the send, never after — the same rule the Worker
+       keeps in KV. A crash here costs one hello; the other order sends two. */
+    S.meta.buddyBack=today; save(); touched=true;
+    if(d.getHours()>=NUDGE_HOUR){
+      const b=nudgeBucket(d)||"good";
+      try{ await ntfySend(BACK+buddyLine(b),TAGS[b]); S.meta.buddyDay=today; }
+      catch(e){ failed=String(e.message||e); }
+    }else backNow=true;
   }
 
   /* One message a day, at 8pm, no exceptions. If there's nothing to report the
@@ -6618,7 +6640,7 @@ async function nudgeSchedule(now){
   const moodOf=w=>w==="silent"?"silent":w.split("|")[0];
 
   /* fill a slot: clear whatever's there, then put the current picture in it */
-  const fill=async(id,want,when)=>{
+  const fill=async(id,want,when,pre)=>{
     const have=q[id];
     if(have){
       try{ await ntfyCancel(id); }
@@ -6629,7 +6651,7 @@ async function nudgeSchedule(now){
       /* under a minute of runway is below ntfy's minimum delay — send it now
          rather than lose the day to a rejected timestamp */
       const late=when-nowSecs<60;
-      await ntfySend(buddyLine(moodOf(want)),TAGS[moodOf(want)],id,late?0:when);
+      await ntfySend((pre||"")+buddyLine(moodOf(want)),TAGS[moodOf(want)],id,late?0:when);
       delete q[id].unsure;
       if(late){ q[id].sentNow=1; S.meta.buddyDay=today; }
       return true;
@@ -6637,14 +6659,16 @@ async function nudgeSchedule(now){
   };
 
   const slots=[];
-  if(d.getHours()<NUDGE_HOUR) slots.push([0,sig]);   /* tonight, if 8pm hasn't passed */
-  slots.push([1,sig]);                               /* tomorrow, same picture */
-  slots.push([2,"silent"]);                          /* and if we never hear from you */
-  for(const [n,want] of slots){
+  if(d.getHours()<NUDGE_HOUR) slots.push([0,sig,backNow?BACK:""]);  /* tonight, if 8pm hasn't passed */
+  slots.push([1,sig,""]);                            /* tomorrow, same picture */
+  slots.push([2,"silent",""]);                       /* and if we never hear from you */
+  for(const [n,want,pre] of slots){
     const day=addDays(d,n), id=seqFor(day), have=q[id];
-    if(have&&have.sig===want&&!have.unsure) continue;   /* already says exactly this */
+    /* a prefix is new information even when the signature has not moved, so a
+       comeback always rewrites tonight rather than leaving the plain copy up */
+    if(have&&have.sig===want&&!have.unsure&&!pre) continue;
     if(have&&have.stuck) continue;                      /* a cancel already failed here */
-    await fill(id,want,at8pm(day));
+    await fill(id,want,at8pm(day),pre);
   }
 
   /* THE SAFETY NET. 8pm has been and gone — did today actually get one? A record
