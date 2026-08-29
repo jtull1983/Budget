@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v100";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v102";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1290,6 +1290,10 @@ function build(){
       const st=S.stmts&&S.stmts[k];
       if(st&&st.rows&&st.rows.length){
         const due=(st.dates&&st.dates.newBalance)||st.rows.reduce((a,r)=>a+r.amt,0);
+        /* a real payment assigned to this bill replaces it, same as any other
+           planned line that a transaction has stood in for */
+        const ccAssigned=S.assign&&S.assign["info#"+k]&&LIVE[S.assign["info#"+k]];
+        if(!ccAssigned)
         rows.push({key:"info#"+k, ruleId:"cc", info:true, off:true, manual:true,
                    label:"Credit card · "+ordinal(28), day:28, sort:9999,
                    amount:-up10(due), kind:"exp", account:"Main"});
@@ -1311,9 +1315,15 @@ function build(){
        doesn't subtract the same money twice. */
     if(!pre) txFor(k).forEach(t=>{
       const sig=TXSIG(t), card=txIsCard(t);
+      /* A card payment is normally marked off, because the card bill line is
+         already taking that money out and counting both would subtract it
+         twice. But once the payment has been ASSIGNED to the bill, the bill has
+         stepped out and the payment is the only thing left holding that money —
+         so it has to count. Getting this wrong drops the payment entirely. */
+      const standingIn=!!assignedTo(sig);
       rows.push({key:"tx#"+sig, tx:t, sig, label:txLabel(t),
                  day:+String(t.date).slice(8,10)||1, amount:Number(t.amt)||0,
-                 real:true, ccpay:card, off:card, sort:400,
+                 real:true, ccpay:card, off:card&&!standingIn, sort:400,
                  transfer:txIsTransfer(t), assignedKey:assignedTo(sig),
                  kind:(Number(t.amt)||0)>=0?"inc":"exp", account:"Main"});
     });
@@ -1452,11 +1462,14 @@ function normalizeSigns(rows){
   if(negs>real.length/2) rows.forEach(r=>r.amt=-r.amt);
   return rows;
 }
-/* Dates the app prints are day/month/year. The pickers above are native controls,
-   so those follow whatever the phone's region is set to — that part isn't ours. */
+/* Month/day/year. This printed day/month/year up to v101, which read as a date
+   in the future or the past depending on the number, and there is no reason for
+   a household in Maryland to be reading dates in a format nobody here uses. The
+   pickers are native controls and still follow the phone's region — that part
+   isn't ours to set. */
 function fmtDate(iso){
   const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||""));
-  return m?`${m[3]}/${m[2]}/${m[1]}`:String(iso||"");
+  return m?`${m[2]}/${m[3]}/${m[1]}`:String(iso||"");
 }
 function normMerchant(desc){
   return String(desc).toLowerCase()
@@ -3314,6 +3327,66 @@ function smsDel(num){
   S.meta.sms=smsList().filter(x=>x.num!==num); save();
 }
 function bankRows(){ return (S.bank&&Array.isArray(S.bank.rows))?S.bank.rows:[]; }
+
+/* ── the same transaction, twice ─────────────────────────────────────────────
+   Rows are deduped on date|amount|description. A reconnected card can send a
+   transaction it has already sent under a DIFFERENT description — the bridge
+   re-derives it from whatever the institution hands over that day — and the old
+   copy then survives the dedupe forever, because by that signature it is a
+   different row.
+
+   Same day and same amount to the cent is the signal. It is not proof: two $250
+   transfers on one day are perfectly possible, which is why nothing here
+   deletes anything on its own. This only gathers the suspects, ranks each pair
+   so the copy carrying your decisions is the one proposed to keep, and hands
+   the list to the Sync pane to be confirmed by hand. */
+function dupGroups(){
+  const meaty=g=>!!(g&&(g.label||g.rule||g.transfer||g.ccpay));
+  const by={}, out=[];
+  bankRows().forEach((t,i)=>{
+    if(!t||!t.date) return;
+    const k=t.date+"|"+(Number(t.amt)||0).toFixed(2);
+    (by[k]=by[k]||[]).push({t,i,sig:TXSIG(t)});
+  });
+  Object.keys(by).forEach(k=>{
+    const g=by[k];
+    if(g.length<2) return;
+    /* identical descriptions never reach here — txRows() already folds those */
+    const descs={}; g.forEach(x=>descs[normTxt(x.t.desc)]=1);
+    if(Object.keys(descs).length<2) return;
+    /* the copy to keep: the one that has been named, tagged or assigned. If more
+       than one has, or none has, the longer description wins as a tiebreak and
+       the whole group still has to be confirmed by hand. */
+    /* Two separate questions. `decided` is whether a copy carries any of your
+       work, and that alone decides confidence: one copy named and the other not
+       is the exact shape a re-send leaves behind. Description length is only a
+       tiebreak for ordering when neither copy has been touched, and it must not
+       leak into `sure` or every pair would look confident. */
+    const decided=x=>(meaty((S.tag||{})[x.sig])?1:0)+(assignedTo(x.sig)?1:0);
+    const score=x=>decided(x)*4+(String(x.t.desc||"").length>24?1:0);
+    const ranked=g.slice().sort((a,b)=>score(b)-score(a));
+    out.push({date:g[0].t.date, amt:Number(g[0].t.amt)||0,
+              keep:ranked[0], drop:ranked.slice(1),
+              sure:decided(ranked[0])>0&&ranked.slice(1).every(x=>!decided(x))});
+  });
+  return out.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+}
+/* Removing a row means removing its decisions too, or txHeal would adopt the
+   survivor onto the tag of the copy that just went. */
+function dupDrop(sigs){
+  const kill={}; (sigs||[]).forEach(x=>kill[x]=1);
+  const before=bankRows().length;
+  S.bank=S.bank||{rows:[]};
+  S.bank.rows=bankRows().filter(t=>!kill[TXSIG(t)]);
+  Object.keys(kill).forEach(sig=>{
+    if(S.tag) delete S.tag[sig];
+    clearAssign(sig);
+    if(S.hits) Object.keys(S.hits).forEach(k=>{
+      if(S.hits[k]&&S.hits[k].sig===sig) delete S.hits[k]; });
+  });
+  save(); render();
+  return before-bankRows().length;
+}
 /* v67 — savings is gone. The account role, its pane, its labels and its rows were
    all removed at the owner's request; it comes back later on different rules.
    matchPool() and totalNow() are kept as the single names the rest of the file asks
@@ -3890,9 +3963,14 @@ function txPaneTitle(){
 /* every line in that month a transaction could be sitting against: the things
    you predicted, minus the card — that is its own stream and always has been —
    and minus the transactions themselves. */
+/* Lines a real transaction can be told to stand in for.
+   The card bill used to be excluded here, which meant the one transaction that
+   most obviously answers a planned line — the payment on the card — was the one
+   line you could not point at. It is an info row, so it takes its own branch
+   rather than loosening the info filter for everything else. */
 function openLines(k){
   const M=MODEL.find(x=>x.k===k); if(!M) return [];
-  return M.rows.filter(r=>!r.real&&!r.info&&!r.group&&!r.budget&&r.ruleId!=="cc");
+  return M.rows.filter(r=>!r.real&&!r.group&&!r.budget&&(r.ruleId==="cc"||!r.info));
 }
 const CADENCES=[["","Doesn't repeat"],["monthly","Every month"],["biweekly","Every 2 weeks"],
   ["semimonthly","Twice a month"],["quarterly","Every 3 months"],["annual","Once a year"]];
@@ -5741,7 +5819,6 @@ cycle:[
  "cycle turnover complete. that's it, that's the whole announcement. go be careful.",
  "new billing cycle. let's make this one boring. boring is the goal. boring is beautiful."],
 good:[
- "y'all are doing really well with your budget. kinda the best little savers ever and def NOT some broke ass bitches.",
  "checked the card. it's behaving. y'all are basically financially responsible adults and I'm a little emotional about it.",
  "biiiiitch you doin a good job. that's it. that's the message.",
  "the numbers look GOOD. suspiciously good. did y'all get a second job or just develop character?",
@@ -5845,7 +5922,6 @@ good:[
 early:[
  "yooooo what the heck is going on. y'all should work for the government with that level of disregard for a budget! yowzers.",
  "it is EARLY. why does this card look like it's already been through a whole month??",
- "biiiiyoch!!! stop spending all your money! damn!",
  "we are like nine seconds into this cycle and y'all already went crazy. slow it down.",
  "somebody had a moment. the card knows. I know. we all know.",
  "this is a marathon and y'all sprinted out of the gate straight into a Target.",
@@ -5944,19 +6020,14 @@ early:[
  "still early enough that this is advice and not a eulogy.",
  "the pace is loud. the total isn't yet. let's keep it that way."],
 hot:[
- "okay so we need to fucking talk. the pace on this card is not a pace, it's a fall.",
  "WHOA. hi. no. put the card down. I'm not asking.",
  "y'all are spending like the cycle ends tomorrow. it does NOT end tomorrow.",
- "this is the part where I stop being nice about it. slow the hell down. \u{1F6A8}",
- "I did the math four times hoping I was wrong. I was not wrong. shit.",
  "we are not even done with this cycle and the number is already showing off. knock it off.",
  "absolutely not. no. I'm putting my little foot down. \u{1F45E}",
  "the card is on FIRE and nobody in this house has noticed. hello?? \u{1F525}",
  "y'all hear that? that's me screaming. that's the sound of me screaming.",
  "someone explain this to me like I'm a notification, because I am one, and I'm horrified.",
- "this pace is a whole ass problem. I said what I said.",
  "we are burning through this thing like it's got a coupon on it. it does not.",
- "damn. DAMN. what happened this week?? \u{1F4B8}",
  "I'm not mad, I'm doing division, and the division is being very rude to me.",
  "hard stop. eat what's in the fridge. the fridge has food. I've seen it.",
  "the budget called. it's scared. \u260E\uFE0F",
@@ -5967,19 +6038,15 @@ hot:[
  "somebody's been busy and my god does it show on this card.",
  "I want to be the fun one. y'all keep making me be the other one. \u{1F624}",
  "the vibes are expensive and the math is worse.",
- "hell no. lock the cards in a drawer. I'll wait. \u{1F512}",
  "we had a plan!! we HAD a plan!! \u{1F62D}",
  "at this rate the card's gonna need its own budget. sort it out.",
  "this is the intervention. you are in it right now. \u{1F198}",
  "I'd love to know what was so important. genuinely. write me a letter.",
- "shit's getting loose out here. rein it in before it reins itself in.",
  "y'all are trending in a direction and that direction is BROKE.",
- "what in the ACTUAL hell is happening to this card. \u{1F92C}",
  "I'm gonna need everyone to put their hands where I can see them. \u{1F91A}",
  "this pace is criminal. I'd report it but I'm a notification, not a cop.",
  "somebody in this house has a spending problem and it's whoever touched the card last.",
  "no. NO. we are not doing this again. put it back. put it ALL back.",
- "the math just looked at me and shook its damn head.",
  "I'm one more charge away from becoming a completely different kind of app. \u{1F620}",
  "y'all are cooking. and by cooking I mean setting the budget on fire. \u{1F525}",
  "this is not spending, this is a hostage situation and the budget is the hostage.",
@@ -6014,7 +6081,6 @@ hot:[
  "the budget didn't do anything to deserve this.",
  "at this rate I'm gonna show up at the door and personally hold the card. \u{1F6AA}",
  "somebody's out here living large and the spreadsheet is picking up the tab.",
- "this is a whole ass emergency dressed up as a normal Tuesday.",
  "y'all are gonna blow through this thing with a week to spare and I'll be here for it. angrily.",
  "the projection just made a noise I've never heard a projection make.",
  "I'm gonna start reading your charges back to you one by one. don't test me.",
@@ -6151,7 +6217,6 @@ blown:[
  "I've seen natural disasters with better spending restraint.",
  "this isn't a budget anymore, it's a suggestion y'all ignored in writing.",
  "congrats! y'all beat the budget. by going THROUGH it. that's not how winning works.",
- "biiiiyoch!!! stop spending all your money! DAMN!",
  "a thief with your card would've been gentler. and probably guiltier.",
  "the number went past the line and just kept walking. didn't even look back.",
  "remember the budget? me neither apparently.",
@@ -6165,8 +6230,6 @@ blown:[
  "I ran the numbers, then ran them again, then took a walk.",
  "this month is a crime scene and the card is the weapon.",
  "we are so far past the line the line needs binoculars.",
- "you muthafuckas are trading in your future for knickknacks n' shit. Lordy \u{1F629}",
- "shhhhhhheeeeeeiiiiit! Y'all are FUCKIN UP! \u{1F525}",
  "hi it's Buddy the Budget. this is my letter of resignation. I can't help you people. \u{1F4DD}",
  "the budget is not over. the budget is DECEASED. \u26B0\uFE0F",
  "y'all went past the limit, waved at it, and kept going. \u{1F44B}",
@@ -6246,6 +6309,345 @@ blown:[
  "somebody get me a new budget, this one's been destroyed on impact. \u{1F4A5}",
  "I've seen a lot of bad months. this one's got a real shot at the trophy. \u{1F3C5}"]};
 
+/* ── the unhinged bank ────────────────────────────────────────────────────
+   Everything above this line is the bank that has been through carrier review.
+   Everything below has not, and never will be: it goes out over ntfy only.
+
+   The split is not squeamishness. A2P content filtering sits downstream of
+   10DLC approval and judges the message, not the campaign, and obfuscating a
+   word to slip past it is itself a violation — the kind that takes the brand
+   down rather than the message. ntfy has no such committee, so that is where
+   Buddy is allowed to be himself.
+
+   sendSMS in the Worker must keep passing spicy=false. There is a test.        */
+const FLIP="(\u256F\u00B0\u25A1\u00B0\uFF09\u256F\uFE35 \u253B\u2501\u253B";
+const UNFLIP="\u252C\u2500\u252C\u30CE( \u00BA _ \u00BA\u30CE)";
+
+const BUDDY_HI_X=[
+ "hiiii\u2026 Buddy the fucking Budget\u2026",
+ "heyyy\u2026 it's your shitty little money ghost\u2026",
+ "hiiiii\u2026 Buddy the Budget, and I'm already tired\u2026",
+ "yo\u2026 Buddy the Budget, dead inside, on time\u2026",
+ "hiii\u2026 it's me. the fucking spreadsheet with feelings\u2026",
+ "evening\u2026 Buddy the Budget, unpaid, unlicensed, unwell\u2026",
+ "hiiii\u2026 your worst notification, back on his bullshit\u2026",
+ "knock knock\u2026 it's the bastard with the numbers\u2026",
+ "heyyy\u2026 Buddy the Budget, legally not allowed to stop\u2026",
+ "hiiiii\u2026 ya boy Buddy, fresh out of patience\u2026",
+ "hey\u2026 it's 8pm and I'm contractually obligated to ruin it\u2026",
+ "hiiii\u2026 Buddy the Budget, haunting this app rent free\u2026",
+ "sup\u2026 it's the little guy who counts your shit\u2026",
+ "hiiiii\u2026 Buddy. still here. still furious\u2026"];
+
+/* Same eight buckets, same escalation, no manners. close stays tense rather
+   than cruel for the same reason it always did: you are about to WIN. */
+const BUDDY_X={
+silent:[
+ "still nothing from either of you. I'm rotting in here, thanks for asking.",
+ "two days dark and I'm out here doing improv with a fossil of a damn number.",
+ "three days of fuck all. I'm a scarecrow guarding an empty field.",
+ "nobody's checked in and I'm losing my goddamn mind in here.",
+ "still dark. still nothing. still fucking here though, aren't I.",
+ "y'all disappeared and left me holding a number like a shitty little urn.",
+ "open the app. OPEN THE APP. sorry. I'm not well.",
+ "no signal from either of you. I assume the worst because I always fucking do.",
+ "two days of nothing. I've been screaming into a fucking void with a calculator.",
+ "y'all ghosted me and I'm out here doing math on vibes and spite.",
+ "no check-in. I have become a haunted number. this is your fault.",
+ "nobody's opened this app and I'm holding a total so old it's got a fucking pension.",
+ "radio silence. I'm just a sad little bastard clutching Tuesday's figure.",
+ "still nothing. I've started talking to the mortgage. it doesn't answer either.",
+ "open the damn app. I'm begging. I have no dignity left to lose.",
+ "two days dark. for all I know y'all bought a boat. did you buy a boat.",
+ "I'm flying blind and the instruments are screaming. open the app, you monsters.",
+ "no data, no hope, no fucking clue. " + FLIP,
+ "y'all left me on read like I'm not the only thing standing between you and ruin.",
+ "I have been alone in here with a stale number and my own thoughts. both are bad."],
+nodata:[
+ "nothing. not a damn thing. I'm a very expensive way of saying I don't know.",
+ "no data and no dignity. hook up the damn card.",
+ "empty as hell in here. somebody connect something before I invent numbers.",
+ "no numbers, no card, no goddamn purpose. I'm decorative.",
+ "the feed is empty and so am I. hook something up, for fuck's sake.",
+ "I'm a budget bot with no budget, screaming into a spreadsheet-shaped hole.",
+ "nothing connected. I'm doing bits for an empty room like a sad little clown.",
+ "give me a damn number. one. I'm not picky. I'm desperate.",
+ "there's nothing here. no card, no numbers, nothing. I'm a ghost in an empty house.",
+ "no data. I'm just a personality with no fucking job. deeply upsetting.",
+ "nothing's connected. I'm out here performing for an audience of zero.",
+ "I have no numbers. I have only feelings. this is a nightmare.",
+ "the feed's dry. hook something up before I start making shit up.",
+ "no card, no bank, no point. I'm a notification with an existential problem.",
+ "empty. completely empty. I'm rattling around in here like a lost sock.",
+ "give me something. anything. a number. a receipt. a fucking clue.",
+ "I know nothing and I'm still legally required to text you. " + FLIP,
+ "no data means I can't roast you and that's the real tragedy here.",
+ "nothing to report because nothing is connected. fix it or I start guessing.",
+ "I'm a budget app with no budget. do you understand how humiliating that is."],
+cycle:[
+ "new cycle, clean slate, same two beautiful idiots. let's not fuck it up.",
+ "counter's back to zero and so is my patience. fresh start for both, I guess.",
+ "the slate's clean. I give it eleven days before somebody buys something stupid.",
+ "new cycle. the slate's clean and I give it a week before somebody fucks it up.",
+ "counter's at zero. don't get cute. don't get comfortable. don't get a boat.",
+ "fresh damn month. new chances for y'all to disappoint me creatively.",
+ "cycle's turned. whatever the hell happened last month, it's sealed. moving on.",
+ "clean slate, and I swear to god if this one goes the same way.",
+ "new cycle. I'm choosing hope, which is a bad damn habit I keep picking up.",
+ "new cycle. clean slate. try not to set it on fire in the first fucking week.",
+ "the counter's back to zero. so is my faith, but here we are.",
+ "fresh cycle, fresh chances to disappoint me in brand new ways.",
+ "cycle turned. everything's forgiven. nothing's forgotten. I keep records.",
+ "new month, same two idiots I love. let's go. " + UNFLIP,
+ "clean slate. I've reset the number and my blood pressure. one of them will hold.",
+ "cycle's over. that was a lot. genuinely, that was a fucking lot.",
+ "back to zero. don't make me watch that happen again.",
+ "new cycle. I have been reborn. I am already suspicious.",
+ "the slate is clean and I give it eleven days, tops.",
+ "cycle flipped. I'd celebrate but I've seen what you do with a fresh start.",
+ "new cycle, and this time I'm watching from the very first swipe.",
+ "reset. done. gone. whatever happened last month is between y'all and god.",
+ "starting over. I'm cautiously optimistic, which for me is a medical condition.",
+ "the number's zero again. the only time all month I'm not upset."],
+good:[
+ "under budget and I'm emotionally unprepared as hell for it.",
+ "no complaints. none. put this damn message in a frame.",
+ "y'all did the boring correct thing and I respect the hell out of it.",
+ "we're under and I don't know what the fuck to do with my hands.",
+ "damn. y'all are actually doing it. I'm shook.",
+ "nothing's on fire. no bullshit to report. weird as hell in here.",
+ "under budget. I'd yell but there's nothing to yell about. this is my hell.",
+ "y'all are being responsible adults and it's freaking me the fuck out.",
+ "clean numbers. genuinely clean. I checked twice because I didn't damn well believe it.",
+ "no fires, no disasters, no bullshit. I'm redundant and I'm fine with it. mostly.",
+ "we're comfortable and I'm sat here waiting for the other shoe to drop like a paranoid bastard.",
+ "good damn cycle. don't let it go to your heads, I'm still watching every swipe.",
+ "under. still under. what the hell is happening. who are you people.",
+ "y'all are doing really well with your budget. kinda the best little savers ever and def NOT some broke ass bitches.",
+ "look at y'all being fucking responsible. I don't know what to do with this.",
+ "we're under. genuinely under. I've checked it four times like a maniac.",
+ "this is fine. this is actually fine. I feel weird and I don't like it.",
+ "nothing's on fire. I've got nothing to yell about and it's disorienting as hell.",
+ "y'all are doing great and it's ruining my whole bit.",
+ "under budget. I'd flip a table but there's nothing to flip. " + UNFLIP,
+ "healthy numbers. disgusting. keep it up.",
+ "no notes. none. I hate having no notes.",
+ "we're comfortable. I'm going to sit here and quietly not trust it.",
+ "this is what winning looks like and honestly it's a little boring. good.",
+ "I came here to raise hell and instead I'm handing out gold stars. bullshit.",
+ "y'all are under and I have to be nice about it. this is the worst day of my life.",
+ "solid. genuinely solid. don't let it go to your heads, I'm still watching.",
+ "everything's in order. I've been demoted to a fucking status bar.",
+ "nothing to report except competence. gross.",
+ "we're fine. I'm going to lie down. call me if you buy a jet ski.",
+ "under budget and I've got no material. absolute career-ending performance from y'all.",
+ "good numbers. I'm suspicious but I'm also proud. it's confusing in here.",
+ "y'all are behaving. I've written this whole message and used zero swears. one. one swear.",
+ "the card's calm. the bank's calm. I'm the only one losing it and that's normal.",
+ "clean cycle so far. I'm keeping one eye open like a paranoid little goblin.",
+ "no complaints. wild. put this message in a frame.",
+ "on pace and under. I'd say I'm shocked but I'm mostly just relieved as hell.",
+ "y'all did the thing. the boring, unglamorous, correct thing. respect.",
+ "under. still under. I keep refreshing like it's going to change.",
+ "nothing dramatic to report. I'll be in my room, unloved and unnecessary.",
+ "good cycle. I'm banking this feeling for the next time it all goes to shit.",
+ "we're winning and I'm emotionally unprepared for it.",
+ "the numbers are fine. genuinely. go enjoy your evening, you absolute legends.",
+ "solid work. I'm legally obligated to add that it could still all collapse. love you."],
+early:[
+ "it's day five. FIVE. what in the hell are we doing already.",
+ "early and hot is how every bad damn cycle starts. I've seen it. twice.",
+ "slow the hell down, we've got three weeks of month left to pay for.",
+ "this is a marathon and y'all are doing shots at the damn start line.",
+ "early spend like this and I'll be screaming by the 20th. save us both the shit.",
+ "day six and the card's already fucking sprinting. it's a month, not a dash.",
+ "we're out the gate hot as hell and there's twenty-odd days left. slow down.",
+ "early burn. fixable now, absolute shitshow in two weeks. your call.",
+ "it's the first damn week and I'm already doing arithmetic I hate.",
+ "y'all came out swinging at the budget and the budget has feelings, one of which is me.",
+ "this pace is a problem I can see from here and I don't even have damn eyes.",
+ "too early for this number. way too fucking early.",
+ "pump the brakes. I'm asking nice and that never lasts long with me.",
+ "week one and the card's already breathing hard. what the hell was that.",
+ "front-loading a cycle like this is how we end up screaming at each other on the 28th.",
+ "biiiiyoch!!! stop spending all your money! damn!",
+ "it's early and we're already moving fast. slow the fuck down.",
+ "day five and the number's got momentum. that's not a compliment.",
+ "we're out the gate like it's a fucking sprint. it's a month, not a 100m.",
+ "early days and the card's already breathing heavy. ease up.",
+ "this pace is a problem in about nine days. just so we're clear now.",
+ "we've barely started and I'm already doing math I don't like.",
+ "y'all came out swinging. at the budget. with a bat. " + FLIP,
+ "it's the first week. the FIRST week. what are we doing.",
+ "early and hot. I'm not panicking. I'm pre-panicking. it's a whole discipline.",
+ "the cycle is a baby and you're already feeding it your paycheck.",
+ "this is a marathon and y'all are doing a keg stand at mile one.",
+ "we're ahead of pace and it's day six. do that math. actually don't, I'll do it.",
+ "early burn. it's fixable right now and it will not be fixable in two weeks.",
+ "slow it down. I'm asking nicely and that never lasts.",
+ "the number's climbing early and I've got a bad fucking feeling about it.",
+ "week one and I'm already sweating. that's a new record for me.",
+ "y'all are front-loading this cycle like it's a buffet plate.",
+ "early pace like this ends one way and it's not a happy way.",
+ "it's too early for this number. genuinely, too early.",
+ "we're moving quick. quicker than last cycle. quicker than sense.",
+ "first stretch and the card's already got opinions. so do I.",
+ "this early and this fast means I'll be screaming by the 20th. save us both.",
+ "pump the brakes. I'm not even mad yet and I'd like to stay that way.",
+ "the cycle just started and y'all are already testing it. rude.",
+ "early spend, early warning. that's all this is. so far.",
+ "we've got a lot of month left and not a lot of restraint on display.",
+ "I'm flagging this now so I can say I flagged it. flagged. FLAGGED.",
+ "it's day seven and this is a day-eighteen number. explain yourselves.",
+ "fast start. I've seen this movie and it ends with me yelling.",
+ "early. hot. fixable. three words, one of which expires soon."],
+hot:[
+ "we're running hot as hell and I am not okay about it.",
+ "the number's climbing and I'm losing my absolute shit watching it.",
+ "this pace cooks us. I've run it four times and it fucking cooks us every time.",
+ "somebody put the goddamn card in a drawer. a locked one. in another county.",
+ "we're above pace and gaining and I need one of you to look at me.",
+ "hot. very hot. unpleasantly, sweatily, what-the-fuck hot.",
+ "I'm the alarm. this is the alarm going off. WEE OO WEE OO. slow down.",
+ "the projection is so ugly I checked whether I'd broken my own damn math. I hadn't.",
+ "we are burning through this cycle like it owes us money. it does not. we owe IT.",
+ "one quiet damn weekend. that's all I want. I'm begging on my little pixel knees.",
+ "this is heading somewhere bad and I want it on the record that I fucking said so.",
+ "the card's having the time of its life and it is not remotely free.",
+ "hot streak, wrong damn kind. I need boring. give me boring.",
+ "we're not blown yet but I can see it from here and it looks like shit.",
+ "okay so we need to fucking talk. the pace on this card is not a pace, it's a fall.",
+ "this is the part where I stop being nice about it. slow the hell down. \u{1F6A8}",
+ "I did the math four times hoping I was wrong. I was not wrong. shit.",
+ "this pace is a whole ass problem. I said what I said.",
+ "damn. DAMN. what happened this week?? \u{1F4B8}",
+ "hell no. lock the cards in a drawer. I'll wait. \u{1F512}",
+ "shit's getting loose out here. rein it in before it reins itself in.",
+ "what in the ACTUAL hell is happening to this card. \u{1F92C}",
+ "the math just looked at me and shook its damn head.",
+ "this is a whole ass emergency dressed up as a normal Tuesday.",
+ "we're running hot and I'm officially fucking stressed.",
+ "the number's climbing and my will to live is doing the opposite.",
+ "this pace is going to cook us. I can see it from here.",
+ "we are hot. very hot. unpleasantly hot. do something.",
+ "I'm watching this number go up like a balloon and I've got no scissors.",
+ "y'all are cooking and it's not dinner. " + FLIP,
+ "hot pace. we're not blown yet but I can see it from where I'm standing.",
+ "the card's on a run and nobody's stopping it. I'm nobody. I can't stop it.",
+ "this is the part where I get loud. we're running hot. RUNNING HOT.",
+ "we're above pace and climbing and I'd love it if that stopped happening.",
+ "I've done the projection three times hoping it'd change. it didn't. it won't.",
+ "hot. genuinely hot. I need y'all to sit down for a few days.",
+ "the trajectory on this is ugly as hell and I need someone to look at it.",
+ "we're not over yet. we are absolutely heading over. those are different things.",
+ "somebody's card is having the time of its life and it's not fucking free.",
+ "I'm sounding the alarm. this is the alarm. it's me. I'm the alarm.",
+ "this pace holds and we blow it. that's not a threat, that's arithmetic.",
+ "hot streak, wrong kind. I need a boring week and I need it now.",
+ "we are burning through this cycle like it owes us money. it doesn't. we owe IT money.",
+ "the number's angry and so am I and only one of us can do anything about it.",
+ "running hot. I've been running hot for three days and nobody's noticed.",
+ "I need a quiet weekend. one. just one. I'm begging on my little digital knees.",
+ "this is heading somewhere bad and I'd like to file that formally.",
+ "we're over pace and the days aren't slowing down to help.",
+ "the card is doing numbers. bad numbers. big bad numbers.",
+ "hot. and the worst part is I know exactly how this ends and I still have to watch.",
+ "somebody put the card in a drawer. a locked drawer. a drawer in another house.",
+ "we're above the line on pace and gaining. this is your one calm warning.",
+ "I'm not mad, I'm running hot, which for me is the same thing but louder.",
+ "the projection is bad enough that I checked whether I'd broken the math. I hadn't."],
+close:[
+ "one dumb swipe and this whole damn thing collapses. hold steady.",
+ "we're threading a needle. do not sneeze. do not buy a goddamn thing.",
+ "this close and I've got no jokes left, just white knuckles and a bad damn feeling.",
+ "hold. hold. HOLD. sorry for yelling, this is genuinely tense as hell.",
+ "nearly there. don't celebrate, don't spend, don't do a damn thing.",
+ "we are right on the damn line. nobody move. nobody breathe. nobody buy.",
+ "this is winnable and one dumbass purchase kills it. hold.",
+ "razor thin. I'm watching every swipe like a hawk on its fourth damn coffee.",
+ "so close it hurts. keep the card in your pocket, I'm begging.",
+ "we might actually pull this off. do not fuck it up in the last stretch.",
+ "hold the line. that's it. that's the whole damn message.",
+ "close as hell and still ours to win. steady hands.",
+ "one quiet week and we take it. one bad night and we don't. no damn pressure.",
+ "I've stopped joking. that's how close this is.",
+ "we're a rounding error from the line. treat every dollar like it's the last damn one.",
+ "we are RIGHT on the line. don't breathe. don't buy anything. don't move.",
+ "this is going to be close as hell. I'm holding my breath and I don't have lungs.",
+ "we're inches from it. inches. hold the line, I'm begging.",
+ "close. so close. one dumb purchase and it's over. no pressure.",
+ "we might actually make this. don't fuck it up in the last stretch.",
+ "razor thin. I'm watching every swipe like a hawk with anxiety.",
+ "we're on the edge and it's genuinely thrilling and I hate it.",
+ "this is winnable. barely. hold on. " + UNFLIP,
+ "so close I can taste it and I don't have a mouth. hold steady.",
+ "we're threading a needle here. keep the hands still.",
+ "this is the tense part. I'm not yelling. I'm just very, very focused.",
+ "one good week and we take it. one bad night and we don't.",
+ "close enough that I've stopped making jokes. mostly.",
+ "hold. hold. hold. that's the whole message.",
+ "we're right up against it and it's still ours to win. barely. carefully.",
+ "I've run this three times. it's close. it's really close. don't spend.",
+ "we're going to squeak this if nobody does anything stupid. that's the ask.",
+ "the line's right there. do not test it. do not poke it.",
+ "close cycle. I'm proud and terrified in equal measure.",
+ "we could actually pull this off. keep the card in your pocket a few more days.",
+ "this is the last stretch and it's tight as hell. eyes up.",
+ "nearly there. genuinely nearly there. don't celebrate yet.",
+ "we're a rounding error from the line. treat every dollar like it's the one.",
+ "it's close. I'd rather it wasn't but here we are. hold on.",
+ "one more quiet week and this is a win. that's all that's between us and it."],
+blown:[
+ "well we blew the shit out of that one.",
+ "it's gone. the budget is fucking gone. pour one out.",
+ "blown to hell and back and then blown again for good measure.",
+ "over the line and STILL SPENDING. genuinely incredible. genuinely fucked.",
+ "the budget's dead and y'all are stood over it holding the damn card.",
+ "I set a limit. y'all set it on fire and roasted marshmallows on the bastard.",
+ "we didn't just blow it. we blew it and then kept fucking going.",
+ "the number went through that line like it wasn't even goddamn there.",
+ "blown, and there's days left, and I'm going to be sick.",
+ "past the line, past caring, past the point of a single helpful damn suggestion.",
+ "this cycle is a crime scene and I'm the chalk outline, you absolute maniacs.",
+ "the limit was apparently a suggestion. a suggestion y'all ignored with real fucking conviction.",
+ "budget's blown. I've got nothing left but sarcasm and this godforsaken number.",
+ "y'all blew it and the month's not even done. that's the impressive damn part.",
+ "over budget and I've run out of polite. so: what the actual hell.",
+ "biiiiyoch!!! stop spending all your money! DAMN!",
+ "you muthafuckas are trading in your future for knickknacks n' shit. Lordy \u{1F629}",
+ "shhhhhhheeeeeeiiiiit! Y'all are FUCKIN UP! \u{1F525}",
+ "well we blew the fuck out of that one. " + FLIP,
+ "it's gone. it's over. the budget is a memory and a warning.",
+ "blown. thoroughly, comprehensively blown. I'm going to go lie down in the road.",
+ "we're over. way over. I've stopped counting and started grieving.",
+ "the budget is dead and y'all are standing over it holding the card.",
+ "blown to hell. I'd be angrier if I wasn't so impressed by the commitment.",
+ "over the line and still going. genuinely astonishing work.",
+ "that's a wrap on the budget. it fought bravely. it lost badly.",
+ "we didn't just blow it, we blew it and then kept spending. incredible.",
+ "the number went through the line like it wasn't fucking there.",
+ "budget's gone. I'm gone. we're all gone. " + FLIP,
+ "I set a limit. y'all set it on fire. cool. cool cool cool.",
+ "blown. and there's still days left. I'm going to be sick.",
+ "the budget filed a restraining order. it doesn't want to see either of you.",
+ "we are so far past the line I can't see it anymore. it's a dot. it's a memory.",
+ "this is the part where I stop being helpful and start being a witness.",
+ "over. very over. spectacularly over. do you want the number or should I just scream.",
+ "y'all blew it and the month isn't even done. that's the impressive part.",
+ "budget's blown. I've got nothing left but sarcasm and this fucking number.",
+ "we're past the line and picking up speed. it's almost artistic.",
+ "I'm not even going to pretend this is salvageable. it isn't. it's a bonfire.",
+ "blown. I'd flip a table but I've flipped them all already. " + FLIP,
+ "the limit was a suggestion apparently. a suggestion y'all ignored with real conviction.",
+ "over budget and I'm out of polite ways to say it. so: what the hell.",
+ "the card won. the budget lost. I'm just here reading the score.",
+ "we blew it. we blew it hard. and somehow I still love y'all. weak of me.",
+ "this cycle is a crime scene and I'm the chalk outline.",
+ "blown, and I want it on record that I said something about this two weeks ago.",
+ "past the line, past caring, past the point of a helpful suggestion.",
+ "budget's blown. next cycle we try again. same two idiots, same bad plan."]};
+
+
 function monthLen(d){ return new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); }
 /* Where we are inside the BILLING cycle, which is not the calendar month. The
    cycle runs the 4th to the 3rd, so on the 18th you are 15 days into 31 — a bit
@@ -6318,7 +6720,7 @@ function buddyTail(b){
    position means nothing against a different array — line 40 of the old `hot`
    is line 40 of something else entirely. Rather than try to migrate it, a new
    stamp throws the whole memory away once and starts clean. */
-const BANK_V="b2";
+const BANK_V="b3";
 function buddyMem(){
   const m=S.meta;
   if(m.buddySeenV!==BANK_V){ m.buddySeen={}; m.buddySeenV=BANK_V; }
@@ -6519,12 +6921,30 @@ function buddyFact(b){
   return hit.text;
 }
 
+/* Spice is on unless something explicitly turns it off. The only caller that
+   turns it off is the SMS half of the Worker, and that is deliberate: the two
+   channels are not equally free. */
+const spiceOn=()=>S.meta.spice!==false;
+
 /* greeting, joke, number, memory. The fact goes last because it's the part worth
    reading twice, and it's allowed to be missing — a first cycle with nothing
-   behind it just gets the first three. */
-function buddyLine(b){
+   behind it just gets the first three.
+
+   `spicy` picks which banks are on the table. The freshness memory is keyed per
+   bank set ("blown" vs "blown+") because the two have different lengths, and
+   pickFresh stores INDICES — one key across both would have the memory pointing
+   at whichever line happened to land in that slot. */
+function buddyLine(b,spicy){
+  const hot=spicy===undefined?spiceOn():!!spicy;
   const f=buddyFact(b);
-  return pickFresh(BUDDY_HI,"hi")+" "+pickFresh(BUDDY[b]||BUDDY.nodata,b)
+  const hi=hot?BUDDY_HI_X:BUDDY_HI;
+  const base=BUDDY[b]||BUDDY.nodata;
+  /* Not concat. Pooling ~600 clean lines with the unhinged ones means the
+     unhinged ones turn up about a quarter of the time, which is not what
+     "filthy" means. When spice is on the clean bank is off the table entirely,
+     and it stays whole and untouched for the channel that needs it. */
+  const bank=hot&&BUDDY_X[b]&&BUDDY_X[b].length?BUDDY_X[b]:base;
+  return pickFresh(hi,hot?"hi+":"hi")+" "+pickFresh(bank,hot?b+"+":b)
         +buddyTail(b)+(f?" "+f:"");
 }
 const NUDGE_HOUR=20;                       /* everything lands at 8pm local */
@@ -6742,6 +7162,33 @@ function accSec(id,label,note,body){
       <span class="accx">${on?"\u2212":"+"}</span></div>
     <div class="accb">${body}</div></div>`;
 }
+/* Nothing in here deletes on its own. Same day, same amount, different wording
+   is a strong hint and not a fact, and the one thing this app must never do is
+   quietly throw away rows the bank sent. So it shows its work: what it would
+   keep, what it would drop, and a button per pair. */
+function dupHTML(){
+  const g=dupGroups();
+  if(!g.length) return "";
+  const sure=g.filter(x=>x.sure).length;
+  let h=`<div class="flag${sure?" bad":""}"><div class="ft">Possible duplicates \u00b7 ${g.length}</div>
+    <div class="fb">Same day, same amount, different wording. Reconnecting a card
+    can make it re-send transactions under a new description, and the old copy
+    survives because by then it looks like a different row.
+    ${sure?`<b>${sure}</b> of these have one copy you've already named or assigned
+      and one you haven't, which is the pattern a re-send leaves.`:""}
+    Check each pair against your statement before removing it.</div></div>`;
+  g.forEach((x,i)=>{
+    h+=`<div class="flag"><div class="ft">${fmtDate(x.date)} \u00b7 ${money(x.amt)}</div>
+      <div class="fb"><b>Keep</b> ${esc(String(x.keep.t.desc||"\u2014").slice(0,60))}
+      ${x.keep.t.desc&&(S.tag||{})[x.keep.sig]?" (named)":""}
+      ${x.drop.map(d=>`<br><b>Drop</b> ${esc(String(d.t.desc||"\u2014").slice(0,60))}`).join("")}
+      </div>
+      <div class="crow"><button class="mini" data-dup="${i}">Remove the duplicate</button></div></div>`;
+  });
+  if(g.length>1) h+=`<div class="crow"><button class="del" id="dupAll">Remove all
+    ${g.length} duplicates</button></div>`;
+  return h;
+}
 function syncHTML(){
   let h="";
   const loc=whereAmI();
@@ -6820,6 +7267,7 @@ function syncHTML(){
         <div class="flag" id="sfPeekBox" style="display:none"><div class="ft">What the bank actually sends</div>
         <div id="sfPeekBody"></div></div>`;
   }
+  card+=dupHTML();
 
   /* The role picker is where an account becomes a bank account, so it lives
      under Bank info even though it files cards and assets from the same list. */
@@ -6935,7 +7383,25 @@ function syncHTML(){
             ntfyOn()?"ntfy on · Twilio pending":"nothing set up",comms);
   return h;
 }
+function wireDups(){
+  const g=dupGroups();
+  document.querySelectorAll("[data-dup]").forEach(b=>{
+    b.onclick=()=>{
+      const x=g[+b.dataset.dup]; if(!x) return;
+      const n=dupDrop(x.drop.map(d=>d.sig));
+      toast(n===1?"Removed 1 duplicate":"Removed "+n+" rows");
+    };
+  });
+  const all=document.getElementById("dupAll");
+  if(all) all.onclick=()=>{
+    if(!confirm("Remove "+g.length+" duplicate rows? Undo will put them back."))
+      return;
+    const n=dupDrop(g.reduce((a,x)=>a.concat(x.drop.map(d=>d.sig)),[]));
+    toast("Removed "+n+" rows");
+  };
+}
 function wireSync(){
+  wireDups();
   const tok=document.getElementById("sTok"), gid=document.getElementById("sGist");
   document.getElementById("sConnect").onclick=async()=>{
     const t=tok.value.trim();
