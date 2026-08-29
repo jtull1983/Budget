@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v102";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v103";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3328,64 +3328,95 @@ function smsDel(num){
 }
 function bankRows(){ return (S.bank&&Array.isArray(S.bank.rows))?S.bank.rows:[]; }
 
-/* ── the same transaction, twice ─────────────────────────────────────────────
-   Rows are deduped on date|amount|description. A reconnected card can send a
-   transaction it has already sent under a DIFFERENT description — the bridge
-   re-derives it from whatever the institution hands over that day — and the old
-   copy then survives the dedupe forever, because by that signature it is a
-   different row.
+/* ── the same transaction, twice ─────────────────────────────────
+   Rows are deduped on date|amount|description. Reconnecting a card makes the
+   bridge re-derive a transaction it has already sent — a new description, and
+   often a new posted date too — so the old copy survives forever, because by
+   that signature it is a different row.
 
-   Same day and same amount to the cent is the signal. It is not proof: two $250
-   transfers on one day are perfectly possible, which is why nothing here
-   deletes anything on its own. This only gathers the suspects, ranks each pair
-   so the copy carrying your decisions is the one proposed to keep, and hands
-   the list to the Sync pane to be confirmed by hand. */
+   v102 looked for the same date and found nothing, because the dates had moved.
+   The amount is the part that does not drift: same money to the cent, within
+   TXSLIP days, worded differently. That is the same window txHeal uses to
+   re-attach a tag whose row was rewritten under it, and for the same reason.
+
+   Two rows worded IDENTICALLY are left alone. Those are two real transactions
+   — three $250 stock buys in a month look exactly like that — and txRows()
+   already folds away anything that is genuinely the same row twice.
+
+   Nothing here deletes on its own. It gathers suspects and the Sync pane asks. */
+const dayGapOf=(a,b)=>Math.abs((Date.parse(a+"T00:00:00")-Date.parse(b+"T00:00:00"))/864e5);
+function txDecided(sig){
+  const g=(S.tag||{})[sig];
+  return !!(g&&(g.label||g.rule||g.transfer||g.ccpay))||!!assignedTo(sig);
+}
 function dupGroups(){
-  const meaty=g=>!!(g&&(g.label||g.rule||g.transfer||g.ccpay));
-  const by={}, out=[];
-  bankRows().forEach((t,i)=>{
+  const by={};
+  bankRows().forEach(t=>{
     if(!t||!t.date) return;
-    const k=t.date+"|"+(Number(t.amt)||0).toFixed(2);
-    (by[k]=by[k]||[]).push({t,i,sig:TXSIG(t)});
+    const k=(Number(t.amt)||0).toFixed(2);
+    (by[k]=by[k]||[]).push({t,sig:TXSIG(t),date:String(t.date),
+                            txt:normTxt(t.desc).slice(0,24)});
   });
+  const out=[];
   Object.keys(by).forEach(k=>{
-    const g=by[k];
+    const g=by[k].slice().sort((a,b)=>a.date.localeCompare(b.date));
     if(g.length<2) return;
-    /* identical descriptions never reach here — txRows() already folds those */
-    const descs={}; g.forEach(x=>descs[normTxt(x.t.desc)]=1);
-    if(Object.keys(descs).length<2) return;
-    /* the copy to keep: the one that has been named, tagged or assigned. If more
-       than one has, or none has, the longer description wins as a tiebreak and
-       the whole group still has to be confirmed by hand. */
-    /* Two separate questions. `decided` is whether a copy carries any of your
-       work, and that alone decides confidence: one copy named and the other not
-       is the exact shape a re-send leaves behind. Description length is only a
-       tiebreak for ordering when neither copy has been touched, and it must not
-       leak into `sure` or every pair would look confident. */
-    const decided=x=>(meaty((S.tag||{})[x.sig])?1:0)+(assignedTo(x.sig)?1:0);
-    const score=x=>decided(x)*4+(String(x.t.desc||"").length>24?1:0);
-    const ranked=g.slice().sort((a,b)=>score(b)-score(a));
-    out.push({date:g[0].t.date, amt:Number(g[0].t.amt)||0,
-              keep:ranked[0], drop:ranked.slice(1),
-              sure:decided(ranked[0])>0&&ranked.slice(1).every(x=>!decided(x))});
+    const used={};
+    for(let i=0;i<g.length;i++){
+      if(used[i]) continue;
+      for(let j=i+1;j<g.length;j++){
+        if(used[j]) continue;
+        /* sorted by date, so once one is out of range every later one is too */
+        if(dayGapOf(g[i].date,g[j].date)>TXSLIP) break;
+        if(g[i].txt===g[j].txt) continue;          /* two real rows, same wording */
+        /* Keep the copy the live connection is still sending. The one carrying
+           your work is the older one by definition — you named it, which means it
+           has been on screen a while — and dropping the bare one would just let
+           the next card check bring it back. */
+        const iD=txDecided(g[i].sig), jD=txDecided(g[j].sig);
+        let keep,drop;
+        if(iD!==jD){ keep=iD?g[j]:g[i]; drop=iD?g[i]:g[j]; }
+        else { keep=g[j]; drop=g[i]; }             /* neither or both: later date wins */
+        used[i]=used[j]=1;
+        out.push({date:keep.date, amt:Number(keep.t.amt)||0, keep, drop:[drop],
+                  gap:dayGapOf(g[i].date,g[j].date),
+                  /* one copy touched and the other not, close together, is the
+                     exact fingerprint a re-send leaves */
+                  sure:(iD!==jD)});
+        break;
+      }
+    }
   });
   return out.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
 }
-/* Removing a row means removing its decisions too, or txHeal would adopt the
-   survivor onto the tag of the copy that just went. */
-function dupDrop(sigs){
-  const kill={}; (sigs||[]).forEach(x=>kill[x]=1);
-  const before=bankRows().length;
-  S.bank=S.bank||{rows:[]};
-  S.bank.rows=bankRows().filter(t=>!kill[TXSIG(t)]);
-  Object.keys(kill).forEach(sig=>{
-    if(S.tag) delete S.tag[sig];
-    clearAssign(sig);
-    if(S.hits) Object.keys(S.hits).forEach(k=>{
-      if(S.hits[k]&&S.hits[k].sig===sig) delete S.hits[k]; });
+/* Carry the work across, then remove the stale copy. Doing it in that order
+   matters: the name, the repeat rule and the assignment all hang off a
+   signature, and deleting first would strand them. */
+function dupMerge(groups){
+  let gone=0;
+  (groups||[]).forEach(x=>{
+    const keepSig=x.keep.sig;
+    x.drop.forEach(d=>{
+      const from=(S.tag||{})[d.sig];
+      if(from&&!txDecided(keepSig)){
+        S.tag=S.tag||{};
+        S.tag[keepSig]=Object.assign({},from);
+      }
+      /* an assignment points at a signature; move it rather than lose the link */
+      const line=assignedTo(d.sig);
+      if(line){ S.assign=S.assign||{}; S.assign[line]=keepSig; }
+      if(S.hits) Object.keys(S.hits).forEach(kk=>{
+        if(S.hits[kk]&&S.hits[kk].sig===d.sig) S.hits[kk].sig=keepSig; });
+      if(S.tag) delete S.tag[d.sig];
+    });
+    const kill={}; x.drop.forEach(d=>kill[d.sig]=1);
+    const before=bankRows().length;
+    S.bank=S.bank||{rows:[]};
+    S.bank.rows=bankRows().filter(t=>!kill[TXSIG(t)]);
+    gone+=before-bankRows().length;
   });
-  save(); render();
-  return before-bankRows().length;
+  if(gone){ save(); render(); }
+  return gone;
 }
 /* v67 — savings is gone. The account role, its pane, its labels and its rows were
    all removed at the owner's request; it comes back later on different rules.
@@ -7171,17 +7202,20 @@ function dupHTML(){
   if(!g.length) return "";
   const sure=g.filter(x=>x.sure).length;
   let h=`<div class="flag${sure?" bad":""}"><div class="ft">Possible duplicates \u00b7 ${g.length}</div>
-    <div class="fb">Same day, same amount, different wording. Reconnecting a card
-    can make it re-send transactions under a new description, and the old copy
-    survives because by then it looks like a different row.
+    <div class="fb">Same amount to the cent, within a few days, worded differently.
+    Reconnecting a card makes it re-send transactions under a new description and
+    often a new date, so the old copy survives — by then it looks like a different
+    row. The copy your card is still sending is the one kept; anything you had
+    named or assigned moves across onto it.
     ${sure?`<b>${sure}</b> of these have one copy you've already named or assigned
       and one you haven't, which is the pattern a re-send leaves.`:""}
     Check each pair against your statement before removing it.</div></div>`;
   g.forEach((x,i)=>{
     h+=`<div class="flag"><div class="ft">${fmtDate(x.date)} \u00b7 ${money(x.amt)}</div>
       <div class="fb"><b>Keep</b> ${esc(String(x.keep.t.desc||"\u2014").slice(0,60))}
-      ${x.keep.t.desc&&(S.tag||{})[x.keep.sig]?" (named)":""}
-      ${x.drop.map(d=>`<br><b>Drop</b> ${esc(String(d.t.desc||"\u2014").slice(0,60))}`).join("")}
+      ${x.drop.map(d=>`<br><b>Drop</b> ${esc(String(d.t.desc||"\u2014").slice(0,60))}
+        ${d.date!==x.date?` \u00b7 ${fmtDate(d.date)}`:""}
+        ${txDecided(d.sig)?" \u00b7 carries your name, which moves across":""}`).join("")}
       </div>
       <div class="crow"><button class="mini" data-dup="${i}">Remove the duplicate</button></div></div>`;
   });
@@ -7388,15 +7422,15 @@ function wireDups(){
   document.querySelectorAll("[data-dup]").forEach(b=>{
     b.onclick=()=>{
       const x=g[+b.dataset.dup]; if(!x) return;
-      const n=dupDrop(x.drop.map(d=>d.sig));
-      toast(n===1?"Removed 1 duplicate":"Removed "+n+" rows");
+      const n=dupMerge([x]);
+      toast(n===1?"Merged \u00b7 1 row removed":"Removed "+n+" rows");
     };
   });
   const all=document.getElementById("dupAll");
   if(all) all.onclick=()=>{
     if(!confirm("Remove "+g.length+" duplicate rows? Undo will put them back."))
       return;
-    const n=dupDrop(g.reduce((a,x)=>a.concat(x.drop.map(d=>d.sig)),[]));
+    const n=dupMerge(g);
     toast("Removed "+n+" rows");
   };
 }
