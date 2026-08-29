@@ -671,7 +671,7 @@ function sessionNo(dayId){
 }
 function drawBar(){
   const c=cur();
-  $('dayname').innerHTML='<b>'+c.dayLabel.split('\u2014')[0].trim()+' \u00b7 S'+sessionNo(c.dayId)+'</b>'
+  $('dayname').innerHTML='<b>'+c.dayLabel.split('\u2014')[0].trim()+' \u00b7 Session '+sessionNo(c.dayId)+'</b>'
     +(S.days.length>1?'<span class="swap">\u21c4</span>':'');
   const g=$('gym'); g.textContent=(c.gym==='home'?'HOME':c.gym.toUpperCase());
   g.classList.toggle('on',c.gym!=='home');
