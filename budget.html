@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v103";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v105";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3386,9 +3386,65 @@ function dupGroups(){
         break;
       }
     }
+    /* ── the wider pass ───────────────────────────────────────────────────
+       Five days is the right window for "certainly the same row". It is the
+       wrong one for "worth a look": a reconnect can move a posted date further
+       than that, and capping recall there is why v103 still showed nothing.
+       So: same amount, same month, worded differently, and exactly one of the
+       two carries your name or assignment. Both untouched is not enough — two
+       $99 debits three weeks apart are just two debits — but one named and one
+       bare is a shape that does not happen by accident. Reported as unsure, so
+       it is still a question rather than an answer. */
+    for(let i=0;i<g.length;i++){
+      if(used[i]) continue;
+      for(let j=i+1;j<g.length;j++){
+        if(used[j]) continue;
+        if(g[i].txt===g[j].txt) continue;
+        if(g[i].date.slice(0,7)!==g[j].date.slice(0,7)) continue;
+        const iD=txDecided(g[i].sig), jD=txDecided(g[j].sig);
+        if(iD===jD) continue;
+        const keep=iD?g[j]:g[i], drop=iD?g[i]:g[j];
+        used[i]=used[j]=1;
+        out.push({date:keep.date, amt:Number(keep.t.amt)||0, keep, drop:[drop],
+                  gap:dayGapOf(g[i].date,g[j].date), wide:true, sure:false});
+        break;
+      }
+    }
   });
   return out.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
 }
+/* ── the automatic pass ─────────────────────────────────────────────────────
+   Only the certain kind: inside the five-day window, one copy carrying your
+   work and one bare. The wide matches are deliberately left alone — they are
+   the ones where a real repeating charge could be mistaken for a re-send, and
+   nothing should delete a real transaction without being asked.
+
+   Capped, because anything that deletes rows on a timer needs a ceiling. If a
+   single pass ever wants a quarter of the account or more than twenty rows,
+   something has gone wrong upstream and the right move is to stop and let the
+   review pane show its working instead. */
+const DUP_MAX_SHARE=0.25, DUP_MAX_ROWS=20, DUP_MIN_BASE=20;
+function dupSweep(){
+  if(syncOn()&&!pulledOK) return 0;          /* not on a half-loaded state */
+  const sure=dupGroups().filter(x=>x.sure&&!x.wide);
+  if(!sure.length) return 0;
+  const total=bankRows().length;
+  const want=sure.reduce((n,x)=>n+x.drop.length,0);
+  /* The share test only means anything once there are enough rows for a share
+     to be a share. On an account holding three transactions, folding one pair is
+     33% and would trip a ceiling meant to catch a runaway, so the proportion is
+     only consulted past DUP_MIN_BASE rows. The flat row cap always applies. */
+  if(want>DUP_MAX_ROWS||(total>=DUP_MIN_BASE&&want/total>DUP_MAX_SHARE)){
+    S.meta.dupHeld=want;                     /* the pane explains it */
+    return 0;
+  }
+  delete S.meta.dupHeld;
+  const gone=dupMerge(sure);
+  if(gone) toast(gone===1?"Merged a duplicate the card re-sent"
+                         :"Merged "+gone+" duplicates the card re-sent");
+  return gone;
+}
+
 /* Carry the work across, then remove the stale copy. Doing it in that order
    matters: the name, the repeat rule and the assignment all hang off a
    signature, and deleting first would strand them. */
@@ -5653,8 +5709,12 @@ async function sfinPull(quiet){
       merged.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
       S.bank={at:Date.now(), rows:merged};
       /* The pull is the moment rows get revised, so it is the moment to put the
-         decisions back on them. */
+         decisions back on them — and the moment a reconnect's re-sent copies
+         actually arrive, so it is also the moment to fold them away. Order
+         matters: txHeal first, so a tag whose row was rewritten is back on a
+         live row before the sweep decides which copy carries your work. */
       txHeal();
+      dupSweep();
     }
     /* a filed statement is the real thing — never overwrite one */
     const held=S.stmts[c.bill];
@@ -7211,7 +7271,8 @@ function dupHTML(){
       and one you haven't, which is the pattern a re-send leaves.`:""}
     Check each pair against your statement before removing it.</div></div>`;
   g.forEach((x,i)=>{
-    h+=`<div class="flag"><div class="ft">${fmtDate(x.date)} \u00b7 ${money(x.amt)}</div>
+    h+=`<div class="flag"><div class="ft">${fmtDate(x.date)} \u00b7 ${money(x.amt)}${
+      x.wide?" \u00b7 "+Math.round(x.gap)+" days apart":""}</div>
       <div class="fb"><b>Keep</b> ${esc(String(x.keep.t.desc||"\u2014").slice(0,60))}
       ${x.drop.map(d=>`<br><b>Drop</b> ${esc(String(d.t.desc||"\u2014").slice(0,60))}
         ${d.date!==x.date?` \u00b7 ${fmtDate(d.date)}`:""}
@@ -7270,6 +7331,18 @@ function syncHTML(){
       Last save wins — but if the copy on GitHub is newer than the one this device started from, it stops and
       warns you instead of overwriting. Use <b>Pull now</b> to take theirs, or <b>Push now</b> twice to force yours.</div></div>`;
   }
+  /* Outside the folds on purpose. This lived inside Card info and stayed
+     invisible, which is the same as not existing. */
+  const dg=dupGroups();
+  if(S.meta.dupHeld) h+=`<div class="flag bad"><div class="ft">Duplicate sweep stopped</div>
+    <div class="fb">It wanted to remove <b>${S.meta.dupHeld}</b> rows in one pass,
+    which is more than looks right, so it did nothing. Have a look at the list
+    under <b>Card info</b> before letting any of it go.</div></div>`;
+  if(dg.length) h+=`<div class="flag bad"><div class="ft">Possible duplicates \u00b7 ${dg.length}</div>
+    <div class="fb">These are the ones that aren't certain \u2014 same amount and the
+    same month, but far enough apart that a real repeating charge would look the
+    same. The obvious re-sends have already been merged on their own.</div>
+    <div class="crow"><button class="mini" id="dupJump">Show me</button></div></div>`;
   h+=accSec("me","My personal info",
             syncOn()?`gist ${sync.gistId.slice(0,8)}…`
                     :sync.token?"token saved, no gist yet":"not set up yet",me);
@@ -7419,6 +7492,15 @@ function syncHTML(){
 }
 function wireDups(){
   const g=dupGroups();
+  const jump=document.getElementById("dupJump");
+  if(jump) jump.onclick=()=>{
+    const sec=document.querySelector('[data-acc="card"]');
+    if(!sec) return;
+    sec.classList.add("on");
+    const x=sec.querySelector(".accx"); if(x) x.textContent="\u2212";
+    const box=document.querySelector("[data-dup]");
+    if(box&&box.scrollIntoView) box.scrollIntoView({block:"center"});
+  };
   document.querySelectorAll("[data-dup]").forEach(b=>{
     b.onclick=()=>{
       const x=g[+b.dataset.dup]; if(!x) return;
@@ -8437,6 +8519,10 @@ setInterval(autoSyncTick,600000);
    plenty of headroom under the cap */
 setInterval(()=>{ if(sfinOn()&&!netBlocked()&&document.visibilityState!=="hidden"
                      &&sfinLeft()>8) sfinPull(true); },10800000);
+/* Duplicates from a reconnect are already in state before any of this runs, so
+   the sweep needs one pass on load as well as one per pull. After the gist has
+   had a chance to land, so it judges the merged state and not this device's. */
+setTimeout(()=>{ try{ if(dupSweep()) render(); }catch(e){} },6000);
 /* after the card has had a chance to land, see if Buddy owes anyone a message */
 setTimeout(()=>nudgeSchedule(),7000);
 setInterval(()=>{ if(document.visibilityState!=="hidden") nudgeSchedule(); },3600000);
