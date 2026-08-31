@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v106";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v107";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -4173,10 +4173,19 @@ function txHTML(){
   const open=openLines(k);
   /* v106 — is this merchant already taught against the line it is sitting on?
      The box mirrors that rather than starting blank, so it reads as a state
-     and unticking it means something. */
-  const pickedRow=assigned?open.find(r=>r.key===assigned):null;
-  const taughtLine=!!(pickedRow&&pickedRow.ruleId&&pickedRow.ruleId!=="cc"&&S.payee
-                      &&(S.payee[pickedRow.ruleId]||[]).includes(normMerchant(t.desc)));
+     and unticking it means something.
+
+     Read off the key, not off openLines(): an assigned line has stepped out of
+     the month by definition, so it is exactly the one row that is never in
+     that list. A key is ruleId#YYYY-MM#i; "one" and "info" are the one-off and
+     pre-records prefixes, and "cc" is the card bill, none of which is a
+     merchant-bearing rule. */
+  const pickedRule=(()=>{
+    const rid=assigned?String(assigned).split("#")[0]:"";
+    return (rid&&rid!=="cc"&&rid!=="one"&&rid!=="info")?rid:"";
+  })();
+  const taughtLine=!!(pickedRule&&S.payee
+                      &&(S.payee[pickedRule]||[]).includes(normMerchant(t.desc)));
   return `
   <div class="flag${card?"":" good"}"><div class="ft">${esc(t.desc||"—")}</div>
     <div class="fb"><b>${money(t.amt)}</b> \u00b7 ${fmtDate(t.date)}
@@ -7522,12 +7531,21 @@ function wireDups(){
   const g=dupGroups();
   const jump=document.getElementById("dupJump");
   if(jump) jump.onclick=()=>{
-    const sec=document.querySelector('[data-acc="card"]');
-    if(!sec) return;
-    sec.classList.add("on");
-    const x=sec.querySelector(".accx"); if(x) x.textContent="\u2212";
-    const box=document.querySelector("[data-dup]");
-    if(box&&box.scrollIntoView) box.scrollIntoView({block:"center"});
+    /* v107 — the list is two folds deep: dupHTML() goes into `card`, and
+       accSec("card") is nested inside accSec("money"). Opening the inner one
+       and nothing else left it sitting inside a closed outer accordion, which
+       is why this button appeared to do nothing at all.
+
+       Written through syncOpen rather than straight onto the DOM: syncOpen is
+       what the pane rebuilds itself from, so a class added by hand here is
+       thrown away by the next render. */
+    syncOpen.money=true; syncOpen.card=true;
+    openDrawer("sync");
+    /* after the rebuild, or there is nothing to scroll to yet */
+    setTimeout(()=>{
+      const box=document.querySelector("[data-dup]");
+      if(box&&box.scrollIntoView) box.scrollIntoView({block:"center"});
+    },60);
   };
   document.querySelectorAll("[data-dup]").forEach(b=>{
     b.onclick=()=>{
