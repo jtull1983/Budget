@@ -827,7 +827,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v105";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v106";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1230,9 +1230,15 @@ function build(){
   for(const k of monthList()){
     /* before the wall: reference only */
     const pre=!!(S.meta.recordsFrom&&cmpYM(k,S.meta.recordsFrom)<0);
+    /* v106 — behind the wall, does this month carry a statement of its own?
+       If it does, the info# row below draws the card bill with the real figure
+       on it, and the cc rule must not draw a second one alongside. If it does
+       not, there is no info row and the rule is the only thing drawing it. */
+    const preStmt=pre&&!!(S.stmts&&S.stmts[k]&&S.stmts[k].rows&&S.stmts[k].rows.length);
     const rows=[];
     for(const r of S.rules){
       if(!inWindow(r,k)) continue;
+      if(preStmt&&r.id==="cc") continue;          /* v106 — the info# row has it */
       const dates=occDates(r,k);
       dates.forEach((day,i)=>{
         const key=r.id+"#"+k+"#"+i;
@@ -4165,6 +4171,12 @@ function txHTML(){
   const rule=g.rule?(S.rules||[]).find(x=>x.id===g.rule):null;
   const assigned=assignedTo(TXSIG(t));
   const open=openLines(k);
+  /* v106 — is this merchant already taught against the line it is sitting on?
+     The box mirrors that rather than starting blank, so it reads as a state
+     and unticking it means something. */
+  const pickedRow=assigned?open.find(r=>r.key===assigned):null;
+  const taughtLine=!!(pickedRow&&pickedRow.ruleId&&pickedRow.ruleId!=="cc"&&S.payee
+                      &&(S.payee[pickedRow.ruleId]||[]).includes(normMerchant(t.desc)));
   return `
   <div class="flag${card?"":" good"}"><div class="ft">${esc(t.desc||"—")}</div>
     <div class="fb"><b>${money(t.amt)}</b> \u00b7 ${fmtDate(t.date)}
@@ -4199,6 +4211,12 @@ function txHTML(){
     </select></div></div>
     <div class="hint" style="margin-top:6px">Pick one and it drops out of this month \u2014
       this transaction takes its place and its name.</div>
+    <label class="chk"><input type="checkbox" id="txTeach" ${taughtLine?"checked":""}>
+      Remember the pairing \u2014 next month this merchant finds that line on its own</label>
+    <div class="hint" style="margin-top:6px">Leave it off and the pick is just for
+      ${esc(prettySpend(k))}. Tick it and anything from this merchant is offered
+      against that line from now on, in <b>Does this look right?</b> \u2014 it is
+      proposed for a tap, never crossed off behind your back.</div>
   </div>
 
   <div class="steps"><div class="sh">Does it happen again?</div>
@@ -4295,6 +4313,15 @@ function applyTx(t,a){
       const i=Math.max(0,occDates(born,k).indexOf(day));
       S.skip=S.skip||{}; S.skip[born.id+"#"+k+"#"+i]=1;
     }
+    /* v106 — teach the pairing, the way the picker's commit() always has.
+       Written both ways: unticking removes the merchant again, or the box
+       would be a one-way door with no undo short of Start over. */
+    if(row&&row.ruleId&&row.ruleId!=="cc"&&!a.transfer&&mer){
+      S.payee=S.payee||{};
+      const list=(S.payee[row.ruleId]||[]).filter(x=>x!==mer);
+      if(a.teach) list.push(mer);
+      if(list.length) S.payee[row.ruleId]=list; else delete S.payee[row.ruleId];
+    }
   }
   S.tag[sig]=tag;
   return {tag,rule};
@@ -4314,7 +4341,8 @@ function wireTx(){
       startM:(el("txStart")||{}).value||"",
       endM:endSwapRead("tx").endM,
       payoff:endSwapRead("tx").payoff,
-      pick:(el("txAssign")||{}).value||""
+      pick:(el("txAssign")||{}).value||"",
+      teach:!!(el("txTeach")||{}).checked
     });
     save(); render(); closeDrawer();
     toast(out.rule?(out.tag.label||"That one")+" \u00b7 repeating from here on"
