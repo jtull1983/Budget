@@ -825,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v113";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v114";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -7948,7 +7948,10 @@ function monthHTML(){
   const tot=gross+back;
   const mx=Math.max(...cats.map(c=>Math.abs(c[1])),Math.abs(back),1);
   const bill=nextMonth(nav.month), lc=liveCycle();
-  let h=crumbs()+`<div class="flag"><div class="ft">${prettySpend(nav.month)} spending</div>
+  /* v114 — the held number lives here, because this is the branch the card row
+     actually reaches. Directly under the spending summary, which is where the
+     figure being tided over is quoted. */
+  let h=crumbs()+cardTempHTML()+`<div class="flag"><div class="ft">${prettySpend(nav.month)} spending</div>
     <div class="fb"><b>${money(gross)}</b> across <b>${charges.length}</b> charges,
     in <b>${cats.length}</b> categories.${backs.length
       ? ` <b>${money(-back)}</b> came back in ${backs.length}
