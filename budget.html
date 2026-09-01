@@ -825,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v110";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v112";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -888,6 +888,7 @@ function migrate(s){
   delete s.bonus;
   s.accountNames=s.accountNames||{};
   s.catRules=s.catRules||[];
+  if(!s.temp||typeof s.temp!=="object") s.temp={};   /* v111 — held numbers */
   s.meta.ccTarget=s.meta.ccTarget??5000;
   s.meta.holdCat=s.meta.holdCat||"Groceries";
   s.meta.title=s.meta.title||"Household Budget";
@@ -1180,10 +1181,20 @@ function liveStmt(){
    its budget last, because those summarise everything above them.
    Within a band the order set in Recurring items still decides — sort, then day —
    so this regroups the column without reshuffling what you arranged. */
+/* v112 — is this income actually a paycheck? Everything coming in used to be,
+   because wages were the only income there was. A refund or a rebate is money in
+   and belongs in the month's total, but it is not a payday and should not be
+   counted as one. Unset means yes, so nothing that predates the flag moves. */
+function payish(r){
+  if(r.rule&&r.rule.notPay) return false;
+  if(r.oneoff&&r.oneoff.notPay) return false;
+  return true;
+}
 function rowBand(r){
   if(r.ruleId==="cc"||r.cc||r.budget) return 3;   /* card and its budget, at the foot */
   if(r.off) return 2;                             /* purple: shown, never counted */
-  return r.kind==="inc" ? 0 : 1;
+  if(r.kind==="inc") return payish(r)?0:1;        /* v112 — a credit is not a payday */
+  return 1;
 }
 function sortRows(rows){
   rows.forEach((r,i)=>{ if(r._i===undefined) r._i=i; });
@@ -1259,6 +1270,20 @@ function build(){
         else if(!ovr&&r.id==="cc"){
           const ex=plannedOnBill(k); if(ex) amt-=ex;
         }
+        /* v111 — a held number. `base` is what this cell worked out for itself
+           when the number was typed; `amt` above is what it works out now. While
+           those agree the feed has not moved and the held number stands. When
+           they differ a pull has brought something newer, and new information is
+           the only thing that should retire a stop-gap — so it stands aside.
+
+           Not deleted here: build() is read in a dozen places and must not write.
+           The stale entry is harmless (it can never match again once the base has
+           moved on) and gets cleared the next time the row or its pane is used. */
+        let tmp=false;
+        if(!ovr&&S.temp&&S.temp[key]){
+          const t=S.temp[key];
+          if(Number(t.base)===Number(amt)){ amt=Number(t.amt); tmp=true; }
+        }
         if(r.payoff){ const pe=payoffMap(r)[key]; if(!pe||!pe.applied) return; amt=pe.amount; }
         let label=r.name;
         /* Income used to be labelled "Paycheck", "Paycheck 2" regardless of what the
@@ -1284,7 +1309,7 @@ function build(){
            the flag silently never fired. */
         const late=(k===NOW&&!hit&&!r.offbook&&r.id!=="cc"&&day<new Date().getDate()
                     &&totalNow()!==null);
-        rows.push({key,ruleId:r.id,rule:r,label,day,amount:amt,ovr,manual:!!r.manual,
+        rows.push({key,ruleId:r.id,rule:r,label,day,amount:amt,ovr,tmp,manual:!!r.manual,
                    hit,late,off:!!r.offbook,account:r.account||"Main",
                    sort:r.sort,kind:amt>=0?"inc":"exp"});
       });
@@ -2205,6 +2230,16 @@ function render(anim,popTab){
         const fl=document.createElement("i"); fl.className="rowflash"; el.appendChild(fl);
         /* a typed number on the live row stops the feed updating it, which looks
            exactly like the feed being wrong. Say so, and make it one tap to undo. */
+        /* v111 — says out loud that this figure is a stop-gap, so a number that
+           later changes on its own does not read as the app losing your edit. */
+        if(r.tmp){
+          const chip=document.createElement("span");
+          chip.className="frz"; chip.textContent="holding";
+          chip.title="A number you typed to tide this over. It steps aside on its own once the feed moves. Tap to drop it now.";
+          chip.onclick=ev=>{ ev.preventDefault(); ev.stopPropagation();
+            delete S.temp[r.key]; save(); render(); toast("Back on the live feed"); };
+          el.insertBefore(chip,el.querySelector(".amt"));
+        }
         if(r.ovr){
           const chip=document.createElement("span");
           chip.className="frz"; chip.textContent="typed";
@@ -2421,8 +2456,8 @@ function editAmt(span,r,k){
       const v=signed(inp.value,anchor);
       if(v!==null){
         if(r.oneoff) r.oneoff.amount=v;
-        else if(v===naturalAmt(r,k)) delete S.over[r.key];   /* same as the feed = release it */
-        else S.over[r.key]=v;
+        else if(v===naturalAmt(r,k)){ delete S.over[r.key]; delete S.temp[r.key]; }
+        else { S.over[r.key]=v; delete S.temp[r.key]; }   /* v111 — one answer per cell */
         save();
       }
     }
@@ -2737,14 +2772,98 @@ function lineHTML(){
   finally{ tipSink=null; }
   return `<div id="linepane">${box.innerHTML}</div>`+lineExtra();
 }
+function wireLinePay(){
+  const box=document.getElementById("lnPay");
+  const r=lineCtx&&lineCtx.r;
+  if(!box||!r) return;
+  box.onchange=()=>{
+    const notPay=!box.checked;
+    /* on the rule when there is one, so every month of a recurring credit agrees;
+       on the one-off otherwise, which is the only place it can live. */
+    if(r.rule){ if(notPay) r.rule.notPay=true; else delete r.rule.notPay; }
+    else if(r.oneoff){ if(notPay) r.oneoff.notPay=true; else delete r.oneoff.notPay; }
+    save(); render();
+    toast(notPay?"Moved to Line items":"Counted as a paycheck");
+  };
+}
+function wireLineTemp(){
+  const r=lineCtx&&lineCtx.r, k=lineCtx&&lineCtx.k;
+  const inp=document.getElementById("lnTemp");
+  const go=document.getElementById("lnTempGo");
+  const off=document.getElementById("lnTempOff");
+  if(off) off.onclick=()=>{ if(r) delete S.temp[r.key];
+    save(); render(); closeDrawer(); toast("Back on the live feed"); };
+  if(!go||!inp||!r) return;
+  go.onclick=()=>{
+    const v=signed(inp.value,-1);
+    if(v===null){ toast("Give me a number first"); return; }
+    /* base is what the cell says for itself right now, with any held number
+       ignored — otherwise a second edit would record the held figure as the
+       feed's and the thing would never retire. */
+    const base=naturalAmt(r,k);
+    if(Number(v)===Number(base)){
+      delete S.temp[r.key]; save(); render(); closeDrawer();
+      toast("That's what the feed already says"); return;
+    }
+    S.temp=S.temp||{};
+    S.temp[r.key]={amt:v,base:Number(base)};
+    delete S.over[r.key];        /* one answer per cell */
+    save(); render(); closeDrawer();
+    toast("Holding "+money(v)+" until the feed moves");
+  };
+}
 /* A line you typed in by hand is a placeholder for something you know is coming.
    This is where it earns the rest of the year: give it a cadence and it stops
    being a single month's guess and becomes a line every month, waiting for the
    real transaction to be sat against it. */
+/* v111 — where a stop-gap number is set. Deliberately in the pane rather than
+   on the row: tapping the number on the row is the permanent edit and has been
+   for a long time, and quietly changing what that gesture means would be worse
+   than asking for one more tap. */
+function lineTempHTML(){
+  const r=lineCtx&&lineCtx.r;
+  if(!r||r.ruleId!=="cc"||r.real||r.info) return "";
+  const held=S.temp&&S.temp[r.key];
+  return `<div class="steps"><div class="sh">Tide it over</div>
+    <div class="fg" style="margin-top:0">
+      <div class="f"><label>Show this for now</label>
+        <input id="lnTemp" inputmode="decimal" value="${held?esc(String(Math.abs(held.amt))):""}"
+               placeholder="${esc(String(Math.abs(r.amount)))}"></div>
+    </div>
+    <div class="hint" style="margin-top:6px">For when the feed is behind and you already know the
+      real figure. This shows <b>until the feed moves</b> — the next pull that brings a different
+      number takes it back on its own. Typing on the row itself is the other thing: that one holds
+      until you clear it.</div>
+    <div class="crow"><button class="mini on" id="lnTempGo">${held?"Update it":"Hold this number"}</button>
+      ${held?`<button class="mini" id="lnTempOff">Drop it</button>`:""}</div>
+  </div>`;
+}
+/* v112 — only offered on income, because it is the only band the question means
+   anything in. Reads as a question rather than a setting: the row is already
+   sitting under a heading that makes a claim about it, and this is where that
+   claim gets corrected. */
+function linePayHTML(){
+  const r=lineCtx&&lineCtx.r;
+  /* the card bill row carries kind:"inc" too — rowBand() never reaches the income
+     test for it because the cc check fires first, but this guard has to exclude it
+     by hand or the pane offers the question on the credit card. */
+  if(!r||r.kind!=="inc"||r.real||r.info||r.group||r.budget) return "";
+  if(r.ruleId==="cc"||r.cc||r.off) return "";
+  if(!r.rule&&!r.oneoff) return "";
+  const yes=payish(r);
+  return `<div class="steps"><div class="sh">Is this a paycheck?</div>
+    <label class="chk"><input type="checkbox" id="lnPay" ${yes?"checked":""}>
+      Count it under Paychecks</label>
+    <div class="hint" style="margin-top:6px">Money in either way — this only decides
+      which heading it sits under and whether it counts toward the month's payday
+      tally. Turn it off for a refund, a rebate or a one-off credit and it drops to
+      <b>Line items</b> instead.</div>
+  </div>`;
+}
 function lineExtra(){
   const r=lineCtx&&lineCtx.r;
   if(!r) return "";
-  if(!r.oneoff) return lineRemoveHTML();
+  if(!r.oneoff) return linePayHTML()+lineTempHTML()+lineRemoveHTML();
   return `<div class="steps"><div class="sh">Does it happen again?</div>
     <div class="fg" style="margin-top:0">
       <div class="f"><label>How often</label><select id="lnRep">
@@ -2756,7 +2875,7 @@ function lineExtra(){
       ${prettySpend(lineCtx.k)}. Give it a cadence and it appears in every month from
       here on.</div>
     <div class="crow"><button class="mini on" id="lnGo">Make it repeat</button></div>
-  </div>`+lineRemoveHTML();
+  </div>`+linePayHTML()+lineRemoveHTML();
 }
 /* ── removing one line of a repeating series ─────────────────────────────────
    Three different intentions that a single delete button can't tell apart: a
@@ -2830,6 +2949,8 @@ function lineRemoveHTML(){
 }
 function wireLine(){
   wireLineRemove();
+  wireLineTemp();
+  wireLinePay();
   const go=document.getElementById("lnGo"); if(!go) return;
   go.onclick=()=>{
     const r=lineCtx&&lineCtx.r; if(!r||!r.oneoff) return;
