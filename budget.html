@@ -286,6 +286,13 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* sits outside .lbl — inside it, the label's ellipsis swallowed it on a phone */
 .row .frz{flex:none;margin:0 2px;padding:1px 4px;border:1px solid #7a6320;border-radius:3px;
   color:var(--amber);font-size:9.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+/* v110 — a manually added budget line keeps its x on show, on every device.
+   .planned is the S.plans row; the category rows beside it are derived from the
+   statement and would come straight back if deleted, so they keep theirs hidden.
+   This has to live OUTSIDE @media (hover:hover) — v109 put it inside, which is
+   the one place a phone never reads, so the x stayed invisible exactly where it
+   was needed. */
+.row.planned .kill{opacity:1;color:var(--dim)}
 .row .kill{position:absolute;right:1px;top:50%;transform:translateY(-50%);opacity:0;color:var(--dimmer);font-size:13px;line-height:1;padding:0 2px;border-radius:2px;background:var(--panel2)}
 .row .dot{width:4px;height:4px;border-radius:50%;flex:none;background:#3e545e}
 .row.oneoff .dot{background:var(--violet)}
@@ -342,12 +349,6 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .row .amt:hover{border-color:var(--line2);background:#0e171c}
   .row .frz:hover{background:#3a2f0e}
   .row:hover .kill{opacity:1}
-  /* v109 — a manually added budget line keeps its x on show. Hover is a mouse
-     idea and this row is mostly read on a phone; with swipe gone in v108 there
-     was otherwise no way at all to delete one. Only .planned rows, which are
-     the ones from S.plans — the category rows beside them are derived from the
-     statement and would come straight back. */
-  .row.planned .kill{opacity:1}
   .row .kill:hover{color:var(--red)}
   .row .paid:hover{background:#10302c}
   .row .tq:hover{background:#3a2f0e}
@@ -824,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v109";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v110";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
