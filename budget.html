@@ -825,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v115";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v116";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1318,6 +1318,11 @@ function build(){
            cycle is excluded — real charges are already arriving there, and adding
            the plan on top would count the same purchase twice. */
         else if(!ovr&&r.id==="cc"){
+          /* v116 — a placeholder bill is what the card is allowed for the month
+             that lands on it, not a figure typed into the rule once and left.
+             Raising the budget used to move the line the card is measured against
+             while leaving the bill it produces saying something else. */
+          amt=-targetAt(prevMonth(k));
           const ex=plannedOnBill(k); if(ex) amt-=ex;
         }
         /* v111 — a held number. `base` is what this cell worked out for itself
@@ -2478,7 +2483,10 @@ function naturalAmt(r,k){
     if(lt!==null) return -Math.round(lt*100)/100;
   }
   let a=amountAt(r.rule,k);
-  if(r.ruleId==="cc"){ const ex=plannedOnBill(k); if(ex) a-=ex; }
+  /* v116 — the same rule as build(), and it has to be the same or an override
+     equal to the placeholder would never recognise itself and could not be
+     released by retyping the number it already shows. */
+  if(r.ruleId==="cc"){ a=-targetAt(prevMonth(k)); const ex=plannedOnBill(k); if(ex) a-=ex; }
   return a;
 }
 /* sign lock: money out stays money out unless you lead with + */
