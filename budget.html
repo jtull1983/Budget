@@ -825,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v114";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v115";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1168,8 +1168,58 @@ function plannedOnBill(k){ return plannedFor(prevMonth(k)); }
 function plansFor(k){ if(!Array.isArray(S.plans)) S.plans=[]; return S.plans.filter(x=>x.ym===k); }
 /* the number the card is actually being held to that month. a planned purchase
    raises the bar rather than eating into it: budget 5k + a 1k mattress = 6k. */
+/* v115 — the budget with a date on it.
+   A list of {from, amt}, oldest first. targetAt(m) is the last entry that has
+   started by m; a month earlier than every entry falls back to the first one, so
+   history keeps whatever it had and asking "what should past months do" never
+   arises. ccTarget is kept as a mirror of what is in force now. */
+function targetList(){
+  if(!Array.isArray(S.meta.ccTargets)||!S.meta.ccTargets.length)
+    S.meta.ccTargets=[{from:"0000-01",amt:Math.abs(Number(S.meta.ccTarget)||5000)}];
+  return S.meta.ccTargets;
+}
+function targetAt(m,list){
+  const L=(list&&list.length)?list:targetList();
+  let cur=L[0];
+  for(const e of L){ if(String(e.from)<=String(m)) cur=e; else break; }
+  return Math.abs(Number(cur&&cur.amt)||0);
+}
+function normTargets(list){
+  const sorted=list.filter(x=>x&&x.from).slice()
+    .sort((a,b)=>String(a.from)<String(b.from)?-1:String(a.from)>String(b.from)?1:0);
+  const out=[];
+  /* a run of equal amounts is one period, not several — otherwise re-asserting a
+     value that happens to match leaves a stack of entries that all say the same */
+  sorted.forEach(e=>{
+    if(!out.length||Number(out[out.length-1].amt)!==Number(e.amt))
+      out.push({from:String(e.from),amt:Math.abs(Number(e.amt))||0});
+  });
+  return out.length?out:[{from:"0000-01",amt:Math.abs(Number(S.meta.ccTarget)||5000)}];
+}
+const BG_SCOPES=[["all","All of it"],["just","Just this month"],
+                 ["from","This month on"],["justNext","Just next month"],
+                 ["fromNext","Next month on"]];
+function applyTarget(v,scope,m){
+  v=Math.abs(Number(v)||0);
+  /* against the snapshot the panel opened with, not against whatever the last
+     drag left behind — otherwise sliding to 60% and back to 0% would leave a
+     trail of periods instead of returning to where it started */
+  const prev=(bgPrev&&bgPrev.length?bgPrev:targetList()).map(e=>({from:e.from,amt:e.amt}));
+  const at=x=>targetAt(x,prev);
+  const n=nextMonth(m), n2=nextMonth(n);
+  let out;
+  if(scope==="from")           out=prev.filter(e=>String(e.from)<m).concat([{from:m,amt:v}]);
+  else if(scope==="fromNext")  out=prev.filter(e=>String(e.from)<n).concat([{from:n,amt:v}]);
+  else if(scope==="just")      out=prev.concat([{from:m,amt:v},{from:n,amt:at(n)}]);
+  else if(scope==="justNext")  out=prev.concat([{from:n,amt:v},{from:n2,amt:at(n2)}]);
+  else                         out=[{from:"0000-01",amt:v}];
+  const byKey={};
+  out.forEach(e=>{ byKey[String(e.from)]={from:String(e.from),amt:Number(e.amt)}; });
+  S.meta.ccTargets=normTargets(Object.keys(byKey).map(k=>byKey[k]));
+  S.meta.ccTarget=targetAt(NOW);
+}
 function effTarget(spendMonth){
-  return Math.abs(Number(S.meta.ccTarget)||0)+plannedFor(spendMonth);
+  return targetAt(spendMonth)+plannedFor(spendMonth);
 }
 function liveStmt(){
   const st=S.stmts&&S.stmts[liveCycle().bill];
@@ -3042,12 +3092,23 @@ function catBudget(){
 }
 function budgetTotal(){ const b=catBudget();
   return Object.keys(b).reduce((a,k)=>a+(Math.abs(+b[k])||0),0); }
-function budgetSync(){ S.meta.ccTarget=budgetTotal(); save(); render(); paintBudget(); }
+function budgetSync(){ applyTarget(budgetTotal(),bgScope,NOW); save(); render(); paintBudget(); }
 
+function bgScopeHint(){
+  const m=prettySpend(NOW), n=prettySpend(nextMonth(NOW));
+  return bgScope==="just"      ? `Only ${m}. Everything after it goes back to what it was.`
+       : bgScope==="from"      ? `${m} and every month after. Earlier months keep what they had.`
+       : bgScope==="justNext"  ? `Only ${n}. ${m} and everything after ${n} are left alone.`
+       : bgScope==="fromNext"  ? `${n} and every month after. ${m} and earlier keep what they had.`
+       : `Every month, past and future — one number for the whole file.`;
+}
 let bgBase=null;                       /* the amounts as they were when the panel opened */
+let bgScope="all";                     /* v115 — how far a change reaches */
+let bgPrev=null;                       /* the periods as they were when it opened */
 function budgetHTML(){
   const b=catBudget();
   bgBase=Object.assign({},b);
+  bgPrev=targetList().map(e=>({from:e.from,amt:e.amt}));
   const cats=Object.keys(b);
   return `<div class="flag"><div class="ft">What the card is allowed</div><div class="fb">
       Everything here adds up to your <b>CC budget</b> — the line the card row is
@@ -3062,6 +3123,11 @@ function budgetHTML(){
     </div>
     <div class="hint" style="margin-bottom:14px">Type what you want the whole thing to
       be and everything below moves to fit, keeping the same shape.</div>
+
+    <div class="sh" style="margin-bottom:6px">How far does this reach?</div>
+    <div class="crow" id="bgScope" style="flex-wrap:wrap;margin-bottom:4px">${
+      BG_SCOPES.map(([v,l])=>`<button class="mini${bgScope===v?" on":""}" data-scope="${v}">${l}</button>`).join("")}</div>
+    <div class="hint" style="margin-bottom:14px" id="bgScopeHint">${esc(bgScopeHint())}</div>
 
     <div class="bglab"><span>Move everything at once</span><b id="bgPctLab">0%</b></div>
     <input type="range" class="bgrange" id="bgPct" min="-50" max="100" step="5" value="0">
@@ -3107,6 +3173,19 @@ function budgetScaleTo(want){
   budgetSync();
 }
 function wireBudget(){
+  document.querySelectorAll("#bgScope [data-scope]").forEach(btn=>{
+    btn.onclick=()=>{
+      bgScope=btn.dataset.scope;
+      document.querySelectorAll("#bgScope [data-scope]").forEach(o=>
+        o.classList.toggle("on",o.dataset.scope===bgScope));
+      const hint=document.getElementById("bgScopeHint");
+      if(hint) hint.textContent=bgScopeHint();
+      /* re-apply what is already on screen under the new reach, so picking a
+         scope after typing a number does the thing rather than waiting for
+         another edit that may never come */
+      budgetSync();
+    };
+  });
   const pct=document.getElementById("bgPct"), lab=document.getElementById("bgPctLab");
   const apply=()=>{
     const p=+pct.value;
@@ -5239,7 +5318,9 @@ function wireRec(){
   bind(document.getElementById("mOpen"),v=>S.meta.opening=parseFloat(v)||0);
   bind(document.getElementById("mRF"),v=>{if(/^\d{4}-\d{2}$/.test(v))S.meta.recordsFrom=v;});
   bind(document.getElementById("mBuf"),v=>S.meta.buffer=parseFloat(v)||0);
-  bind(document.getElementById("mCC"), v=>S.meta.ccTarget=parseFloat(v)||5000);
+  /* v115 — the plain field in settings has no month attached to it, so it means
+     what it always meant: one number for everything. */
+  bind(document.getElementById("mCC"), v=>{ bgPrev=null; applyTarget(parseFloat(v)||5000,"all",NOW); });
   bind(document.getElementById("mEnd"),v=>{if(/^\d{4}-\d{2}$/.test(v))S.meta.end=v;});
 }
 
