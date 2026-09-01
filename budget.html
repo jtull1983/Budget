@@ -342,6 +342,12 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .row .amt:hover{border-color:var(--line2);background:#0e171c}
   .row .frz:hover{background:#3a2f0e}
   .row:hover .kill{opacity:1}
+  /* v109 — a manually added budget line keeps its x on show. Hover is a mouse
+     idea and this row is mostly read on a phone; with swipe gone in v108 there
+     was otherwise no way at all to delete one. Only .planned rows, which are
+     the ones from S.plans — the category rows beside them are derived from the
+     statement and would come straight back. */
+  .row.planned .kill{opacity:1}
   .row .kill:hover{color:var(--red)}
   .row .paid:hover{background:#10302c}
   .row .tq:hover{background:#3a2f0e}
@@ -818,7 +824,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v108";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v109";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2448,7 +2454,17 @@ function removeRow(r){
      each other, and the balance is the one that can't be argued with. */
   if(r.real){ toast("That came off the account — it can't be deleted"); return; }
   if(r.info){ toast("Reference only — remove it in Feed me info"); return; }
-  if(r.oneoff) S.oneoffs=S.oneoffs.filter(o=>o.id!==r.oneoff.id); else S.skip[r.key]=1; save(); render(); }
+  /* v109 — if a real transaction was sitting against this line, hand it back
+     before the line goes. S.assign[r.key] outlived the row it named, so the
+     transaction was neither shown here nor loose in the column: it still read
+     as spoken for by a line that had stopped existing. Releasing the key puts
+     it back as its own row, which is where an unexplained charge belongs. */
+  const freed=S.assign&&S.assign[r.key];
+  if(freed){ delete S.assign[r.key]; }
+  if(r.oneoff) S.oneoffs=S.oneoffs.filter(o=>o.id!==r.oneoff.id); else S.skip[r.key]=1;
+  save(); render();
+  if(freed) toast("Line removed — the transaction that was on it is back in the column");
+}
 /* A budget line is a purchase you'll put on the card in THIS month. It raises this
    month's budget straight away and lands on next month's bill, because that's when
    the money actually leaves. The live cycle is the exception — real charges are
