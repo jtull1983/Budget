@@ -347,15 +347,6 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .row .tq:hover{background:#3a2f0e}
   .row .late:hover{background:#2a1e08}
 }
-/* swipe a row left and the delete box comes out from under its right edge */
-.row .swx{position:absolute !important;right:-58px;top:0;bottom:0;width:58px;
-  z-index:3;                       /* over the heat gradient (1) and its children (2) */
-  display:flex;align-items:center;justify-content:center;
-  background:#c0392b;color:#fff;font-size:16px;font-weight:700;line-height:1}
-.row.swopen{background:#1b2a31}
-/* the heat rows clip themselves to keep their gradient inside a rounded corner.
-   That also clips the delete box, so the clip lifts only while it is out. */
-.row.heat.swiping,.row.heat.swopen{overflow:visible}
 .amtin{width:84px;font-weight:700;background:#0c1418;border:1px solid var(--teal);border-radius:2px;
   padding:1px 3px;font-size:11.5px;text-align:right;outline:none;font-variant-numeric:tabular-nums}
 
@@ -827,7 +818,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v107";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v108";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2012,7 +2003,6 @@ function render(anim,popTab){
   if(fb) fb.textContent=fitMode?"Expanded view":"See full year";
   const rail=document.getElementById("rail");
   rail.className="rail"+(anim?" "+anim:"");
-  swOpenEl=null;                 /* the row it pointed at is about to stop existing */
   /* Every render rebuilds the rail from scratch, which used to drop each column
      back to the top \u2014 so an edit anywhere scrolled the card row back out of
      sight. Where each column was sitting is carried across the rebuild. */
@@ -2158,9 +2148,8 @@ function render(anim,popTab){
       if(anim==="anim-spill") el.style.animationDelay=(0.06+ri*0.022)+"s";
       el.innerHTML=`<span class="dot"></span><span class="lbl">${r.label}</span>
         <span class="amt${r.manual?" man":""}${r.ovr?" ovr":""}">${money(r.amount)}</span>
-        <button class="kill">×</button><span class="swx">✕</span>`;
+        <button class="kill">×</button>`;
       if(r.child) el.classList.add("child");
-      wireSwipe(el,r);   /* before every other handler — see the note there */
       /* One chip per transaction, and only while there is something to answer.
          An unnamed row says so, a transfer says it still needs a line to sit
          against, and the card payment says why it isn't in the total. Once all
@@ -2282,8 +2271,7 @@ function render(anim,popTab){
          that don't already own their tap: a group toggles, the card opens spending,
          and an open swipe is a close instruction, not a request to drill in. */
       if(!el.onclick&&!r.info) el.onclick=ev=>{
-        if(ev.target.closest(".amt,.kill,.swx,.tri,.frz,.paid,.late,.tq,.tk")) return;
-        if(el.classList.contains("swopen")) return;
+        if(ev.target.closest(".amt,.kill,.tri,.frz,.paid,.late,.tq,.tk")) return;
         r.real?openTxPane(r,M.k):openLinePane(r,M.k);
       };
       if(!el.dataset.ccMonth) el.onmouseenter=e=>showTip(e,r,M.k);
@@ -2436,114 +2424,25 @@ function editAmt(span,r,k){
   inp.onblur=()=>done(true);
   inp.onkeydown=e=>{ if(e.key==="Enter"){inp.onblur=null;done(true);} if(e.key==="Escape"){inp.onblur=null;done(false);} };
 }
-/* ── swipe a row left to delete ──────────────────────
-   The grid also swipes sideways to change month, so a sideways drag on a row has
-   to claim the gesture outright: once it is moving, touchmove and touchend stop
-   at the row and never reach the scroller, which then sees no movement and stays
-   on the month it was on. A drag that is more vertical than horizontal is handed
-   straight back so the list still scrolls normally.
+/* Deleting a line is the side pane's job: tap the row, use Remove. Swipe to
+   delete was taken out in v108.
 
-   This is also the only way to delete a line on a phone now. The × has always
-   been opacity:0 until :hover, and hover no longer exists on touch.
+   It is worth saying why, because the code that went with it was not small. The
+   grid also swipes sideways to change month, so the row and the scroller were
+   two gestures competing for one finger, and most of the row handler was the treaty
+   between them — a claim distance, a bail distance, an angle test that had to
+   re-arm on every move because twelve pixels into a stroke is the noisiest part
+   of it, and a guard that swallowed the tap after a swipe so an open row read as
+   a close button rather than a link. Three versions went into getting that
+   arbitration to feel right and it still depended on how long a thumb rested
+   before setting off.
 
-   Wired before el.onclick and before the credit card gestures on purpose. When
-   the row itself is the click target, listeners run in registration order, so
-   being first is what lets the open-state guard below swallow the tap. */
-/* Arbitration between the two sideways gestures. Before v89, any leftward drag
-   on a row claimed the delete outright at 10px, and stopPropagation meant the
-   month scroller never saw the rest of it \u2014 so swiping forward a month over a
-   row, which is most of a column, peeled the row open instead.
+   None of it is needed now. The scroller gets every horizontal stroke, and
+   lineRemoveHTML()/wireLineRemove() already offered Remove for every row kind
+   that can be deleted — so this is a removal, not a replacement.
 
-   **Distance decides, and only distance.**
-
-     \u00b7 under SW_CLAIM px    nothing has happened yet
-     \u00b7 SW_CLAIM \u2192 SW_BAIL   the row opens; the month does not move
-     \u00b7 past SW_BAIL         the row hands the gesture back mid-stroke, snaps
-                            shut, and the scroller changes the month. Nothing has
-                            to be released and retried.
-
-   v93 \u2014 the angle test used to run once, at whatever the first move over the
-   threshold happened to be, and a failure was final for the rest of the stroke.
-   Twelve pixels in is the noisiest part of a gesture: a thumb swinging left off
-   a phone starts with a real vertical component, so dx -10 / dy 9 read as a
-   scroll and the row stayed dead however clean the next 200px were. Now the test
-   re-runs on every move and only arms; the gesture is written off as a scroll
-   only once it is unmistakably vertical, SW_VERT px of it and steeper than the
-   sideways component.
-
-   v92 \u2014 v89 also gated on speed: anything faster than 0.55 px/ms was treated as
-   a flick and refused. That was wrong and it is gone. The velocity was measured
-   from touchstart to the first move over the threshold, so it was really timing
-   how long the finger rested before setting off. Start moving the instant you
-   touch down and 20px in 20ms reads as 1.0 px/ms \u2014 a flick \u2014 and the delete never
-   armed. Pause a beat first and the identical drag worked. That is what "works on
-   some things and not others" was: not the row, the run-up. The angle went back
-   to 1.3:1 at the same time, since 1.6:1 was refusing the ordinary diagonal a
-   thumb makes swinging across a phone. */
-var SW_W=58, SW_CLAIM=14, SW_BAIL=105, SW_VERT=22, swOpenEl=null;
-function swClose(el){
-  if(!el) return;
-  el.classList.remove("swopen","swiping");
-  el.style.transition="transform .18s ease"; el.style.transform="";
-  if(swOpenEl===el) swOpenEl=null;
-}
-function wireSwipe(el,r){
-  if(r.info) return;                  /* reference rows have nothing to remove */
-  let x0=0,y0=0,live=false,open=false,decided=false;
-  const put=(px,anim)=>{ el.style.transition=anim?"transform .18s ease":"none";
-                         el.style.transform=px?"translateX("+px+"px)":""; };
-  el.addEventListener("touchstart",ev=>{
-    if(ev.touches.length!==1) return;
-    x0=ev.touches[0].clientX; y0=ev.touches[0].clientY;
-    live=false; decided=false; open=el.classList.contains("swopen");
-    if(swOpenEl&&swOpenEl!==el) swClose(swOpenEl);
-  },{passive:true});
-  el.addEventListener("touchmove",ev=>{
-    const dx=ev.touches[0].clientX-x0, dy=ev.touches[0].clientY-y0;
-    if(!decided){
-      /* clearly a scroll: give up on this stroke and let the list have it */
-      if(Math.abs(dy)>=SW_VERT&&Math.abs(dy)>Math.abs(dx)*1.3){ decided=true; return; }
-      /* not far enough sideways to judge \u2014 say nothing and wait for the next move */
-      if(Math.abs(dx)<SW_CLAIM) return;
-      if(!(Math.abs(dx)>Math.abs(dy)*1.3&&(dx<0||open))) return;
-      decided=true; live=true;
-    }
-    if(!live) return;
-    /* changed its mind mid-stroke: give the month scroller everything from here.
-       Not stopping propagation from now on is what lets it see the movement, and
-       settle() below already returns without stopping once live is false. */
-    if(!open&&dx<-SW_BAIL){
-      live=false; el.classList.remove("swiping"); put(0,true); return;
-    }
-    ev.stopPropagation();                            /* the month grid must not see this */
-    if(ev.cancelable) ev.preventDefault();
-    el.classList.add("swiping");                     /* lifts the heat row's own clip */
-    put(Math.max(-SW_W,Math.min(0,(open?-SW_W:0)+dx)),false);
-  },{passive:false});
-  const settle=ev=>{
-    if(!live) return;
-    ev.stopPropagation();
-    const dx=(ev.changedTouches&&ev.changedTouches[0]?ev.changedTouches[0].clientX:x0)-x0;
-    open=((open?-SW_W:0)+dx) < -SW_W/2;              /* past halfway, it stays out */
-    put(open?-SW_W:0,true);
-    el.classList.remove("swiping");
-    el.classList.toggle("swopen",open);
-    if(open) swOpenEl=el; else if(swOpenEl===el) swOpenEl=null;
-    live=false;
-  };
-  el.addEventListener("touchend",settle,{passive:false});
-  el.addEventListener("touchcancel",settle,{passive:false});
-  el.addEventListener("click",ev=>{
-    if(ev.target.closest(".swx")){
-      ev.preventDefault(); ev.stopImmediatePropagation();
-      swClose(el); removeRow(r); return;
-    }
-    /* while it is open the row is a close button, not a link into a drawer */
-    if(el.classList.contains("swopen")){
-      ev.preventDefault(); ev.stopImmediatePropagation(); swClose(el);
-    }
-  },true);
-}
+   If it ever comes back, it is in git at v107 and not worth rewriting from
+   memory. */
 function removeRow(r){
   /* It happened. Hiding it would put the column and the balance out of step with
      each other, and the balance is the one that can't be argued with. */
