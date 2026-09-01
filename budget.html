@@ -825,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v112";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v113";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -7818,11 +7818,39 @@ function cardBtnState(){
   if(d.complete)      return {label:y+" card review",     mode:"review",  d};
   return {label:"Spending so far", mode:"partial", d};
 }
+/* v113 — the same held number as the line pane's, in the drawer the card row
+   actually opens. nav.month is the spending month; the bill for it lands the
+   month after, which is the row that was tapped to get here. */
+function cardTempHTML(){
+  const spend=nav&&nav.month; if(!spend) return "";
+  const bill=nextMonth(spend);
+  const M=MODEL.find(m=>m.k===bill); if(!M) return "";
+  const r=(M.rows||[]).find(x=>x.ruleId==="cc"&&!x.budget&&!x.info&&!x.real);
+  if(!r) return "";
+  const held=S.temp&&S.temp[r.key];
+  return `<div class="steps" id="cardtemp" data-key="${esc(r.key)}" data-bill="${esc(bill)}">
+    <div class="sh">Tide it over &middot; ${esc(prettySpend(bill))}</div>
+    <div class="fg" style="margin-top:0">
+      <div class="f"><label>Show this for now</label>
+        <input id="cdTemp" inputmode="decimal" value="${held?esc(String(Math.abs(held.amt))):""}"
+               placeholder="${esc(String(Math.abs(r.amount)))}"></div>
+    </div>
+    <div class="hint" style="margin-top:6px">For when the feed is behind and you already know the
+      real figure. This shows <b>until the feed moves</b> &mdash; the next pull that brings a
+      different number takes it back on its own. Typing on the row itself is the other thing:
+      that one holds until you clear it.</div>
+    <div class="crow"><button class="mini on" id="cdTempGo">${held?"Update it":"Hold this number"}</button>
+      ${held?`<button class="mini" id="cdTempOff">Drop it</button>`:""}</div>
+  </div>`;
+}
 function cardHTML(){
   const st=cardBtnState(), d=st.d, y=d.y;
+  /* above the early return on purpose: a stop-gap number is most wanted when
+     there is not much loaded yet, which is exactly when that return fires. */
+  const tempSec=cardTempHTML();
   if(st.mode==="waiting"){
     const have=d.keys.length;
-    return `<div class="flag"><div class="ft">Not enough to go on yet</div><div class="fb">
+    return tempSec+`<div class="flag"><div class="ft">Not enough to go on yet</div><div class="fb">
       A year-so-far view needs at least <b>two</b> statements for ${y}, and there
       ${have===1?"is <b>1</b>":"are <b>none</b>"} loaded. One month tells you what you spent that month;
       two is the first point where a trend, an average, or a comparison means anything.<br><br>
@@ -7830,7 +7858,7 @@ function cardHTML(){
       statements paid <b>Feb ${y} through Jan ${y+1}</b>. Add them under <b>Feed me info</b>.</div></div>`;
   }
   const pct=v=>d.charged?Math.abs(v)/d.charged*100:0;
-  let h=`<div class="flag ${d.complete?"good":""}"><div class="ft">${
+  let h=tempSec+`<div class="flag ${d.complete?"good":""}"><div class="ft">${
       d.complete?`Full year · ${y}`:`${y} so far · ${d.months.length} month${d.months.length>1?"s":""}`}</div>
     <div class="fb">${d.complete
       ? `All twelve months are in, including December (which lands on the January ${y+1} statement).`
@@ -8127,7 +8155,35 @@ function applyCat(row,same,cat){
 }
 function closePicker(){ document.getElementById("pickWrap").classList.remove("on"); }
 
+function wireCardTemp(){
+  const sec=document.getElementById("cardtemp");
+  if(!sec) return;
+  const key=sec.dataset.key, bill=sec.dataset.bill;
+  const M=MODEL.find(m=>m.k===bill);
+  const r=M&&(M.rows||[]).find(x=>x.key===key);
+  const inp=document.getElementById("cdTemp");
+  const go=document.getElementById("cdTempGo");
+  const off=document.getElementById("cdTempOff");
+  if(off) off.onclick=()=>{ delete S.temp[key]; save(); render();
+    openDrawer("card"); toast("Back on the live feed"); };
+  if(!go||!inp||!r) return;
+  go.onclick=()=>{
+    const v=signed(inp.value,-1);
+    if(v===null){ toast("Give me a number first"); return; }
+    const base=naturalAmt(r,bill);
+    if(Number(v)===Number(base)){
+      delete S.temp[key]; save(); render(); openDrawer("card");
+      toast("That's what the feed already says"); return;
+    }
+    S.temp=S.temp||{};
+    S.temp[key]={amt:v,base:Number(base)};
+    delete S.over[key];          /* one answer per cell */
+    save(); render(); openDrawer("card");
+    toast("Holding "+money(v)+" until the feed moves");
+  };
+}
 function wireCard(){
+  wireCardTemp();
   /* the fork is the whole panel when it's up — nothing below exists yet */
   const cvc=document.getElementById("cvCat"), cvt=document.getElementById("cvTime");
   if(cvc) cvc.onclick=()=>{ cardView="cat"; openDrawer("card"); };
