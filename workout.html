@@ -1,4 +1,4 @@
-<!-- JART Training Log — v1.8.0 -->
+<!-- JART Training Log — v1.9.1 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -41,6 +41,7 @@ header{position:sticky;top:0;z-index:40;background:var(--bg);
 .dayname .swap{margin-left:auto;color:var(--cy);font-size:13px;flex:none;opacity:.85}
 .burger{font-size:19px;padding:4px 2px;line-height:1;color:var(--mut);
   background:none;border:none;flex:none}
+.vtag{font-size:9px;color:var(--dim);letter-spacing:.06em;flex:none}
 .moodrow{display:flex;justify-content:center;padding:0 10px 10px}
 .moodrow.off{display:none}
 .pill{border:1px solid var(--line);border-radius:999px;padding:5px 11px;
@@ -129,6 +130,7 @@ main{padding:12px 6px 140px;max-width:820px;margin:0 auto}
 .info{color:var(--dim);padding:8px;font-size:13px;flex:none}
 .blk.part{border-color:var(--am);background:linear-gradient(180deg,#16120b,var(--panel))}
 .part .dot{background:var(--am)}
+.sstag.mu{color:var(--am);border-color:#5a4520}
 .sstag{font-size:9px;color:var(--cy);border:1px solid #164a45;border-radius:3px;flex:none;
   padding:1px 4px;letter-spacing:.08em;flex:none}
 .ssnote{font-size:10px;color:var(--dim);letter-spacing:.04em;margin-bottom:10px}
@@ -314,6 +316,7 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
     <button class="pill" id="gym">HOME</button>
     <button class="pill" id="startb">START</button>
     <button class="burger" id="menu" aria-label="Menu">&#9776;</button>
+    <span class="vtag" id="vtag"></span>
   </div>
   <div class="moodrow" id="moodrow"><span class="moods" id="moods"></span></div>
 </header>
@@ -340,7 +343,7 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
 <input type="file" id="fileIn" accept=".json" style="display:none">
 
 <script>
-const VERSION='1.8.0';
+const VERSION='1.9.1';
 const KEY='jart_workout_v1';
 const SEEDV=6;   // bump when seed() targets or day order change
 let bootErr=null;
@@ -509,14 +512,14 @@ function load(){
 function newSessionFrom(st,dayId){
   const d=st.days.find(x=>x.id===dayId); if(!d) return null;
   const rx=st.prescriptions&&st.prescriptions[dayId];
-  return {id:'s'+Date.now(),dayId,dayLabel:d.name,startedAt:null,endedAt:null,
+  return addMakeup({id:'s'+Date.now(),dayId,dayLabel:d.name,startedAt:null,endedAt:null,
     gym:st.prefs.gym||'home',watch:{},notes:'',mood:null,
     warm:{done:false,secs:0},events:[],
     entries:d.order.flatMap((blk,bi)=>blk.map(ex=>({exerciseId:ex,block:bi,
       status:'pending',skipReason:null,
       sets:((rx&&rx.entries&&rx.entries[ex])?rx.entries[ex]:(st.exercises[ex]||{target:[]}).target)
         .map(t=>({w:t.w,r:null,tw:t.w,tr:t.r,failed:false,rp:null,feel:null,note:'',
-          npad:false,skipped:false,hold:false}))})))};
+          npad:false,skipped:false,hold:false}))})))},st);
 }
 function compact(){
   // persist ONLY what the user changed. Seed data is rebuilt from code on load.
@@ -535,6 +538,7 @@ function compact(){
     if(!keepEv) delete c.events;
     c.entries=c.entries.filter(e=>e.status!=='pending'||e.sets.some(z=>z.r!=null||z.note))
       .map(e=>({exerciseId:e.exerciseId,block:e.block,status:e.status,skipReason:e.skipReason,
+        makeup:e.makeup||undefined,
         sets:e.sets.map(z=>({w:z.w,r:z.r,failed:z.failed||undefined,rp:z.rp,
           feel:z.feel||undefined,note:z.note||undefined,skipped:z.skipped||undefined,
           hold:z.hold||undefined}))}));
@@ -612,19 +616,86 @@ function setDot(){
 }
 
 /* ============ session ============ */
+/* Anything skipped for time gets carried into the next session as a make-up block. */
+function addMakeup(sess,st){
+  const q=(st.prefs&&st.prefs.makeup)||[];
+  if(!q.length) return sess;
+  const here=new Set(sess.entries.map(e=>e.exerciseId));
+  let blk=sess.entries.reduce((m,e)=>Math.max(m,e.block),-1)+1;
+  q.forEach(k=>{
+    const X=st.exercises[k]; if(!X||here.has(k)) return;
+    sess.entries.push({exerciseId:k,block:blk++,status:'pending',skipReason:null,makeup:true,
+      sets:(X.target||[]).map(t=>({w:t.w,r:null,tw:t.w,tr:t.r,failed:false,rp:null,
+        feel:null,note:'',npad:false,skipped:false,hold:false}))});
+  });
+  return sess;
+}
 function newSession(dayId){
   const d=S.days.find(x=>x.id===dayId);
   const rx=S.prescriptions[dayId];
-  return {id:'s'+Date.now(),dayId,dayLabel:d.name,startedAt:null,endedAt:null,
+  return addMakeup({id:'s'+Date.now(),dayId,dayLabel:d.name,startedAt:null,endedAt:null,
     gym:S.prefs.gym||'home',watch:{},notes:'',mood:null,
     warm:{done:false,secs:0},events:[],
     entries:d.order.flatMap((blk,bi)=>blk.map(ex=>({exerciseId:ex,block:bi,
       status:'pending',skipReason:null,
       sets:(rx&&rx.entries&&rx.entries[ex]?rx.entries[ex]:S.exercises[ex].target)
         .map(t=>({w:t.w,r:null,tw:t.w,tr:t.r,failed:false,rp:null,feel:null,note:'',
-          npad:false,skipped:false,hold:false}))})))};
+          npad:false,skipped:false,hold:false}))})))},S);
 }
 function cur(){ if(!S.current) S.current=newSession(S.prefs.lastDayId||'day1'); return S.current; }
+/* the START pill becomes a running clock once the session is going */
+let clockIv=null;
+function tickClock(){
+  const sb=$('startb'); if(!sb) return;
+  const c=S&&S.current;
+  if(!c||!c.startedAt){ sb.textContent='START'; sb.classList.remove('on'); return; }
+  const s=Math.max(0,Math.floor((Date.now()-new Date(c.startedAt))/1000));
+  const mm=String(Math.floor(s/60)%60).padStart(2,'0'), ss=String(s%60).padStart(2,'0');
+  const hh=Math.floor(s/3600);
+  sb.textContent='\u23f1 '+(hh?hh+':'+mm+':'+ss:mm+':'+ss);
+  sb.classList.add('on');
+  sb.title='Started '+new Date(c.startedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+}
+function startClock(){ clearInterval(clockIv); clockIv=setInterval(tickClock,1000); tickClock(); }
+/* ---- undo: a stack of whole-state snapshots, popped by the menu or a shake ---- */
+let UNDO=[], lastSnapKey=null;
+function snap(key){
+  if(key&&key===lastSnapKey) return;          // coalesce a run of edits on one field
+  lastSnapKey=key||null;
+  try{ UNDO.push(JSON.stringify(compact())); }catch(_){ return; }
+  if(UNDO.length>40) UNDO.shift();
+}
+function undo(){
+  if(!UNDO.length){ toast('Nothing to undo.'); return false; }
+  try{ S=expand(JSON.parse(UNDO.pop())); }catch(_){ toast('That step could not be undone.',true); return false; }
+  lastSnapKey=null; openEx=null; save(); draw(); startClock();
+  toast('Undone. '+UNDO.length+' step'+(UNDO.length===1?'':'s')+' left.');
+  return true;
+}
+let shakeOn=false, lastShake=0;
+function onMotion(e){
+  const a=e.accelerationIncludingGravity; if(!a) return;
+  const m=Math.sqrt((a.x||0)*(a.x||0)+(a.y||0)*(a.y||0)+(a.z||0)*(a.z||0));
+  if(m<30 || Date.now()-lastShake<1500) return;
+  lastShake=Date.now();
+  if(UNDO.length && confirm('Undo the last change?')) undo();
+}
+function enableShake(cb){
+  if(shakeOn){ if(cb) cb(true); return; }
+  const go=()=>{ window.addEventListener('devicemotion',onMotion); shakeOn=true; if(cb) cb(true); };
+  try{
+    if(typeof DeviceMotionEvent!=='undefined' && DeviceMotionEvent.requestPermission){
+      DeviceMotionEvent.requestPermission()
+        .then(r=>{ r==='granted'?go():(cb&&cb(false)); }).catch(()=>{ if(cb) cb(false); });
+    } else go();
+  }catch(_){ if(cb) cb(false); }
+}
+/* Once every exercise in a block is settled, fold it up. Supersets wait for both. */
+function collapseIfDone(blockIdx){
+  const c=cur();
+  const mem=c.entries.filter(e=>e.block===blockIdx);
+  if(mem.length && mem.every(e=>e.status==='done'||e.status==='skipped')) openEx=null;
+}
 function ev(k,exId,setIdx){
   const c=S.current; if(!c) return;
   if(!Array.isArray(c.events)) c.events=[];
@@ -675,10 +746,8 @@ function drawBar(){
     +(S.days.length>1?'<span class="swap">\u21c4</span>':'');
   const g=$('gym'); g.textContent=(c.gym==='home'?'HOME':c.gym.toUpperCase());
   g.classList.toggle('on',c.gym!=='home');
-  const sb=$('startb');
-  sb.textContent=c.startedAt?'STARTED':'START';
-  sb.title=c.startedAt?'Started '+new Date(c.startedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
-  sb.classList.toggle('on',!!c.startedAt);
+  $('vtag').textContent='v'+VERSION;
+  tickClock();
   $('moodrow').classList.toggle('off',!!c.mood);
   $('moods').innerHTML=c.mood?'':['jacked','tired','meh'].map(m=>
     `<button class="mood" data-mood="${m}">${m.toUpperCase()}</button>`).join('');
@@ -757,7 +826,7 @@ function draw(){
       <div class="bhead" data-open="${bi}">
         <span class="dot"></span>
         <span class="bname">${names}</span>
-        ${ss?'<span class="sstag">SS</span>':''}
+        ${ss?'<span class="sstag">SS</span>':mem[0].e.makeup?'<span class="sstag mu">MAKE-UP</span>':''}
         <span class="bmeta">${meta}</span>
         ${ss?'':`<button class="info" data-info="${mem[0].e.exerciseId}" aria-label="Notes">ⓘ</button>`}
         ${goalBars(mem.map(m=>m.e.exerciseId))}
@@ -980,7 +1049,7 @@ $('dayname').addEventListener('click',()=>{
 $('startb').addEventListener('click',()=>{
   const c=cur();
   if(c.startedAt){ toast('Already running since '+new Date(c.startedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'.'); return; }
-  c.startedAt=new Date().toISOString(); ev('start'); save(); drawBar();
+  c.startedAt=new Date().toISOString(); ev('start'); enableShake(); save(); startClock();
   toast('Clock running. Start your watch now and the two will line up.');
 });
 $('moods').addEventListener('click',e=>{
@@ -995,13 +1064,12 @@ $('main').addEventListener('focusin',e=>{
 $('main').addEventListener('keydown',e=>{
   if(e.target.dataset&&e.target.dataset.f==='note'&&e.key==='Enter'&&!e.shiftKey){
     e.preventDefault();
-    const pad=e.target.closest('.npad');
-    cur().entries[+pad.dataset.e].sets[+pad.dataset.set].npad=false;
-    e.target.blur(); save(); draw();
+    e.target.blur(); save();      // dismiss the keyboard, leave the note open to read back
   }
 });
 $('main').addEventListener('click',e=>{
   if(e.target.closest('[data-info]')){ e.stopPropagation(); sheet(e.target.closest('[data-info]').dataset.info); return; }
+  if(e.target.closest('[data-fail],[data-f2],[data-rp],[data-done],[data-skip],[data-hold],[data-addset],[data-warmdone],[data-timer]')) snap();
   if(e.target.closest('[data-warmdone]')){ const c=cur();
     c.warm.done=!c.warm.done; ev('warm'); stamp(); save(); draw(); return; }
   if(e.target.closest('[data-warmtimer]')){ openTimer('__warm',null); return; }
@@ -1045,6 +1113,7 @@ $('main').addEventListener('click',e=>{
     en.sets.forEach(x=>{ if(x.r==null&&!x.skipped&&x.tr!=null){
       x.r=x.tr; if(x.w==null) x.w=x.tw; filled++; } });
     en.status='done'; en.skipReason=null; ev('done',en.exerciseId);
+    collapseIfDone(en.block);
     stamp(); save(); draw();
     if(filled) toast(filled+' blank set'+(filled>1?'s':'')+' taken as the prescribed numbers.');
     return; }
@@ -1055,7 +1124,7 @@ $('main').addEventListener('click',e=>{
     const logged=en.sets.filter(x=>x.r!=null).length;
     en.sets.forEach(x=>{ if(x.r==null) x.skipped=true; });
     en.status = logged? 'done' : 'skipped';
-    ev('skip',en.exerciseId); stamp(); save(); draw();
+    ev('skip',en.exerciseId); collapseIfDone(en.block); stamp(); save(); draw();
     toast(logged
       ? logged+' set'+(logged>1?'s':'')+' kept, the rest struck out.'
       : (en.skipReason==='time'?'Logged. Rolls forward unchanged.':'Logged as fatigue. Next prescription eases off.'));
@@ -1071,6 +1140,7 @@ $('main').addEventListener('input',e=>{
   if(!row||!e.target.dataset.f) return;
   const en=cur().entries[+row.dataset.e], s=en.sets[+row.dataset.set];
   const v=e.target.value.trim(), n=v===''?null:parseFloat(v);
+  snap('n'+row.dataset.e+':'+row.dataset.set+':'+e.target.dataset.f);
   s[e.target.dataset.f]=isNaN(n)?null:n;
   if(s.r!=null) s.skipped=false;
   e.target.classList.toggle('ghost',s[e.target.dataset.f]==null);
@@ -1169,7 +1239,9 @@ function summary(c){
   const vol=c.entries.reduce((a,e)=>a+e.sets.reduce((b,x)=>b+((x.w||0)*(x.r||0)),0),0);
   const setsDone=c.entries.reduce((a,e)=>a+e.sets.filter(x=>x.r!=null).length,0);
   const mins=c.startedAt&&c.endedAt?Math.round((new Date(c.endedAt)-new Date(c.startedAt))/60000):null;
-  const goals=Object.keys(S.exercises).filter(k=>S.exercises[k].goal)
+  // only the lifts that were actually on the board today
+  const mine=new Set(c.entries.map(e=>e.exerciseId));
+  const goals=Object.keys(S.exercises).filter(k=>S.exercises[k].goal&&mine.has(k))
     .map(k=>({k,X:S.exercises[k],g:goalPct(k,'goal'),f:goalPct(k,'goalF')})).filter(x=>x.g)
     .sort((a,b)=>b.g.pct-a.g.pct);
 
@@ -1206,12 +1278,17 @@ $('finish').addEventListener('click',()=>{
     c.watch={avgHR:p[0]||null,peakHR:p[1]||null,duration:p[2]||null}; }
   c.endedAt=new Date().toISOString();
   c.pace=paceStats(c); delete c.events;
+  S.prefs.makeup=c.entries
+    .filter(e=>e.status==='skipped'&&e.skipReason==='time')
+    .map(e=>e.exerciseId);
   S.sessions.push(c); S.prefs.lastDayId=c.dayId;
   const res=program(c.dayId);                 // program the NEXT run of this same day
   S.log.push(logBlock(c,res?res.lines:[]));
   const next=S.days.find(d=>d.id!==c.dayId)||S.days[0];
-  S.current=newSession(next.id); openEx=null; save(); draw();
+  S.current=newSession(next.id); S.prefs.makeup=[]; openEx=null;
+  UNDO=[]; save(); draw(); startClock();
   summary(c);
+  if(res&&res.moved) toast(res.moved);
 });
 $('menu').addEventListener('click',()=>{
   const c0=cur();
@@ -1245,6 +1322,14 @@ $('menu').addEventListener('click',()=>{
       <button class="abtn" id="expLog">EXPORT LOG</button>
       <button class="abtn" id="saveNow">SAVE NOW</button>
     </div>
+    <div class="sh2">Undo</div>
+    <div class="acts">
+      <button class="abtn" id="undoBtn">UNDO LAST</button>
+      <button class="abtn${shakeOn?' pri':''}" id="shakeBtn">${shakeOn?'\u2713 SHAKE TO UNDO':'ENABLE SHAKE TO UNDO'}</button>
+    </div>
+    <div class="hint">${UNDO.length} step${UNDO.length===1?'':'s'} available. iOS only hands out
+      motion access after you ask for it, so shake needs turning on once per install.
+      Finishing a session clears the stack.</div>
     <div class="sh2">Programmer</div>
     <div class="acts"><button class="abtn warn" id="reprog">RE-PROGRAM THIS DAY</button></div>
     <div class="hint">Runs the rules again over everything already logged. Use it after a rule
@@ -1269,6 +1354,10 @@ $('menu').addEventListener('click',()=>{
   $('saveNow').addEventListener('click',()=>{
     const ok=writeNow();
     toast(ok?'Saved.':'Still failing: '+(lastErr||'unknown'),!ok);
+  });
+  $('undoBtn').addEventListener('click',()=>{ if(undo()) closeSheet(); });
+  $('shakeBtn').addEventListener('click',()=>{
+    enableShake(okd=>toast(okd?'Shake to undo is on.':'iOS refused motion access. Use UNDO LAST instead.',!okd));
   });
   $('reprog').addEventListener('click',()=>{
     const res=program(cur().dayId);
@@ -1425,7 +1514,7 @@ function program(dayId){
     if(e.sets.some(z=>z.skipped)&&e.skipReason==='tired'){
       plan[key]={sets:base,why:'held — you ran out of gas partway through it',up:0,down:0}; return;
     }
-    let up=0,down=0;
+    let up=0,down=0,tiredDown=0;
     const rough=(h.s&&h.s.mood==='tired');   // whole session was a slog — no drops off it
     // If he moved the whole lift to a different weight, unlogged sets follow it there
     // instead of sitting on a stale prescription.
@@ -1443,7 +1532,8 @@ function program(dayId){
       // a quarter over the prescription means the load was wrong, not the effort.
       const over=z.r-tr, big=Math.max(2,Math.ceil(tr*0.25));
       if(feel==='tired'){                                    // TIRED never adds load
-        if(z.r<tr && !rough && !q && !noLoad){ down++; return {w:Math.max(st,w-st),r:tr}; }
+        if(t.w>0 && w<t.w) return {w:w,r:tr};                // he already backed it off himself
+        if(z.r<tr && !rough && !q && !noLoad){ down++; tiredDown++; return {w:Math.max(st,w-st),r:tr}; }
         return {w:w,r:tr};
       }
       if(over>=big){
@@ -1468,13 +1558,15 @@ function program(dayId){
       const li=base.findIndex((t,i)=>{ const z=e.sets[i]; return z&&z.r!=null&&!z.skipped; });
       if(li>=0){ const W=sets[li].w; sets.forEach(x=>{ x.w=W; }); }
     }
-    plan[key]={sets,why:null,up,down};
+    plan[key]={sets,why:null,up,down,tiredDown};
   });
   // rule 4 — don't raise one half of a superset while the other is collapsing
   d.order.forEach(blk=>{
     if(blk.length<2) return;
     const mem=blk.filter(k=>plan[k]);
-    if(mem.some(k=>plan[k].down>0)) mem.forEach(k=>{
+    // A partner that only dropped because he was gassed is not the same as one that
+    // collapsed under load — the other half still earned its increase.
+    if(mem.some(k=>plan[k].down>0 && plan[k].down>plan[k].tiredDown)) mem.forEach(k=>{
       if(plan[k].up>0 && plan[k].down===0){
         plan[k].sets=(S.exercises[k].target||[]).map(t=>({w:t.w,r:t.r}));
         plan[k].up=0; plan[k].why='held — its superset partner went backwards';
@@ -1530,7 +1622,47 @@ function program(dayId){
   });
   S.prescriptions[dayId]={generatedAt:new Date().toISOString(),entries,rationale};
   keys.forEach(k=>{ if(S.exercises[k]) S.exercises[k].target=entries[k]; });
-  return {changed,lines};
+  const moved=restack(d,lastSession(dayId));
+  if(moved) lines.push('ORDER: '+moved);
+  return {changed,lines,moved};
+}
+
+/* ---- ordering: what you struggled with drifts toward the front, one slot a session ---- */
+function lastSession(dayId){
+  for(let i=S.sessions.length-1;i>=0;i--) if(S.sessions[i].dayId===dayId) return S.sessions[i];
+  return null;
+}
+function struggleOf(e){
+  if(!e) return 0;
+  if(e.status==='skipped') return e.skipReason==='tired'?3:0;   // out of time says nothing
+  let s=0;
+  e.sets.forEach(z=>{
+    if(z.r==null||z.skipped) return;
+    const tr=(z.tr!=null?z.tr:z.r);
+    if(z.feel==='tired') s+=2;
+    if(z.failed && z.r<tr) s+=1+Math.min(3,(tr-z.r)/2);
+    else if(z.r<tr) s+=(tr-z.r)/3;
+    if(z.feel==='easy') s-=1;
+  });
+  return s;
+}
+function restack(d,sess){
+  if(!sess||d.order.length<3) return null;
+  const by={}; sess.entries.forEach(e=>{ by[e.exerciseId]=e; });
+  const score=blk=>Math.max.apply(null,blk.map(k=>struggleOf(by[k])).concat([0]));
+  // block 0 is pinned: chest press runs first while you are fresh, by choice
+  let worst=-1, worstScore=0;
+  for(let i=2;i<d.order.length;i++){
+    const s=score(d.order[i]);
+    if(s>worstScore){ worstScore=s; worst=i; }
+  }
+  if(worst<0 || worstScore<3) return null;
+  const above=score(d.order[worst-1]);
+  if(worstScore <= above+1.5) return null;      // not a clear enough difference to churn
+  const name=b=>b.map(k=>(S.exercises[k]||{}).name||k).join(' / ');
+  const moving=name(d.order[worst]), passed=name(d.order[worst-1]);
+  const tmp=d.order[worst]; d.order[worst]=d.order[worst-1]; d.order[worst-1]=tmp;
+  return moving+' moves ahead of '+passed+' \u2014 it is where you fell off';
 }
 
 /* ---- the cumulative log ---- */
@@ -1590,11 +1722,84 @@ function toast(m,bad){ const t=$('toast'); t.textContent=m; t.classList.toggle('
   t.classList.add('on'); clearTimeout(tt); tt=setTimeout(()=>t.classList.remove('on'),3600); }
 window.addEventListener('beforeunload',e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
 
+
+/* ---------------------------------------------------------------------------
+   Session 14 was logged on an older copy of this file. It ships here so it
+   does not have to be exported and imported by hand. It is written in ONCE,
+   only if no Day 1 session from that date is already stored, so re-opening
+   the app or landing on a phone that already has it changes nothing.
+   Set PRELOAD to null to disable.
+   [w, reps, feel, failed, note, rest-pause]
+--------------------------------------------------------------------------- */
+const PRELOAD={
+  id:'s1756832000000', dayId:'day1', dayLabel:'Day 1 \u2014 Upper',
+  startedAt:'2026-09-02T12:53:00-04:00', endedAt:'2026-09-02T14:08:00-04:00',
+  gym:'home', mood:'meh', warm:{done:true,secs:0},
+  pace:{n:22,med:114,min:7,max:940,rushed:7,dragged:5,peeks:0,idle:0,idleMin:0},
+  skipped:{cablePullThrough:'time', gobletSquat:'time'},
+  data:{
+    chestPress:[[65,10,null,1],[45,15,null,1],[45,14,null,1]],
+    shrugs:[[65,20,'right',0],[45,30,'right',0],[45,25,'right',0]],
+    backExtension:[[0,5,null,1,'',3],
+                   [0,10,null,1,'Wooo. My lower back is weak.'],
+                   [0,10,null,0,'Ow lol. Going to be a body weight for a while.']],
+    dbShoulderPress:[[30,10,'right',0],[30,10,'right',0],[30,12,null,1]],
+    deadHang:[[0,56,null,0,'Wide grip this time'],[0,29,null,0],[0,26,null,0]],
+    invertedRow:[[0,10,null,1],[0,10,null,1,'Hell yeah this is hammering my grip'],[0,10,null,1]],
+    hammerCurl:[[35,10,'right',0,'Wooo grip is getting crunchy'],[20,15,'right',0],[20,20,null,1,'',3]],
+    skullCrusher:[[20,15,'right',0,'Switched to EZ bar 10 on each side'],[20,15,'right',0],[20,15,'right',0]],
+    latPulldown:[[130,3,'tired',0,'Probably tired from hanging'],[85,15,'right',0],[70,20,'right',0]],
+    cableRow:[[130,10,null,1,'Same machine always use same weights'],[85,10,null,1],[70,12,null,1]],
+    plank:[[0,81,null,0]]
+  }
+};
+function preload(){
+  if(!PRELOAD) return false;
+  const when=(PRELOAD.startedAt||'').slice(0,10);
+  const already=(S.sessions||[]).some(s=>s.id===PRELOAD.id ||
+    (s.dayId===PRELOAD.dayId && (s.startedAt||s.endedAt||'').slice(0,10)===when));
+  if(already) return false;
+  const sess=newSession(PRELOAD.dayId);
+  Object.assign(sess,{id:PRELOAD.id, startedAt:PRELOAD.startedAt, endedAt:PRELOAD.endedAt,
+    gym:PRELOAD.gym, mood:PRELOAD.mood, warm:PRELOAD.warm, pace:PRELOAD.pace, notes:''});
+  delete sess.events;
+  Object.entries(PRELOAD.data).forEach(([k,rows])=>{
+    const e=sess.entries.find(x=>x.exerciseId===k); if(!e) return;
+    e.status='done';
+    rows.forEach((r,i)=>{
+      if(!e.sets[i]) e.sets[i]={w:r[0],r:null,tw:r[0],tr:r[1],failed:false,rp:null,
+        feel:null,note:'',npad:false,skipped:false,hold:false};
+      Object.assign(e.sets[i],{w:r[0], r:r[1], feel:r[2]||null, failed:!!r[3],
+        note:r[4]||'', rp:(r[5]==null?null:r[5]), skipped:false, hold:false});
+    });
+    e.sets.length=rows.length;
+  });
+  Object.entries(PRELOAD.skipped||{}).forEach(([k,why])=>{
+    const e=sess.entries.find(x=>x.exerciseId===k); if(!e) return;
+    e.status='skipped'; e.skipReason=why;
+    e.sets.forEach(z=>{ z.skipped=true; });
+  });
+  S.sessions.push(sess);
+  S.prefs.lastDayId=PRELOAD.dayId;
+  S.prefs.makeup=sess.entries
+    .filter(e=>e.status==='skipped'&&e.skipReason==='time').map(e=>e.exerciseId);
+  const res=program(PRELOAD.dayId);
+  S.log.push(logBlock(sess,res?res.lines:[]));
+  S.current=null;
+  return true;
+}
 (function(){
   load();
   if(!Array.isArray(S.log)) S.log=[];
-  if(!S.current) S.current=newSession(S.prefs.lastDayId||'day1');
-  draw(); setDot();
+  const pre=preload();
+  if(pre||!S.current){
+    const next=pre?(S.days.find(d=>d.id!==PRELOAD.dayId)||S.days[0]).id
+                  :(S.prefs.lastDayId||'day1');
+    S.current=newSession(next);
+  }
+  if(pre){ S.prefs.makeup=[]; writeNow(); }
+  draw(); setDot(); startClock();
+  if(pre) toast('Session 14 loaded. Day 2 is programmed and your make-ups are on it.');
   if(bootErr) toast(bootErr,true);
 })();
 </script>
