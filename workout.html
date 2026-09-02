@@ -1,4 +1,4 @@
-<!-- JART Training Log — v1.9.1 -->
+<!-- JART Training Log — v1.9.2 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -343,7 +343,7 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
 <input type="file" id="fileIn" accept=".json" style="display:none">
 
 <script>
-const VERSION='1.9.1';
+const VERSION='1.9.2';
 const KEY='jart_workout_v1';
 const SEEDV=6;   // bump when seed() targets or day order change
 let bootErr=null;
@@ -1731,10 +1731,32 @@ window.addEventListener('beforeunload',e=>{ if(dirty){ e.preventDefault(); e.ret
    Set PRELOAD to null to disable.
    [w, reps, feel, failed, note, rest-pause]
 --------------------------------------------------------------------------- */
-const PRELOAD={
+const PRELOAD=[
+{
+  id:'s1756400000000', dayId:'day2', dayLabel:'Day 2 \u2014 Lower + Delts + Posture',
+  startedAt:'2026-08-28T18:45:00-04:00', endedAt:'2026-08-28T20:20:00-04:00',
+  gym:'home', mood:null, warm:{done:true,secs:300},
+  // The seed numbers for Day 2 were already rebuilt by hand off this session,
+  // so it goes in for the history and the log but does NOT get programmed off
+  // again — that would advance every Day 2 lift a second time.
+  program:false,
+  data:{
+    hamstringCurl:[[80,15,'easy',0,'Started with my incline walk 5 minutes'],[80,15,'right',0],[80,20,null,1]],
+    legExtension:[[180,15,null,1],[150,16,null,1,'',5]],
+    calfRaise:[[185,25,null,0,'Always same weight on the shrugs and calf raises. Started at 225 but I\u2019m not gonna keep that cause it\u2019s too difficult to raise up and down so we\u2019re gonna go to 185 and just do numbers volume rather.'],[185,25,null,0]],
+    shrugs2:[[135,30,null,0,'We\u2019re going up in weight'],[185,30,null,0],[185,30,null,0,'This really challenges me. I like it.']],
+    cableLateralRaise:[[12.5,20,'right',0,'Cross cable with handles'],[12.5,15,null,1],[12.5,12,null,1]],
+    farmerCarry:[[100,1,'right',0,'50 each hand'],[100,1,'right',0,'1 counts as one lap'],[100,1,'right',0]],
+    cableCurl:[[57.5,15,null,1]],
+    cablePushdown:[[72.5,20,null,1]],
+    reversePecDeck:[[75,20,null,1,'Seat to 3']],
+    pecDeck:[[110,20,null,1,'Chair set to 4 arms set to 4']]
+  }
+},
+{
   id:'s1756832000000', dayId:'day1', dayLabel:'Day 1 \u2014 Upper',
   startedAt:'2026-09-02T12:53:00-04:00', endedAt:'2026-09-02T14:08:00-04:00',
-  gym:'home', mood:'meh', warm:{done:true,secs:0},
+  gym:'home', mood:'meh', warm:{done:true,secs:300}, program:true,
   pace:{n:22,med:114,min:7,max:940,rushed:7,dragged:5,peeks:0,idle:0,idleMin:0},
   skipped:{cablePullThrough:'time', gobletSquat:'time'},
   data:{
@@ -1752,18 +1774,15 @@ const PRELOAD={
     cableRow:[[130,10,null,1,'Same machine always use same weights'],[85,10,null,1],[70,12,null,1]],
     plank:[[0,81,null,0]]
   }
-};
-function preload(){
-  if(!PRELOAD) return false;
-  const when=(PRELOAD.startedAt||'').slice(0,10);
-  const already=(S.sessions||[]).some(s=>s.id===PRELOAD.id ||
-    (s.dayId===PRELOAD.dayId && (s.startedAt||s.endedAt||'').slice(0,10)===when));
-  if(already) return false;
-  const sess=newSession(PRELOAD.dayId);
-  Object.assign(sess,{id:PRELOAD.id, startedAt:PRELOAD.startedAt, endedAt:PRELOAD.endedAt,
-    gym:PRELOAD.gym, mood:PRELOAD.mood, warm:PRELOAD.warm, pace:PRELOAD.pace, notes:''});
+}];
+const PRELOAD_BASE={day1:13, day2:11};   // sessions banked before these two
+function buildPreloaded(P){
+  const sess=newSession(P.dayId);
+  Object.assign(sess,{id:P.id, startedAt:P.startedAt, endedAt:P.endedAt,
+    gym:P.gym, mood:P.mood||null, warm:P.warm||{done:false,secs:0}, notes:''});
+  if(P.pace) sess.pace=P.pace;
   delete sess.events;
-  Object.entries(PRELOAD.data).forEach(([k,rows])=>{
+  Object.entries(P.data||{}).forEach(([k,rows])=>{
     const e=sess.entries.find(x=>x.exerciseId===k); if(!e) return;
     e.status='done';
     rows.forEach((r,i)=>{
@@ -1774,18 +1793,34 @@ function preload(){
     });
     e.sets.length=rows.length;
   });
-  Object.entries(PRELOAD.skipped||{}).forEach(([k,why])=>{
+  Object.entries(P.skipped||{}).forEach(([k,why])=>{
     const e=sess.entries.find(x=>x.exerciseId===k); if(!e) return;
     e.status='skipped'; e.skipReason=why;
     e.sets.forEach(z=>{ z.skipped=true; });
   });
-  S.sessions.push(sess);
-  S.prefs.lastDayId=PRELOAD.dayId;
-  S.prefs.makeup=sess.entries
-    .filter(e=>e.status==='skipped'&&e.skipReason==='time').map(e=>e.exerciseId);
-  const res=program(PRELOAD.dayId);
-  S.log.push(logBlock(sess,res?res.lines:[]));
+  return sess;
+}
+function preload(){
+  if(!PRELOAD||!PRELOAD.length) return false;
+  const seen=(S.sessions||[]).map(s=>s.id+'|'+s.dayId+'|'+(s.startedAt||s.endedAt||'').slice(0,10));
+  const todo=PRELOAD.filter(P=>!seen.some(x=>
+    x.startsWith(P.id+'|') || x.endsWith('|'+P.dayId+'|'+(P.startedAt||'').slice(0,10))));
+  if(!todo.length) return false;
+  if(PRELOAD_BASE) S.prefs.base=Object.assign({},PRELOAD_BASE);
+  let last=null;
+  todo.forEach(P=>{
+    const sess=buildPreloaded(P);
+    S.sessions.push(sess);
+    S.prefs.lastDayId=P.dayId;
+    S.prefs.makeup=sess.entries
+      .filter(e=>e.status==='skipped'&&e.skipReason==='time').map(e=>e.exerciseId);
+    // program:false means the seed already accounts for this session
+    const res=(P.program===false)?null:program(P.dayId);
+    S.log.push(logBlock(sess,res?res.lines:[]));
+    last=P;
+  });
   S.current=null;
+  PRELOAD.__last=last;
   return true;
 }
 (function(){
@@ -1793,13 +1828,14 @@ function preload(){
   if(!Array.isArray(S.log)) S.log=[];
   const pre=preload();
   if(pre||!S.current){
-    const next=pre?(S.days.find(d=>d.id!==PRELOAD.dayId)||S.days[0]).id
+    const lastId=(PRELOAD&&PRELOAD.__last)?PRELOAD.__last.dayId:null;
+    const next=pre?(S.days.find(d=>d.id!==lastId)||S.days[0]).id
                   :(S.prefs.lastDayId||'day1');
     S.current=newSession(next);
   }
   if(pre){ S.prefs.makeup=[]; writeNow(); }
   draw(); setDot(); startClock();
-  if(pre) toast('Session 14 loaded. Day 2 is programmed and your make-ups are on it.');
+  if(pre) toast('Your logged sessions loaded. Day 2 is up, with your make-ups on it.');
   if(bootErr) toast(bootErr,true);
 })();
 </script>
