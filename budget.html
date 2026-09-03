@@ -837,7 +837,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v122";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v123";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -5499,14 +5499,30 @@ function wireRec(){
          paycheckBodyHTML), but amountAt() only ever compares by month —
          slice(0,7) keeps schedule[].from at the YYYY-MM grain it's always
          been, whatever day was actually picked. A no-op for the older
-         type="month" inputs elsewhere, whose values are already 7 chars. */
-      card.querySelectorAll('[data-s="from"]').forEach(i=>{r.schedule[+i.dataset.i].from=i.value.trim().slice(0,7);});
+         type="month" inputs elsewhere, whose values are already 7 chars.
+
+         v123 — and it must be a REAL month before it is written. An empty
+         or half-typed picker yields "", which sorts before every real
+         month; syncFirstStep() then reads it as a step dated before the
+         rule starts, collapses it onto the start month, finds two steps
+         sharing that month and drops one. The surviving one is the older
+         amount, so the change just entered vanishes with no error at all —
+         it looks exactly like the edit "came unstuck" hours later, when in
+         fact it never landed. Leave the stored date alone instead, and say
+         so rather than swallowing it. */
+      let badDate=0;
+      card.querySelectorAll('[data-s="from"]').forEach(i=>{
+        const v=i.value.trim().slice(0,7);
+        if(/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) r.schedule[+i.dataset.i].from=v;
+        else badDate++;
+      });
       card.querySelectorAll('[data-s="amount"]').forEach(i=>{
         const v=signed(i.value,r.kind==="income"?1:-1); r.schedule[+i.dataset.i].amount=v===null?0:v;});
       r.schedule.sort((a,b)=>cmpYM(a.from,b.from));
       syncFirstStep(r);          /* the opening amount follows the start date */
       save(); render(); openDrawer("rec");
-      document.querySelector(`[data-r="${id}"]`).classList.add("open"); toast("Updated");
+      document.querySelector(`[data-r="${id}"]`).classList.add("open");
+      toast(badDate?"Saved — but pick a Starts month; that one was left as it was":"Updated");
     };
   });
   document.getElementById("addRule").onclick=()=>{
