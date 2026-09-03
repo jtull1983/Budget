@@ -825,7 +825,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v116";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v117";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -5560,8 +5560,12 @@ try{
    gist's braces, so recovery doesn't depend on revision history. */
 const BAKKEY="budget_backup_v1";
 function keepBackup(o){
-  try{ if(bulk(o).rows>0||bulk(o).rules>3)
-    localStorage.setItem(BAKKEY,JSON.stringify({at:Date.now(),state:o})); }catch(e){}
+  /* v117 — the gate used to ask only about statement rows and budget lines, so a
+     file full of transactions and taught names but no filed statements was never
+     worth backing up. Same blind spot the gut-guard had. */
+  try{ const b=bulk(o);
+    if(b.rows>0||b.rules>3||b.tx>0||b.tags>0)
+      localStorage.setItem(BAKKEY,JSON.stringify({at:Date.now(),state:o})); }catch(e){}
 }
 function readBackup(){ try{ return JSON.parse(localStorage.getItem(BAKKEY)); }catch(e){ return null; } }
 function saveSync(){ try{ localStorage.setItem(SYNCKEY,JSON.stringify(sync)); }catch(e){} }
@@ -5630,7 +5634,67 @@ const ts=o=>(o&&o.meta&&o.meta.savedAt)||0;
 function bulk(o){
   const st=(o&&o.stmts)||{}; let rows=0;
   for(const k in st) rows+=((st[k]&&st[k].rows)||[]).length;
-  return {rules:((o&&o.rules)||[]).length, stmts:Object.keys(st).length, rows};
+  /* v117 — the three below are new. rows/rules/stmts keep their old meaning
+     because keepBackup() tests them; adding fields is safe, redefining is not.
+     Without these the guard was blind to the only things that went missing. */
+  return {rules:((o&&o.rules)||[]).length, stmts:Object.keys(st).length, rows,
+          tx:(((o&&o.bank)||{}).rows||[]).length,
+          tags:Object.keys((o&&o.tag)||{}).length,
+          assigns:Object.keys((o&&o.assign)||{}).length};
+}
+/* ---- earlier versions -------------------------------------------------
+   Every push is a gist revision and GitHub keeps the lot. These read that
+   history so a bad day can be undone from the app rather than from a file
+   manager on a phone. */
+let histList=null, histBusy=false, histPick=null;
+async function ghHistory(){
+  const r=await gh("/gists/"+sync.gistId,{method:"GET"});
+  if(!r.ok) throw new Error(r.status===401?"Token rejected":r.status===404?"Gist not found":"GitHub error "+r.status);
+  const j=await r.json();
+  return (j.history||[]).slice(0,30);
+}
+async function ghReadAt(sha){
+  const r=await gh("/gists/"+sync.gistId+"/"+sha,{method:"GET"});
+  if(!r.ok) throw new Error("GitHub error "+r.status);
+  const j=await r.json(), files=j.files||{};
+  const key=files[GFILE]?GFILE:Object.keys(files).find(k=>/\.json$/i.test(k));
+  const f=key&&files[key];
+  if(!f) throw new Error("that revision has no .json file");
+  let c=f.content;
+  if(f.truncated&&f.raw_url) c=await (await fetch(f.raw_url)).text();
+  return JSON.parse(c);
+}
+/* how a revision differs from what is loaded right now, in the terms that
+   matter — not line counts, which say nothing about what was lost */
+function histDiff(st){
+  const a=bulk(st), b=bulk(S);
+  return [["transactions",a.tx,b.tx],["named",a.tags,b.tags],
+          ["assignments",a.assigns,b.assigns],["budget lines",a.rules,b.rules],
+          ["statements",a.stmts,b.stmts]];
+}
+function histWhen(iso){
+  const d=new Date(iso);
+  return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+
+         d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
+}
+/* deliberately not save(): save() schedules a push, which would send this
+   revision back up before you had a chance to look at it. */
+function histLoad(st){
+  keepBackup(S);
+  const held=JSON.parse(JSON.stringify(S));
+  try{
+    S=st; migrate(S); render();
+  }catch(e){
+    /* a revision that will not render leaves you stranded with no way back,
+       which is the opposite of what a recovery feature is for. Put the old
+       one back and say so. */
+    S=held; try{ render(); }catch(x){}
+    toast("That version wouldn't open — nothing changed");
+    return false;
+  }
+  pushUndo(); localSave(); openDrawer("sync");
+  toast("Loaded — look it over, then Push now");
+  return true;
 }
 /* Would sending `mine` destroy most of what's already on GitHub? The timestamp
    guard below can't catch this on its own: save() stamps savedAt to now before
@@ -5640,6 +5704,12 @@ function wouldGut(mine,theirs){
   if(b.rows>40 && a.rows<b.rows*0.5)    return b.rows+" statement rows down to "+a.rows;
   if(b.stmts>2  && a.stmts<b.stmts*0.5) return b.stmts+" statements down to "+a.stmts;
   if(b.rules>3  && a.rules<b.rules*0.5) return b.rules+" budget lines down to "+a.rules;
+  /* v117 — the ones that actually went missing. Transactions and taught names
+     drop in bulk when signatures drift or a sweep misfires, and neither showed
+     up in any of the three tests above. */
+  if(b.tx>20     && a.tx<b.tx*0.7)          return b.tx+" transactions down to "+a.tx;
+  if(b.tags>10   && a.tags<b.tags*0.7)      return b.tags+" named transactions down to "+a.tags;
+  if(b.assigns>5 && a.assigns<b.assigns*0.6) return b.assigns+" assignments down to "+a.assigns;
   return null;
 }
 /* nothing automatic may write until this device has actually heard from GitHub */
@@ -7493,6 +7563,35 @@ function syncHTML(){
       <div class="flag"><div class="ft">If two of you edit at once</div><div class="fb">
       Last save wins — but if the copy on GitHub is newer than the one this device started from, it stops and
       warns you instead of overwriting. Use <b>Pull now</b> to take theirs, or <b>Push now</b> twice to force yours.</div></div>`;
+    /* v117 — earlier versions, read straight off the gist */
+    me+=`<div class="flag" style="margin-top:14px"><div class="ft">Earlier versions</div>
+      <div class="fb">Every push leaves a copy on GitHub. If something goes wrong you can look
+      back through them here and load one — it only lands on this device, so you can check it
+      before pushing.</div></div>`;
+    if(histBusy) me+=`<div class="mini" style="opacity:.7">Reading history…</div>`;
+    else if(!histList) me+=`<div class="crow"><button class="mini" id="sHist">Show earlier versions</button></div>`;
+    else if(!histList.length) me+=`<div class="mini" style="opacity:.7">No earlier versions yet.</div>`;
+    else {
+      me+=`<div class="crow"><button class="mini" id="sHistHide">Hide</button></div>`;
+      histList.forEach(v=>{
+        const cs=v.change_status||{}, sha=v.version;
+        const on=histPick&&histPick.sha===sha;
+        me+=`<div class="row" style="align-items:center">
+          <div style="flex:1">${histWhen(v.committed_at)}
+            <span style="opacity:.6">+${cs.additions||0} −${cs.deletions||0}</span></div>
+          <button class="mini histLook" data-sha="${sha}">${on?"Hide":"Look"}</button></div>`;
+        if(on&&histPick.state){
+          me+=`<div class="flag"><div class="ft">What that version holds</div><div class="fb">`;
+          histDiff(histPick.state).forEach(([lab,was,now])=>{
+            const d=was-now, sign=d>0?"+":"";
+            me+=`${lab}: <b>${was}</b> (now ${now}${d?`, ${sign}${d}`:""})<br>`;
+          });
+          me+=`</div></div>
+            <div class="crow"><button class="mini" id="sHistLoad">Load this version</button></div>`;
+        }
+        if(on&&histPick.err) me+=`<div class="mini" style="opacity:.7">${histPick.err}</div>`;
+      });
+    }
   }
   /* Outside the folds on purpose. This lived inside Card info and stayed
      invisible, which is the same as not existing. */
@@ -7690,6 +7789,31 @@ function wireDups(){
 }
 function wireSync(){
   wireDups();
+  /* v117 — earlier versions */
+  const hb=document.getElementById("sHist");
+  if(hb) hb.onclick=async()=>{
+    histBusy=true; openDrawer("sync");
+    try{ histList=await ghHistory(); }
+    catch(e){ toast(netMsg(e)); histList=null; }
+    histBusy=false; openDrawer("sync");
+  };
+  const hh=document.getElementById("sHistHide");
+  if(hh) hh.onclick=()=>{ histList=null; histPick=null; openDrawer("sync"); };
+  Array.prototype.forEach.call(document.querySelectorAll(".histLook"),b=>{
+    b.onclick=async()=>{
+      const sha=b.dataset.sha;
+      if(histPick&&histPick.sha===sha){ histPick=null; openDrawer("sync"); return; }
+      histPick={sha,state:null,err:""}; openDrawer("sync");
+      try{ histPick={sha,state:await ghReadAt(sha),err:""}; }
+      catch(e){ histPick={sha,state:null,err:netMsg(e)}; }
+      openDrawer("sync");
+    };
+  });
+  const hl=document.getElementById("sHistLoad");
+  if(hl) hl.onclick=()=>{
+    if(!histPick||!histPick.state) return;
+    const st=histPick.state; histPick=null; histList=null; histLoad(st);
+  };
   const tok=document.getElementById("sTok"), gid=document.getElementById("sGist");
   document.getElementById("sConnect").onclick=async()=>{
     const t=tok.value.trim();
