@@ -837,7 +837,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v121";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v122";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -5219,8 +5219,16 @@ document.addEventListener("drop",e=>{
    shared with every other recurring item. Superseded schedule periods fold
    into a collapsed, greyed <details> with an auto-filled "Ended" date —
    the day before the next period's Starts. */
+/* v122 — a pending "new amount?" click, keyed by rule id, not yet written
+   into r.schedule. Session-only, same pattern as feedDraft below: nothing
+   here is real until Apply pushes it and calls save(). Collapsing the card,
+   closing the drawer, or navigating away without Apply just lets it sit
+   here unsaved — reopening the card still shows it, but the gist never
+   sees it until Apply. */
+let pcDraft={};
 function paycheckBodyHTML(r){
   const sched=r.schedule, n=sched.length;
+  const draft=pcDraft[r.id];
   const oldHTML=(starts,ended,amount)=>`<details class="oldperiod">
       <summary class="mini">${starts} – ${ended}: ${money(amount)}</summary>
       <div class="fg" style="margin-top:8px">
@@ -5230,47 +5238,57 @@ function paycheckBodyHTML(r){
         <div class="f"><label>Ended</label><input value="${ended}" disabled></div>
       </div>
     </details>`;
-  /* v121 — the one live-editable period: index 0 still edits the exact
-     anchor date (biweekly's occurrence math needs the day), every later
-     index edits its own schedule[].from (month-only), same as before.
-     "pcrow" matches every field in the row to the tallest one — a native
-     date/month control renders taller than a plain text input or select
-     on most phones, and .dbody's usual min-height:34px only reaches the
-     date/month field, not its row-mates. */
-  const activeHTML=idx=>{
-    const s=sched[idx];
-    return `<div class="fg pcrow">
-      <div class="f"><label>Amount</label><input data-s="amount" data-i="${idx}" value="${s&&s.amount?s.amount:""}" placeholder="0"></div>
+  /* v122 — Starts is a real date picker now, not a month-only one (it only
+     ever fed a month back to the schedule anyway — see the Apply guard
+     below that slices to YYYY-MM — but picking a day feels normal and a
+     month-only widget didn't on a phone). Index 0 still edits the exact
+     anchor date for the same reason it always has: biweekly's occurrence
+     math needs the day, not just the month. "pcrow" matches every field
+     in the row to the tallest one — a native date control renders taller
+     than a plain text input or select on most phones. */
+  const fieldsHTML=(amtVal,startsAttr,startsVal)=>`<div class="fg pcrow">
+      <div class="f"><label>Amount</label><input ${amtVal.attr} value="${amtVal.value}" placeholder="0"></div>
       <div class="f"><label>Every</label><select data-f="cadence">
         ${["monthly","biweekly","semimonthly","quarterly","annual"].map(c=>`<option ${c===r.cadence?"selected":""}>${c}</option>`).join("")}
       </select></div>
-      ${idx===0
-        ? `<div class="f"><label>Starts</label><input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>`
-        : `<div class="f"><label>Starts</label><input type="month" data-s="from" data-i="${idx}" value="${s.from}"></div>`}
+      <div class="f"><label>Starts</label><input type="date" ${startsAttr} value="${startsVal}"></div>
     </div>
     ${r.cadence==="biweekly" ? "" : `<div class="fg">
       <div class="f"><label>Day of month</label><input type="number" min="1" max="31" data-f="day" value="${r.day||1}"></div>
       ${(r.cadence==="quarterly"||r.cadence==="annual")
         ? `<div class="f"><label>Months</label><input data-f="months" value="${(r.months||[1,4,7,10]).join(",")}"></div>`:""}
     </div>`}`;
+  const activeHTML=idx=>{
+    const s=sched[idx];
+    return fieldsHTML(
+      {attr:`data-s="amount" data-i="${idx}"`, value:s&&s.amount?s.amount:""},
+      idx===0?'data-f="start"':`data-s="from" data-i="${idx}"`,
+      idx===0?dateVal(r.start,"first"):dateVal(s.from,"first"),
+    );
   };
-  /* v121 — the button never moves. Everything before it is history
+  const draftHTML=()=>fieldsHTML(
+    {attr:`data-s="amount" data-i="${n}"`, value:draft.amount||""},
+    `data-s="from" data-i="${n}"`,
+    dateVal(draft.from,"first"),
+  );
+  /* v121/v122 — the button never moves. Everything before it is history
      (collapsed, oldest first); everything after it is whatever's still
-     being edited. schedule[0] sits ABOVE the button and stays there for
-     good — it collapses in place the moment a second period exists,
-     instead of jumping up to join a fold that used to render before it.
-     Every later period appears BELOW the button; only the newest one is
-     open, each one before it collapses in place the same way once it's
-     superseded. That's what makes "new amount?" read as adding something
-     under the button rather than silently rewriting the row above it. */
-  const anchorHTML = n>1
-    ? oldHTML(dateVal(r.start,"first"), dayBefore(sched[1].from), sched[0].amount)
+     being edited — a real schedule period, or, once "new amount?" has
+     been clicked, the pending draft. schedule[0] sits ABOVE the button
+     and stays there for good — it collapses in place the moment a second
+     period (real or draft) exists. Every period after that appears BELOW
+     the button; only the newest is open, each one before it collapses in
+     place the same way once it's superseded. */
+  const total=n+(draft?1:0);
+  const endedFrom=idx=>idx+1<n?sched[idx+1].from:draft.from;
+  const anchorHTML = total>1
+    ? oldHTML(dateVal(r.start,"first"), dayBefore(endedFrom(0)), sched[0].amount)
     : activeHTML(0);
   const belowHTML = sched.slice(1).map((s,off)=>{
     const idx=off+1;
-    return idx===n-1 ? activeHTML(idx)
-      : oldHTML(dateVal(s.from,"first"), dayBefore(sched[idx+1].from), s.amount);
-  }).join("");
+    if(idx<n-1) return oldHTML(dateVal(s.from,"first"), dayBefore(endedFrom(idx)), s.amount);
+    return draft ? oldHTML(dateVal(s.from,"first"), dayBefore(draft.from), s.amount) : activeHTML(idx);
+  }).join("") + (draft ? draftHTML() : "");
   return `
     <div class="fg">
       <div class="f" style="flex:2"><label>Name</label><input data-f="name" value="${r.name}"></div>
@@ -5393,12 +5411,24 @@ function wireRec(){
       ev.preventDefault(); card.querySelector(".more").classList.toggle("open"); };
     /* v118 — same as + amount change, but reachable without knowing to look
        under More options first. Dates itself from next month, which is what
-       "my pay changed" almost always means. */
+       "my pay changed" almost always means.
+       v122 — for a paycheck specifically, this no longer touches r.schedule
+       or saves anything: it only sets a pending draft (pcDraft), so
+       collapsing the card or closing the drawer without Apply leaves
+       nothing written. Every other recurring item keeps the original
+       immediate push+save — t34 already locks that in. */
+    const isPaycheck=r.kind==="income"&&!r.notPay;
     const chg=card.querySelector("[data-chg]");
     if(chg) chg.onclick=e=>{
       e.preventDefault(); e.stopPropagation();
       const last=r.schedule[r.schedule.length-1];
       const from=nextMonth(NOW);
+      if(isPaycheck){
+        if(!pcDraft[id]) pcDraft[id]={from, amount:last?last.amount:0};
+        openDrawer("rec");
+        const c=document.querySelector(`[data-r="${id}"]`); if(c) c.classList.add("open");
+        return;
+      }
       if(!r.schedule.some(s=>s.from===from))
         r.schedule.push({from, amount:last?last.amount:0});
       save(); openDrawer("rec");
@@ -5429,9 +5459,17 @@ function wireRec(){
     };
     card.querySelector("[data-del]").onclick=()=>{
       if(!confirm(`Delete "${r.name}" from every month?`)) return;
+      delete pcDraft[id];
       S.rules=S.rules.filter(x=>x.id!==id); save(); render(); openDrawer("rec"); toast("Deleted");
     };
     card.querySelector("[data-apply]").onclick=()=>{
+      /* v122 — a pending paycheck draft becomes real only here. Push a slot
+         for it before the generic schedule collectors run below, so they
+         find somewhere to write the values the person actually entered;
+         then it's ordinary schedule data and Apply proceeds exactly as it
+         always has. Nothing above this line ever wrote to r.schedule or
+         called save() for it. */
+      if(pcDraft[id]){ r.schedule.push({from:pcDraft[id].from, amount:pcDraft[id].amount}); delete pcDraft[id]; }
       r.name=g("name").value.trim()||r.name;
       if(g("kind")) r.kind=g("kind").value;
       r.cadence=g("cadence").value;
@@ -5457,7 +5495,12 @@ function wireRec(){
       if(g("offbook")) r.offbook=g("offbook").checked;
       if(g("cap")) r.cap=parseFloat(g("cap").value)||null;
       if(g("payoff")) r.payoff=parseFloat(g("payoff").value)||null;
-      card.querySelectorAll('[data-s="from"]').forEach(i=>{r.schedule[+i.dataset.i].from=i.value.trim();});
+      /* v122 — a paycheck's per-period Starts is a real date picker (see
+         paycheckBodyHTML), but amountAt() only ever compares by month —
+         slice(0,7) keeps schedule[].from at the YYYY-MM grain it's always
+         been, whatever day was actually picked. A no-op for the older
+         type="month" inputs elsewhere, whose values are already 7 chars. */
+      card.querySelectorAll('[data-s="from"]').forEach(i=>{r.schedule[+i.dataset.i].from=i.value.trim().slice(0,7);});
       card.querySelectorAll('[data-s="amount"]').forEach(i=>{
         const v=signed(i.value,r.kind==="income"?1:-1); r.schedule[+i.dataset.i].amount=v===null?0:v;});
       r.schedule.sort((a,b)=>cmpYM(a.from,b.from));
