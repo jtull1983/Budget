@@ -505,7 +505,10 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row.seg .amt{font-size:11px;font-weight:700;opacity:.85;cursor:pointer}
 .row.seg.inc .amt{color:var(--teal)}
 .row.seg.exp .amt{color:#ffb8a4}
-.row.seg.done .lbl,.row.seg.done .amt{text-decoration:line-through;opacity:.5}
+.row.seg.done .lbl,.row.seg.done .amt{text-decoration:line-through;opacity:.4;filter:grayscale(.8)}
+/* v118 — the landed-rows fold inside a band */
+.row.donefold .lbl{opacity:.55;filter:grayscale(.8)}
+.row.donefold .amt{opacity:.45;filter:grayscale(.8)}
 /* wider than it looks: the glyph is small on purpose but the tap target has to
    clear a thumb, so the whole heading is clickable and this just aims the eye */
 .row.seg .tri{font-size:11px;width:14px;text-align:center;padding-left:0;color:var(--dim)}
@@ -732,7 +735,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .dbody .mini.role.on{border-color:var(--cyan);color:var(--cyan);border-style:solid}
 .dbody .mini.role.hint{border-color:var(--amber);color:var(--amber)}
 .acctrow.fresh{background:#241a06;border-radius:6px;padding-left:8px;padding-right:8px}
-.row.hit .lbl,.row.hit .amt{text-decoration:line-through;opacity:.6}
+.row.hit .lbl,.row.hit .amt{text-decoration:line-through;opacity:.36;filter:grayscale(.85)}
 /* A transaction off the account is not a prediction waiting to come true — it has
    already left. Struck through says so at a glance, and separates the settled half
    of a month from the half still to come.
@@ -742,7 +745,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
    call for a collapsed section: a heading that reads "Paychecks ×5" with a live
    total next to it looks like money still coming, when all five have landed. The
    strike has to reach the number or the summary lies. */
-.row.tx .lbl,.row.tx .amt{text-decoration:line-through;text-decoration-thickness:1px;opacity:.72}
+.row.tx .lbl,.row.tx .amt{text-decoration:line-through;text-decoration-thickness:1px;opacity:.4;filter:grayscale(.8)}
 .row .paid{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #2a5c58;border-radius:3px;
   color:var(--teal);font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap}
 .row .late{flex:none;margin:0 4px;padding:1px 5px;border:1px solid #6b4a12;border-radius:3px;
@@ -825,7 +828,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v117";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v118";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1238,6 +1241,18 @@ function liveStmt(){
 function payish(r){
   if(r.rule&&r.rule.notPay) return false;
   if(r.oneoff&&r.oneoff.notPay) return false;
+  /* v118 — a row built from a real transaction carries no rule at all, only
+     kind:"inc". Naming it against a rule marked "not a paycheck" used to move it
+     straight into Paychecks, because there was nothing here to ask. The tag
+     knows which rule it was named for; ask that. */
+  if(r.real&&r.tx){
+    const tg=txTag(r.tx);
+    if(tg&&tg.notPay) return false;
+    if(tg&&tg.rule){
+      const ru=(S.rules||[]).find(x=>x.id===tg.rule);
+      if(ru&&ru.notPay) return false;
+    }
+  }
   return true;
 }
 function rowBand(r){
@@ -1994,6 +2009,10 @@ function placeMenu(){
    so the Set holds the exceptions. Runtime only \u2014 which sections you folded is
    not something the other phone should inherit. */
 const segShut=new Set();
+/* v118 — which bands are showing their landed rows. Collapsed is the default:
+   the question a column answers is what is still coming. */
+const doneOpen=new Set();
+const doneKey=(k,g)=>k+"|done|"+g;
 function segOf(r){ const b=rowBand(r); return b===0?"inc":b===1?"exp":null; }
 function segKey(k,g){ return k+"|seg:"+g; }
 function rowDone(r){
@@ -2019,6 +2038,24 @@ function segHead(k,g,list){
   el.title=(shut?"Show":"Hide")+" "+(g==="inc"?"income":"expenses")+" for this month";
   el.onclick=()=>{ const key=segKey(k,g);
     segShut.has(key)?segShut.delete(key):segShut.add(key); render(); };
+  return el;
+}
+/* A fold for the rows that have already landed. Only worth drawing when the
+   band holds both kinds — if everything in it has landed the band heading is
+   already the one control, and nesting a second identical one inside it just
+   makes two taps out of one. */
+function doneHead(k,g,list){
+  const open=doneOpen.has(doneKey(k,g));
+  const tot=list.reduce((a,r)=>a+r.amount,0);
+  const cnt=list.reduce((a,r)=>a+(r.count||1),0);
+  const el=document.createElement("div");
+  el.className="row seg donefold "+g;
+  el.innerHTML=`<span class="tri${open?" up":""}">\u25be</span>
+    <span class="lbl">Already landed <span class="gn">\u00d7${cnt}</span></span>
+    <span class="amt">${money(tot)}</span>`;
+  el.title=(open?"Hide":"Show")+" what has already come off the account";
+  el.onclick=()=>{ const key=doneKey(k,g);
+    doneOpen.has(key)?doneOpen.delete(key):doneOpen.add(key); render(); };
   return el;
 }
 function foldRows(rows,crowded,k){
@@ -2163,11 +2200,23 @@ function render(anim,popTab){
     shown.forEach(r=>{ const g=segOf(r); if(g) segRows[g].push(r); });
     /* One row under a heading is a heading that costs more than it saves. */
     const segOn=g=>segRows[g].filter(r=>!r.child).length>=2;
+    /* v118 — only fold the landed rows when there is something unlanded left to
+       look at, and only when folding actually saves a line. */
+    const doneMade={};
+    const doneList=g=>segRows[g].filter(r=>!r.child&&rowDone(r));
+    const doneFold=g=>{
+      const own=segRows[g].filter(r=>!r.child), d=own.filter(rowDone);
+      return d.length>=2 && d.length<own.length;
+    };
     shown.forEach((r,ri)=>{
       const sg=segOf(r);
       if(sg&&segOn(sg)){
         if(!segMade[sg]){ segMade[sg]=1; box.appendChild(segHead(M.k,sg,segRows[sg])); }
         if(segShut.has(segKey(M.k,sg))) return;
+      }
+      if(sg&&segOn(sg)&&doneFold(sg)&&rowDone(r)){
+        if(!doneMade[sg]){ doneMade[sg]=1; box.appendChild(doneHead(M.k,sg,doneList(sg))); }
+        if(!doneOpen.has(doneKey(M.k,sg))) return;
       }
       if(r.budget){
         const p=r.plan, key=M.k+"|budget", open=expanded.has(key);
@@ -5193,8 +5242,11 @@ function recHTML(){
           <div class="f"><label>Ends</label><input type="date" data-f="end" value="${dateVal(r.end,"last")}" ${r.end?"":"disabled"}></div>
         </div>
         <div class="fg">
-          <div class="f"><label>Amount</label><input data-s="amount" data-i="0" value="${r.schedule[0]&&r.schedule[0].amount?r.schedule[0].amount:""}" placeholder="0"></div>
-          <div class="f"><label>Paid from</label><select data-f="account">
+          <div class="f"><label>Amount
+            <button class="mini chgbtn" data-chg="1" title="${r.kind==="income"?"Pay changed from a certain month on":"Amount changed from a certain month on"}">${
+              r.kind==="income"?"pay changed?":"changed later?"}</button></label>
+            <input data-s="amount" data-i="0" value="${r.schedule[0]&&r.schedule[0].amount?r.schedule[0].amount:""}" placeholder="0"></div>
+          <div class="f"><label>${r.kind==="income"?"Paid to":"Paid from"}</label><select data-f="account">
             ${acctList().map(a=>`<option value="${a[0]}" ${a[0]===(r.account||"Main")?"selected":""}>${a[1]}</option>`).join("")}
           </select></div>
         </div>
@@ -5209,6 +5261,8 @@ function recHTML(){
               <div class="f"><label>Payoff balance</label><input data-f="payoff" value="${r.payoff||""}" placeholder="—"></div>
             </div>
             <div class="steps"><div class="sh">Amount changes later on</div>
+              <div class="sh" style="opacity:.7;margin-bottom:6px;text-transform:none;letter-spacing:0">
+                Everything before the date keeps the old figure. Nothing already recorded moves.</div>
               ${r.schedule.length>1
                 ? r.schedule.slice(1).map((s,j)=>{ const i=j+1; return `<div class="step">
                     <input type="month" data-s="from" data-i="${i}" value="${s.from}" style="width:104px">
@@ -5247,6 +5301,20 @@ function wireRec(){
     };
     card.querySelector("[data-more]").onclick=ev=>{
       ev.preventDefault(); card.querySelector(".more").classList.toggle("open"); };
+    /* v118 — same as + amount change, but reachable without knowing to look
+       under More options first. Dates itself from next month, which is what
+       "my pay changed" almost always means. */
+    const chg=card.querySelector("[data-chg]");
+    if(chg) chg.onclick=e=>{
+      e.preventDefault(); e.stopPropagation();
+      const last=r.schedule[r.schedule.length-1];
+      const from=nextMonth(NOW);
+      if(!r.schedule.some(s=>s.from===from))
+        r.schedule.push({from, amount:last?last.amount:0});
+      save(); openDrawer("rec");
+      const c=document.querySelector(`[data-r="${id}"]`);
+      if(c){ c.classList.add("open"); const m=c.querySelector(".more"); if(m) m.classList.add("open"); }
+    };
     card.querySelector("[data-addstep]").onclick=()=>{
       /* a change dated at the very end of the plan is no use to anyone. Put it a
          month past the last one there is, which is where the next change goes. */
