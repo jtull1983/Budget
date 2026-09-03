@@ -738,6 +738,9 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .acctrow .ar{display:flex;gap:5px;flex:none;flex-wrap:wrap;justify-content:flex-end;max-width:60%}
 .dbody input[type="date"],.dbody input[type="month"]{min-height:34px}
 .dbody input[type="date"]::-webkit-date-and-time-value{text-align:left}
+/* v121 — matches Amount and Every to Starts' native date/month height so
+   a paycheck's one editable line doesn't run uneven on a phone */
+.pcrow .f input,.pcrow .f select{min-height:34px}
 .dbody .mini.role.on{border-color:var(--cyan);color:var(--cyan);border-style:solid}
 .dbody .mini.role.hint{border-color:var(--amber);color:var(--amber)}
 .acctrow.fresh{background:#241a06;border-radius:6px;padding-left:8px;padding-right:8px}
@@ -834,7 +837,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v120";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v121";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -5218,28 +5221,56 @@ document.addEventListener("drop",e=>{
    the day before the next period's Starts. */
 function paycheckBodyHTML(r){
   const sched=r.schedule, n=sched.length;
-  const oldRows=sched.slice(0,n-1).map((s,idx)=>{
-    const ended=dayBefore(sched[idx+1].from);
-    const starts=idx===0?dateVal(r.start,"first"):dateVal(s.from,"first");
-    return `<details class="oldperiod">
-      <summary class="mini">${starts} – ${ended}: ${money(s.amount)}</summary>
+  const oldHTML=(starts,ended,amount)=>`<details class="oldperiod">
+      <summary class="mini">${starts} – ${ended}: ${money(amount)}</summary>
       <div class="fg" style="margin-top:8px">
-        <div class="f"><label>Amount</label><input value="${s.amount}" disabled></div>
+        <div class="f"><label>Amount</label><input value="${amount}" disabled></div>
         <div class="f"><label>Every</label><input value="${r.cadence}" disabled></div>
         <div class="f"><label>Starts</label><input value="${starts}" disabled></div>
         <div class="f"><label>Ended</label><input value="${ended}" disabled></div>
       </div>
     </details>`;
+  /* v121 — the one live-editable period: index 0 still edits the exact
+     anchor date (biweekly's occurrence math needs the day), every later
+     index edits its own schedule[].from (month-only), same as before.
+     "pcrow" matches every field in the row to the tallest one — a native
+     date/month control renders taller than a plain text input or select
+     on most phones, and .dbody's usual min-height:34px only reaches the
+     date/month field, not its row-mates. */
+  const activeHTML=idx=>{
+    const s=sched[idx];
+    return `<div class="fg pcrow">
+      <div class="f"><label>Amount</label><input data-s="amount" data-i="${idx}" value="${s&&s.amount?s.amount:""}" placeholder="0"></div>
+      <div class="f"><label>Every</label><select data-f="cadence">
+        ${["monthly","biweekly","semimonthly","quarterly","annual"].map(c=>`<option ${c===r.cadence?"selected":""}>${c}</option>`).join("")}
+      </select></div>
+      ${idx===0
+        ? `<div class="f"><label>Starts</label><input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>`
+        : `<div class="f"><label>Starts</label><input type="month" data-s="from" data-i="${idx}" value="${s.from}"></div>`}
+    </div>
+    ${r.cadence==="biweekly" ? "" : `<div class="fg">
+      <div class="f"><label>Day of month</label><input type="number" min="1" max="31" data-f="day" value="${r.day||1}"></div>
+      ${(r.cadence==="quarterly"||r.cadence==="annual")
+        ? `<div class="f"><label>Months</label><input data-f="months" value="${(r.months||[1,4,7,10]).join(",")}"></div>`:""}
+    </div>`}`;
+  };
+  /* v121 — the button never moves. Everything before it is history
+     (collapsed, oldest first); everything after it is whatever's still
+     being edited. schedule[0] sits ABOVE the button and stays there for
+     good — it collapses in place the moment a second period exists,
+     instead of jumping up to join a fold that used to render before it.
+     Every later period appears BELOW the button; only the newest one is
+     open, each one before it collapses in place the same way once it's
+     superseded. That's what makes "new amount?" read as adding something
+     under the button rather than silently rewriting the row above it. */
+  const anchorHTML = n>1
+    ? oldHTML(dateVal(r.start,"first"), dayBefore(sched[1].from), sched[0].amount)
+    : activeHTML(0);
+  const belowHTML = sched.slice(1).map((s,off)=>{
+    const idx=off+1;
+    return idx===n-1 ? activeHTML(idx)
+      : oldHTML(dateVal(s.from,"first"), dayBefore(sched[idx+1].from), s.amount);
   }).join("");
-  const last=sched[n-1];
-  /* v120 — the active row's Starts used to always bind to r.start, the
-     rule's original payday anchor, so it never moved once a second amount
-     was added: the fold below said "ended 2026-09-30" while Starts still
-     read the rule's opening date from months earlier. The FIRST period is
-     still the anchor (exact date — biweekly's occurrence math depends on
-     the day, not just the month), but every period after it edits its own
-     schedule[].from (data-s="from", month-only), same as the old More
-     options stepper did — the Apply handler already wires that generically. */
   return `
     <div class="fg">
       <div class="f" style="flex:2"><label>Name</label><input data-f="name" value="${r.name}"></div>
@@ -5247,22 +5278,9 @@ function paycheckBodyHTML(r){
         ${acctList().map(a=>`<option value="${a[0]}" ${a[0]===(r.account||"Main")?"selected":""}>${a[1]}</option>`).join("")}
       </select></div>
     </div>
-    ${oldRows}
-    <div class="fg">
-      <div class="f"><label>Amount</label><input data-s="amount" data-i="${n-1}" value="${last&&last.amount?last.amount:""}" placeholder="0"></div>
-      <div class="f"><label>Every</label><select data-f="cadence">
-        ${["monthly","biweekly","semimonthly","quarterly","annual"].map(c=>`<option ${c===r.cadence?"selected":""}>${c}</option>`).join("")}
-      </select></div>
-      ${n>1
-        ? `<div class="f"><label>Starts</label><input type="month" data-s="from" data-i="${n-1}" value="${last.from}"></div>`
-        : `<div class="f"><label>Starts</label><input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>`}
-    </div>
-    ${r.cadence==="biweekly" ? "" : `<div class="fg">
-      <div class="f"><label>Day of month</label><input type="number" min="1" max="31" data-f="day" value="${r.day||1}"></div>
-      ${(r.cadence==="quarterly"||r.cadence==="annual")
-        ? `<div class="f"><label>Months</label><input data-f="months" value="${(r.months||[1,4,7,10]).join(",")}"></div>`:""}
-    </div>`}
-    <button class="mini chgbtn" data-chg="1" title="Pay changed from a certain month on" style="margin-bottom:10px">new amount?</button>`;
+    ${anchorHTML}
+    <button class="mini chgbtn" data-chg="1" title="Pay changed from a certain month on" style="margin:10px 0">new amount?</button>
+    ${belowHTML}`;
 }
 function recHTML(){
   let h=`<div class="hint">Change something here and it updates every month it applies to — except months where you typed a different number by hand. Those stay put.</div>
