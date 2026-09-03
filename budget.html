@@ -834,7 +834,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v119";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v120";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -5220,17 +5220,26 @@ function paycheckBodyHTML(r){
   const sched=r.schedule, n=sched.length;
   const oldRows=sched.slice(0,n-1).map((s,idx)=>{
     const ended=dayBefore(sched[idx+1].from);
+    const starts=idx===0?dateVal(r.start,"first"):dateVal(s.from,"first");
     return `<details class="oldperiod">
-      <summary class="mini">${dateVal(s.from,"first")} – ${ended}: ${money(s.amount)}</summary>
+      <summary class="mini">${starts} – ${ended}: ${money(s.amount)}</summary>
       <div class="fg" style="margin-top:8px">
         <div class="f"><label>Amount</label><input value="${s.amount}" disabled></div>
         <div class="f"><label>Every</label><input value="${r.cadence}" disabled></div>
-        <div class="f"><label>Starts</label><input value="${dateVal(s.from,"first")}" disabled></div>
+        <div class="f"><label>Starts</label><input value="${starts}" disabled></div>
         <div class="f"><label>Ended</label><input value="${ended}" disabled></div>
       </div>
     </details>`;
   }).join("");
   const last=sched[n-1];
+  /* v120 — the active row's Starts used to always bind to r.start, the
+     rule's original payday anchor, so it never moved once a second amount
+     was added: the fold below said "ended 2026-09-30" while Starts still
+     read the rule's opening date from months earlier. The FIRST period is
+     still the anchor (exact date — biweekly's occurrence math depends on
+     the day, not just the month), but every period after it edits its own
+     schedule[].from (data-s="from", month-only), same as the old More
+     options stepper did — the Apply handler already wires that generically. */
   return `
     <div class="fg">
       <div class="f" style="flex:2"><label>Name</label><input data-f="name" value="${r.name}"></div>
@@ -5244,8 +5253,9 @@ function paycheckBodyHTML(r){
       <div class="f"><label>Every</label><select data-f="cadence">
         ${["monthly","biweekly","semimonthly","quarterly","annual"].map(c=>`<option ${c===r.cadence?"selected":""}>${c}</option>`).join("")}
       </select></div>
-      <div class="f"><label>${r.cadence==="biweekly"?"Starts — a payday you know":"Starts"}</label>
-        <input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>
+      ${n>1
+        ? `<div class="f"><label>Starts</label><input type="month" data-s="from" data-i="${n-1}" value="${last.from}"></div>`
+        : `<div class="f"><label>Starts</label><input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>`}
     </div>
     ${r.cadence==="biweekly" ? "" : `<div class="fg">
       <div class="f"><label>Day of month</label><input type="number" min="1" max="31" data-f="day" value="${r.day||1}"></div>
@@ -5417,7 +5427,10 @@ function wireRec(){
          that would appear only on the phone. Normalising costs nothing either way. */
       if(r.cadence==="biweekly") r.anchor=dateVal(r.start,"first");
       if(g("months")) r.months=g("months").value.split(",").map(n=>+n.trim()).filter(n=>n>=1&&n<=12);
-      r.start=g("start").value.trim()||r.start;
+      /* v120 — a paycheck with more than one period has no [data-f="start"]
+         at all; the active period's date lives in a [data-s="from"] instead,
+         already collected below. Guard so Apply doesn't crash reading it. */
+      if(g("start")) r.start=g("start").value.trim()||r.start;
       /* v119 — a paycheck card carries no indef/end field at all; its r.end
          stays whatever it already was (null, for a true paycheck). */
       if(g("indef")) r.end=g("indef").checked?null:(g("end").value.trim()||null);
