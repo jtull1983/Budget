@@ -509,6 +509,12 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* v118 — the landed-rows fold inside a band */
 .row.donefold .lbl{opacity:.55;filter:grayscale(.8)}
 .row.donefold .amt{opacity:.45;filter:grayscale(.8)}
+/* v119 — a superseded paycheck period, collapsed under <details> */
+.oldperiod{opacity:.55;filter:grayscale(.8);margin-bottom:8px}
+.oldperiod summary{cursor:pointer;list-style:none}
+.oldperiod summary::-webkit-details-marker{display:none}
+.oldperiod summary::before{content:"▸ ";}
+.oldperiod[open] summary::before{content:"▾ ";}
 /* wider than it looks: the glyph is small on purpose but the tap target has to
    clear a thumb, so the whole heading is clickable and this just aims the eye */
 .row.seg .tri{font-size:11px;width:14px;text-align:center;padding-left:0;color:var(--dim)}
@@ -828,7 +834,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v118";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v119";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1048,6 +1054,12 @@ function syncFirstStep(r){
   r.schedule.sort((a,b)=>cmpYM(a.from,b.from));
 }
 function amountAt(rule,k){ let v=0; for(const s of rule.schedule) if(cmpYM(s.from,k)<=0) v=s.amount; return v; }
+/* v119 — the last day of the month before a YYYY-MM period starts. Used to
+   show "Ended" on a superseded paycheck period once a newer one is entered. */
+function dayBefore(ym){
+  const {y,m}=parseYM(ym), d=new Date(y,m-1,0);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
 function inWindow(rule,k){
   /* start and end may carry a day now. Compare months here and let occDates()
      handle the day — slicing matters: "2026-08" < "2026-08-07" as raw strings,
@@ -5198,6 +5210,50 @@ document.addEventListener("drop",e=>{
   if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length) ingestFiles(e.dataTransfer.files);
 });
 
+/* v119 — the simplified card body for a true paycheck (kind==="income" &&
+   !notPay). Off-book, indefinite, manual, yearly-limit and payoff-balance
+   never applied to a paycheck; they stayed only because the editor was
+   shared with every other recurring item. Superseded schedule periods fold
+   into a collapsed, greyed <details> with an auto-filled "Ended" date —
+   the day before the next period's Starts. */
+function paycheckBodyHTML(r){
+  const sched=r.schedule, n=sched.length;
+  const oldRows=sched.slice(0,n-1).map((s,idx)=>{
+    const ended=dayBefore(sched[idx+1].from);
+    return `<details class="oldperiod">
+      <summary class="mini">${dateVal(s.from,"first")} – ${ended}: ${money(s.amount)}</summary>
+      <div class="fg" style="margin-top:8px">
+        <div class="f"><label>Amount</label><input value="${s.amount}" disabled></div>
+        <div class="f"><label>Every</label><input value="${r.cadence}" disabled></div>
+        <div class="f"><label>Starts</label><input value="${dateVal(s.from,"first")}" disabled></div>
+        <div class="f"><label>Ended</label><input value="${ended}" disabled></div>
+      </div>
+    </details>`;
+  }).join("");
+  const last=sched[n-1];
+  return `
+    <div class="fg">
+      <div class="f" style="flex:2"><label>Name</label><input data-f="name" value="${r.name}"></div>
+      <div class="f"><label>Paid into</label><select data-f="account">
+        ${acctList().map(a=>`<option value="${a[0]}" ${a[0]===(r.account||"Main")?"selected":""}>${a[1]}</option>`).join("")}
+      </select></div>
+    </div>
+    ${oldRows}
+    <div class="fg">
+      <div class="f"><label>Amount</label><input data-s="amount" data-i="${n-1}" value="${last&&last.amount?last.amount:""}" placeholder="0"></div>
+      <div class="f"><label>Every</label><select data-f="cadence">
+        ${["monthly","biweekly","semimonthly","quarterly","annual"].map(c=>`<option ${c===r.cadence?"selected":""}>${c}</option>`).join("")}
+      </select></div>
+      <div class="f"><label>${r.cadence==="biweekly"?"Starts — a payday you know":"Starts"}</label>
+        <input type="date" data-f="start" value="${dateVal(r.start,"first")}"></div>
+    </div>
+    ${r.cadence==="biweekly" ? "" : `<div class="fg">
+      <div class="f"><label>Day of month</label><input type="number" min="1" max="31" data-f="day" value="${r.day||1}"></div>
+      ${(r.cadence==="quarterly"||r.cadence==="annual")
+        ? `<div class="f"><label>Months</label><input data-f="months" value="${(r.months||[1,4,7,10]).join(",")}"></div>`:""}
+    </div>`}
+    <button class="mini chgbtn" data-chg="1" title="Pay changed from a certain month on" style="margin-bottom:10px">new amount?</button>`;
+}
 function recHTML(){
   let h=`<div class="hint">Change something here and it updates every month it applies to — except months where you typed a different number by hand. Those stay put.</div>
   <div class="fg" style="margin-bottom:8px">
@@ -5216,11 +5272,13 @@ function recHTML(){
   </div>`;
   S.rules.forEach(r=>{
     const cur=amountAt(r,S.meta.end);
+    const isPaycheck=r.kind==="income"&&!r.notPay;   /* v119 — simplified editor */
     h+=`<div class="card" data-r="${r.id}">
       <div class="chead"><span class="car">▸</span><span class="nm">${r.name}</span>
         <span class="cad">${r.cadence}${r.manual?" · manual":""}${r.offbook?" · off-book":""}</span>
         <span class="am" style="color:${cur>=0?"var(--teal)":"#f0a894"}">${money(cur)}</span></div>
       <div class="cbody">
+        ${isPaycheck ? paycheckBodyHTML(r) : `
         <div class="fg">
           <div class="f" style="flex:2"><label>Name</label><input data-f="name" value="${r.name}"></div>
           <div class="f"><label>Money</label><select data-f="kind">
@@ -5272,7 +5330,7 @@ function recHTML(){
               <button class="mini" data-addstep="1">+ amount change</button>
             </div>
           </div>
-        </div>
+        </div>`}
         <div class="crow"><button class="mini" data-apply="1">Apply</button>
           <button class="mini" data-dup="1">Duplicate</button>
           <div style="flex:1"></div><button class="del" data-del="1">Delete item</button></div>
@@ -5286,7 +5344,10 @@ function wireRec(){
     const id=card.dataset.r,r=S.rules.find(x=>x.id===id);
     card.querySelector(".chead").onclick=()=>card.classList.toggle("open");
     const g=f=>card.querySelector(`[data-f="${f}"]`);
-    g("indef").onchange=e=>{const ee=g("end");ee.disabled=e.target.checked;if(e.target.checked)ee.value="";};
+    /* v119 — a true paycheck's card no longer carries offbook/indef/manual/
+       cap/payoff/kind/day/months/end/more; every read of them below is
+       guarded so the shared Apply and cadence handlers still work. */
+    if(g("indef")) g("indef").onchange=e=>{const ee=g("end");ee.disabled=e.target.checked;if(e.target.checked)ee.value="";};
     /* Which field sits beside "Every" is decided when the card is drawn: a day of the
        month for monthly, an exact date for biweekly. Cadence was only read on Apply,
        so switching a new rule to biweekly left "Day of month" on screen and there was
@@ -5294,12 +5355,13 @@ function wireRec(){
        Redraw on change, carrying the two fields most likely to be half-typed. */
     g("cadence").onchange=()=>{
       r.name=g("name").value.trim()||r.name;
-      r.kind=g("kind").value;
+      if(g("kind")) r.kind=g("kind").value;
       r.cadence=g("cadence").value;
       save(); openDrawer("rec");
       const c=document.querySelector(`[data-r="${id}"]`); if(c) c.classList.add("open");
     };
-    card.querySelector("[data-more]").onclick=ev=>{
+    const moreBtn=card.querySelector("[data-more]");
+    if(moreBtn) moreBtn.onclick=ev=>{
       ev.preventDefault(); card.querySelector(".more").classList.toggle("open"); };
     /* v118 — same as + amount change, but reachable without knowing to look
        under More options first. Dates itself from next month, which is what
@@ -5315,7 +5377,8 @@ function wireRec(){
       const c=document.querySelector(`[data-r="${id}"]`);
       if(c){ c.classList.add("open"); const m=c.querySelector(".more"); if(m) m.classList.add("open"); }
     };
-    card.querySelector("[data-addstep]").onclick=()=>{
+    const addstepBtn=card.querySelector("[data-addstep]");
+    if(addstepBtn) addstepBtn.onclick=()=>{
       /* a change dated at the very end of the plan is no use to anyone. Put it a
          month past the last one there is, which is where the next change goes. */
       const last=r.schedule[r.schedule.length-1];
@@ -5342,7 +5405,7 @@ function wireRec(){
     };
     card.querySelector("[data-apply]").onclick=()=>{
       r.name=g("name").value.trim()||r.name;
-      r.kind=g("kind").value;
+      if(g("kind")) r.kind=g("kind").value;
       r.cadence=g("cadence").value;
       if(g("day")) r.day=+g("day").value||1;
       /* Biweekly used to carry a separate "any payday you know" beside the cadence,
@@ -5355,12 +5418,14 @@ function wireRec(){
       if(r.cadence==="biweekly") r.anchor=dateVal(r.start,"first");
       if(g("months")) r.months=g("months").value.split(",").map(n=>+n.trim()).filter(n=>n>=1&&n<=12);
       r.start=g("start").value.trim()||r.start;
-      r.end=g("indef").checked?null:(g("end").value.trim()||null);
-      r.manual=g("manual").checked;
+      /* v119 — a paycheck card carries no indef/end field at all; its r.end
+         stays whatever it already was (null, for a true paycheck). */
+      if(g("indef")) r.end=g("indef").checked?null:(g("end").value.trim()||null);
+      if(g("manual")) r.manual=g("manual").checked;
       r.account=g("account").value;
-      r.offbook=g("offbook").checked;
-      r.cap=parseFloat(g("cap").value)||null;
-      r.payoff=parseFloat(g("payoff").value)||null;
+      if(g("offbook")) r.offbook=g("offbook").checked;
+      if(g("cap")) r.cap=parseFloat(g("cap").value)||null;
+      if(g("payoff")) r.payoff=parseFloat(g("payoff").value)||null;
       card.querySelectorAll('[data-s="from"]').forEach(i=>{r.schedule[+i.dataset.i].from=i.value.trim();});
       card.querySelectorAll('[data-s="amount"]').forEach(i=>{
         const v=signed(i.value,r.kind==="income"?1:-1); r.schedule[+i.dataset.i].amount=v===null?0:v;});
