@@ -1,4 +1,4 @@
-<!-- JART Training Log — v1.9.2 -->
+<!-- JART Training Log — v1.9.3 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -343,7 +343,7 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
 <input type="file" id="fileIn" accept=".json" style="display:none">
 
 <script>
-const VERSION='1.9.2';
+const VERSION='1.9.3';
 const KEY='jart_workout_v1';
 const SEEDV=6;   // bump when seed() targets or day order change
 let bootErr=null;
@@ -544,7 +544,7 @@ function compact(){
           hold:z.hold||undefined}))}));
     return c; };
   return {v:1,savedAt:new Date().toISOString(),prefs:S.prefs,
-    days:S.days.map(d=>({id:d.id,name:d.name,order:d.order})),
+    days:S.days.map(d=>({id:d.id,name:d.name,order:d.order,warmup:d.warmup})),
     ex:ov, sessions:(S.sessions||[]).map(s=>strip(s)), current:strip(S.current,true),
     rx:S.prescriptions, log:S.log||[], seedv:SEEDV};
 }
@@ -554,7 +554,12 @@ function expand(c){
   const fresh=((c.seedv||0)<SEEDV);   // seed changed under them — take the new program
   S2.prefs=Object.assign(S2.prefs,c.prefs||{});
   if(!S2.prefs.base) S2.prefs.base=seed().prefs.base;
-  if(c.days&&c.days.length&&!fresh) S2.days=c.days;
+  if(c.days&&c.days.length&&!fresh){
+    S2.days=c.days;
+    // saves written before v1.9.3 dropped the warm-up; put it back from seed
+    S2.days.forEach(d=>{ if(d.warmup==null){
+      const b=seed().days.find(x=>x.id===d.id); if(b) d.warmup=b.warmup; } });
+  }
   if(c.days&&fresh){ // keep any days they built themselves, refresh the two built-ins
     c.days.filter(d=>!S2.days.some(x=>x.id===d.id)).forEach(d=>{
       d.order=(d.order||[]).map(b=>b.filter(k=>k!=='tester')).filter(b=>b.length);
