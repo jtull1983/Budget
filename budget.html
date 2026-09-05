@@ -837,7 +837,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v123";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v124";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -6304,6 +6304,32 @@ nodata:[
  "someone reconnect the card so I can go back to being insufferable.",
  "no numbers tonight. enjoy the silence. it won't last.",
  "the feed is down and I'm just a guy with a schedule now."],
+turnover:[
+ "last cycle's shut, but the stragglers are still posting. giving it a minute.",
+ "the books are closing on last cycle. a few charges are still finding their way home.",
+ "cycle's over, receipts are still landing. I don't like to call it early.",
+ "one cycle just ended and the next hasn't really started. we're in the hallway.",
+ "counting up the last of it. the number still moves a little.",
+ "old cycle's wrapping up. I'd rather say roughly than say wrong.",
+ "still tallying last cycle. the card takes its time and so will I.",
+ "in between cycles. the old one's nearly totalled, the new one's barely awake.",
+ "waiting on the last few charges to post before I call last cycle done.",
+ "settling up. a couple of charges are still in the mail, so to speak.",
+ "the cycle closed on the 3rd. the paperwork did not. \u{1F4C4}",
+ "this is the quiet part between months. I'm doing sums.",
+ "last cycle's nearly in the books. holding off on the verdict.",
+ "the register's closing. give it a day or two to be honest with you.",
+ "charges from last cycle are still trickling in. patience, briefly.",
+ "the month turned but the totals haven't caught up. that's normal.",
+ "I'm adding up the tail end of last cycle. nearly there.",
+ "we're between numbers right now. here's my best guess.",
+ "old cycle's closing out. the new one gets a proper introduction shortly.",
+ "still reconciling. I'd hate to hand you a number that changes tomorrow.",
+ "the last of last cycle is posting. I'll have something firm soon.",
+ "wrapping up the old month. the new one hasn't earned an opinion yet.",
+ "a few late charges are still arriving. holding the final number.",
+ "closing the books slowly, on purpose. late receipts are a real thing.",
+ "last cycle's total is settling. don't hold me to the cent yet."],
 cycle:[
  "ah yes, a new billing cycle has begun. new possibilities for savings or horrific debt await. it's like a choose your own adventure! \u{1F4D6}",
  "fresh cycle, clean slate, zero dollars spent. this is the best y'all will ever look. cherish it. \u2728",
@@ -6931,6 +6957,27 @@ nodata:[
  "no data means I can't roast you and that's the real tragedy here.",
  "nothing to report because nothing is connected. fix it or I start guessing.",
  "I'm a budget app with no budget. do you understand how humiliating that is."],
+turnover:[
+ "cycle's shut but the damn stragglers are still posting. hold your applause.",
+ "we're in the in-between. old cycle's dying, new one hasn't got its shoes on.",
+ "still counting the wreckage from last cycle. give me a damn minute.",
+ "receipts are still rolling in from last cycle like bad news at a funeral.",
+ "the old cycle is closed but not yet buried. a few charges are still crawling home.",
+ "I'd give you a hard number but the card's still coughing up charges.",
+ "purgatory. that's where we are. between cycles, counting stragglers.",
+ "last cycle's almost totalled. almost. don't make me guess and then be wrong.",
+ "the books are closing and something always shows up late. always.",
+ "one cycle down, one not started, and me in the middle doing arithmetic.",
+ "still settling up. I refuse to be confidently incorrect about money.",
+ "the cycle ended. the spending didn't get the memo yet. checking.",
+ "give it a day. late charges are still crawling out of the woodwork.",
+ "I'm not calling it yet. last time I rushed a number it made a liar out of me.",
+ "the old cycle's in hospice. the new one's not born. we wait.",
+ "charges still posting from last cycle. the audacity of a delayed transaction.",
+ "closing out the old month. don't ask me for a final number, I'll only lie.",
+ "still doing the math on last cycle. it's not pretty but it's not final either.",
+ "the tail end of last cycle is still arriving. like it damn well lives here now.",
+ "between cycles. no verdict yet. sharpen your excuses in the meantime."],
 cycle:[
  "new cycle, clean slate, same two beautiful idiots. let's not fuck it up.",
  "counter's back to zero and so is my patience. fresh start for both, I guess.",
@@ -7216,9 +7263,19 @@ function cyclePos(d){
    of the cycle is left to pay for. `pace` is 1.0 when spending is dead on track
    to land exactly on target; 1.5 means you're heading for half again over. */
 function nudgeBucket(d){
-  /* the day the cycle turns over gets its own announcement, and it fires whether
-     or not there's a target or a feed yet — there's nothing to measure on day one */
-  if(d.getDate()===CYCLE_DAY) return "cycle";
+  /* v124 — the turnover days get their own voice.
+     liveCycle() holds the CLOSED cycle open for GRACE_DAYS, so on days
+     CYCLE_DAY..CYCLE_DAY+GRACE_DAYS-1 every number reachable from here still
+     belongs to the cycle that just shut. Returning "cycle" on CYCLE_DAY meant
+     announcing a clean slate and then letting buddyTail() quote the old
+     cycle's five-figure total beside it, which is how "new cycle, clean
+     slate — we're at $12,063 of $5,000 this cycle" happened.
+     So the grace days say what is actually true: last cycle's bill is still
+     settling, here is roughly where it lands, the new one is coming. The
+     clean-slate announcement waits for the first day the new cycle is live. */
+  const dom=d.getDate();
+  if(dom>=CYCLE_DAY&&dom<CYCLE_DAY+GRACE_DAYS) return "turnover";
+  if(dom===CYCLE_DAY+GRACE_DAYS) return "cycle";
   const tgt=effTarget(liveCycle(d).spend), lt=liveTotal();
   if(!tgt||lt===null) return null;
   const pct=Math.abs(lt)/tgt;
@@ -7230,7 +7287,8 @@ function nudgeBucket(d){
      gets a voice once a fifth of the budget has actually gone.
      This replaces a `day<=3` guard that could never fire — liveCycle() holds the
      PREVIOUS cycle open for GRACE_DAYS, so the earliest day of a new cycle this
-     function is ever handed is day 5. The guard read correctly and was dead. */
+     function is ever handed is CYCLE_DAY+GRACE_DAYS — the 8th, not the 5th as
+     this note used to say. The guard read correctly and was dead either way. */
   const loud=pct>=0.20;
   if(loud&&pace>=1.35) return "hot";        /* on course to blow straight past it */
   if(pct>=0.80&&left<=8) return "close";    /* nearly there, nearly out of month */
@@ -7247,6 +7305,12 @@ function buddyTail(b){
   const spent=money(Math.abs(lt));
   const tgt=effTarget(liveCycle().spend);
   const of=tgt?" of "+money(tgt):"";
+  /* v124 — the turnover days. During grace this total IS the old cycle, and
+     the last charges are still posting, so it goes out as an estimate and
+     never against the target: that target belonged to a cycle that is over. */
+  if(b==="turnover")
+    return " looks like your old card bill lands around "+spent
+          +". I'll let you know when the new cycle really gets going.";
   if(b==="silent") return " last number I had was "+spent+of+" on this cycle.";
   let out=" we're at "+spent+of+" on the card this cycle.";
   /* The pace, out loud. A total on its own sounds fine and isn't — what makes it
@@ -7539,6 +7603,7 @@ async function ntfyPending(){
 const BACK="(back at last) ";
 const TAGS={good:"tada",early:"eyes",hot:"rotating_light",blown:"fire",
             close:"crossed_fingers",cycle:"calendar",silent:"see_no_evil",
+            turnover:"hourglass_flowing_sand",
             nodata:"grey_question"};
 
 /* What the message would SAY, boiled down. Re-queue only when this changes —
@@ -7546,7 +7611,7 @@ const TAGS={good:"tada",early:"eyes",hot:"rotating_light",blown:"fire",
 /* Bump this whenever the WORDING changes shape. Without it, messages already
    sitting at ntfy keep the old format until the number happens to move — a build
    that adds something to every message would take a day to actually show up. */
-const NUDGE_FMT="pace-2";
+const NUDGE_FMT="pace-3";
 function nudgeSig(d){
   const b=nudgeBucket(d); if(!b) return null;
   const lt=liveTotal();
