@@ -731,6 +731,9 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 .bgrow .nm{flex:1;font-size:12.5px}
 .bgrow .am{min-width:74px;text-align:right;font-weight:700;font-size:13px}
 .bgrow .mini{padding:2px 10px;font-size:14px;line-height:1.2}
+.bgsave{margin-top:16px}
+.bgsave .mini{width:100%;padding:11px 10px;font-size:11px}
+.bgsave .mini[disabled]{opacity:.45}
 .acctrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .acctrow .an{flex:1;min-width:0;font-size:12.5px}
 .acctrow .an b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -837,7 +840,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v124";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v125";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3164,7 +3167,51 @@ function catBudget(){
 }
 function budgetTotal(){ const b=catBudget();
   return Object.keys(b).reduce((a,k)=>a+(Math.abs(+b[k])||0),0); }
-function budgetSync(){ applyTarget(budgetTotal(),bgScope,NOW); save(); render(); paintBudget(); }
+/* v125 — the panel edits a draft, not the file.
+   Everything below used to write straight through: budgetSync() ran
+   applyTarget() and save() on every tap, and the scope buttons re-applied
+   the current total under the new reach. That made the ORDER you touched
+   the controls in decide what happened to your history, and the default
+   reach was "all" — so typing a number before choosing a reach flattened
+   every period in the file, permanently. Now nothing leaves this panel
+   until Save. */
+function bgWork(){ if(!bgDraft) bgDraft=Object.assign({},catBudget()); return bgDraft; }
+function bgTotal(){ const b=bgWork();
+  return Object.keys(b).reduce((a,k)=>a+(Math.abs(+b[k])||0),0); }
+/* an edit happened — mark it and repaint, but write nothing */
+function budgetTouch(){ bgDirty=true; paintBudget(); }
+/* the reach, short enough to sit on a button */
+function bgScopeShort(){
+  const m=prettySpend(NOW), n=prettySpend(nextMonth(NOW));
+  return bgScope==="just"     ? "for "+m+" only"
+       : bgScope==="from"     ? "from "+m+" on"
+       : bgScope==="justNext" ? "for "+n+" only"
+       : bgScope==="fromNext" ? "from "+n+" on"
+       : "for every month, past and future";
+}
+function budgetSave(){
+  const v=bgTotal();
+  /* "All of it" is the only reach that rewrites months you have already
+     been through. If there is real history to lose, say so out loud
+     rather than eating it and leaving you to notice weeks later. */
+  const periods=(bgPrev&&bgPrev.length)?bgPrev.length:targetList().length;
+  if(bgScope==="all"&&periods>1&&
+     !confirm("This sets "+money(v)+" for EVERY month, past and future. "
+             +"The "+periods+" budget periods already in this file will be "
+             +"flattened into one and the earlier amounts are not kept.\n\n"
+             +"Use \"This month on\" instead if you only meant from now."))
+    return;
+  applyTarget(v,bgScope,NOW);
+  S.meta.catBudget=Object.assign({},bgWork());
+  save(); render();
+  /* the saved state becomes the new baseline, so a second edit in the same
+     session measures from what is now on file rather than from where the
+     panel first opened */
+  bgPrev=targetList().map(e=>({from:e.from,amt:e.amt}));
+  bgBase=Object.assign({},bgWork());
+  bgDirty=false; paintBudget();
+  toast("Saved — "+money(v)+" "+bgScopeShort());
+}
 
 function bgScopeHint(){
   const m=prettySpend(NOW), n=prettySpend(nextMonth(NOW));
@@ -3175,11 +3222,20 @@ function bgScopeHint(){
        : `Every month, past and future — one number for the whole file.`;
 }
 let bgBase=null;                       /* the amounts as they were when the panel opened */
-let bgScope="all";                     /* v115 — how far a change reaches */
+/* v125 — was "all", which rewrote every month in the file the moment you
+   typed a number. "from" is what people mean by changing their budget. */
+let bgScope="from";                    /* v115 — how far a change reaches */
 let bgPrev=null;                       /* the periods as they were when it opened */
+let bgDraft=null;                      /* v125 — edits live here until Save */
+let bgDirty=false;                     /* v125 — is there anything to save? */
 function budgetHTML(){
-  const b=catBudget();
-  bgBase=Object.assign({},b);
+  /* v125 — every open starts a clean draft off what is actually on file,
+     and resets the reach to the safe one. An abandoned edit from last time
+     must not be sitting here waiting to be saved by accident. */
+  bgDraft=Object.assign({},catBudget());
+  bgBase=Object.assign({},bgDraft);
+  bgDirty=false; bgScope="from";
+  const b=bgDraft;
   bgPrev=targetList().map(e=>({from:e.from,amt:e.amt}));
   const cats=Object.keys(b);
   return `<div class="flag"><div class="ft">What the card is allowed</div><div class="fb">
@@ -3187,11 +3243,13 @@ function budgetHTML(){
       measured against, and the number Buddy quotes at 8pm.</div></div>
 
     <div class="bgtot"><span class="k">CC budget</span>
-      <span class="v" id="bgTotal">${money(budgetTotal())}</span></div>
+      <span class="v" id="bgTotal">${money(bgTotal())}</span></div>
+    <div class="hint" id="bgDirty" style="display:none;color:var(--amber)">
+      Not saved yet — nothing below has touched your file.</div>
 
     <div class="fg" style="margin:10px 0 4px">
       <div class="f"><label>Set it to a number</label>
-        <input id="bgSet" placeholder="${budgetTotal()}"></div>
+        <input id="bgSet" placeholder="${bgTotal()}"></div>
     </div>
     <div class="hint" style="margin-bottom:14px">Type what you want the whole thing to
       be and everything below moves to fit, keeping the same shape.</div>
@@ -3217,24 +3275,38 @@ function budgetHTML(){
     <div class="crow" style="margin-top:14px">
       <button class="mini" id="bgEven">Even it out</button>
       <button class="mini" id="bgReset">Start from spending</button>
-    </div>`;
+    </div>
+
+    <div class="bgsave"><button class="mini" id="bgSave" disabled>Saved</button></div>
+    <div class="hint" style="margin-top:6px">Nothing here changes your budget
+      until you press Save. Close without saving and the file is untouched.</div>`;
 }
 function paintBudget(){
-  const b=catBudget();
-  const t=document.getElementById("bgTotal"); if(t) t.textContent=money(budgetTotal());
+  const b=bgWork();
+  const t=document.getElementById("bgTotal"); if(t) t.textContent=money(bgTotal());
   document.querySelectorAll("#bgRows .bgrow").forEach(row=>{
     const c=row.dataset.c, am=row.querySelector(".am");
     if(am) am.textContent=money(b[c]||0);
   });
-  const set=document.getElementById("bgSet"); if(set) set.placeholder=String(budgetTotal());
+  const set=document.getElementById("bgSet"); if(set) set.placeholder=String(bgTotal());
+  /* the button says what pressing it will actually do, reach included —
+     the whole bug was not being able to tell */
+  const sv=document.getElementById("bgSave");
+  if(sv){ sv.disabled=!bgDirty;
+          sv.textContent=bgDirty?("Save "+money(bgTotal())+" "+bgScopeShort()):"Saved";
+          sv.classList.toggle("on",bgDirty); }
+  const dot=document.getElementById("bgDirty");
+  if(dot) dot.style.display=bgDirty?"":"none";
+  const hint=document.getElementById("bgScopeHint");
+  if(hint) hint.textContent=bgScopeHint();
 }
 /* scale every category so the whole thing lands on `want`, to the nearest $50,
    with the rounding leftover pushed onto the biggest line */
 function budgetScaleTo(want){
-  const base=bgBase||catBudget();
+  const base=bgBase||bgWork();
   const from=Object.keys(base).reduce((a,k)=>a+(Math.abs(+base[k])||0),0);
   if(!from) return;
-  const f=want/from, b=catBudget();
+  const f=want/from, b=bgWork();
   let sum=0, biggest=null, bigv=-1;
   Object.keys(base).forEach(k=>{
     const v=Math.max(0,Math.round(Math.abs(base[k])*f/50)*50);
@@ -3242,7 +3314,7 @@ function budgetScaleTo(want){
     if(v>bigv){ bigv=v; biggest=k; }
   });
   if(biggest&&sum!==want) b[biggest]=Math.max(0,b[biggest]+(want-sum));
-  budgetSync();
+  budgetTouch();
 }
 function wireBudget(){
   document.querySelectorAll("#bgScope [data-scope]").forEach(btn=>{
@@ -3250,23 +3322,24 @@ function wireBudget(){
       bgScope=btn.dataset.scope;
       document.querySelectorAll("#bgScope [data-scope]").forEach(o=>
         o.classList.toggle("on",o.dataset.scope===bgScope));
-      const hint=document.getElementById("bgScopeHint");
-      if(hint) hint.textContent=bgScopeHint();
-      /* re-apply what is already on screen under the new reach, so picking a
-         scope after typing a number does the thing rather than waiting for
-         another edit that may never come */
-      budgetSync();
+      /* v125 — choosing a reach applies NOTHING. It used to re-run
+         applyTarget() with the current total, which is why picking
+         "This month on" after typing a number looked like it did nothing:
+         the periods it produced held the same amount as the ones before
+         them, and normTargets() merges equal runs. The reach is now just a
+         setting that Save reads. */
+      paintBudget();
     };
   });
   const pct=document.getElementById("bgPct"), lab=document.getElementById("bgPctLab");
   const apply=()=>{
     const p=+pct.value;
     lab.textContent=(p>0?"+":"")+p+"%";
-    const base=bgBase||catBudget(), b=catBudget();
+    const base=bgBase||bgWork(), b=bgWork();
     Object.keys(base).forEach(k=>{
       b[k]=Math.max(0,Math.round(Math.abs(base[k])*(1+p/100)/50)*50);
     });
-    budgetSync();
+    budgetTouch();
   };
   pct.oninput=apply; pct.onchange=apply;
 
@@ -3274,39 +3347,43 @@ function wireBudget(){
   set.onchange=()=>{
     const want=Math.abs(parseFloat(String(set.value).replace(/[^0-9.]/g,""))||0);
     if(!want) return;
-    const base=bgBase||catBudget();
+    const base=bgBase||bgWork();
     const from=Object.keys(base).reduce((a,k)=>a+(Math.abs(+base[k])||0),0)||1;
     budgetScaleTo(want);
     /* park the slider on the nearest 5% so the two controls agree */
     const p=Math.round(((want/from)-1)*100/5)*5;
     pct.value=Math.max(-50,Math.min(100,p));
     lab.textContent=(pct.value>0?"+":"")+pct.value+"%";
-    set.value=""; toast("CC budget set to "+money(budgetTotal()));
+    set.value=""; toast(money(bgTotal())+" \u2014 press Save to keep it");
   };
 
   document.querySelectorAll("#bgRows .bgrow [data-step]").forEach(btn=>{
     btn.onclick=()=>{
-      const c=btn.closest(".bgrow").dataset.c, b=catBudget();
+      const c=btn.closest(".bgrow").dataset.c, b=bgWork();
       b[c]=Math.max(0,(Math.abs(+b[c])||0)+(+btn.dataset.step));
       bgBase=Object.assign({},b);          /* a hand nudge becomes the new baseline */
       pct.value=0; lab.textContent="0%";
-      budgetSync();
+      budgetTouch();
     };
   });
 
   document.getElementById("bgEven").onclick=()=>{
-    const b=catBudget(), keys=Object.keys(b), tot=budgetTotal();
+    const b=bgWork(), keys=Object.keys(b), tot=bgTotal();
     const each=Math.max(0,Math.round(tot/keys.length/50)*50);
     keys.forEach(k=>b[k]=each);
     bgBase=Object.assign({},b); pct.value=0; lab.textContent="0%";
-    budgetSync(); toast("Split evenly");
+    budgetTouch(); toast("Split evenly \u2014 press Save to keep it");
   };
   document.getElementById("bgReset").onclick=()=>{
-    S.meta.catBudget=seedCatBudget();
-    bgBase=Object.assign({},catBudget()); pct.value=0; lab.textContent="0%";
-    budgetSync();
-    toast("Back to the shape of your spending");
+    /* into the draft, not onto the file */
+    bgDraft=seedCatBudget();
+    bgBase=Object.assign({},bgDraft); pct.value=0; lab.textContent="0%";
+    budgetTouch();
+    toast("Back to the shape of your spending \u2014 press Save to keep it");
   };
+  const sv=document.getElementById("bgSave");
+  if(sv) sv.onclick=()=>{ if(bgDirty) budgetSave(); };
+  paintBudget();
 }
 
 function labelBlock(which,title){
