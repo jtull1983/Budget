@@ -840,7 +840,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v129";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v130";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -6441,6 +6441,9 @@ async function sfinPull(quiet){
        nothing here can bloat the gist. */
     const SKIP_MAX=30, SKIP_NEAR=10*86400000;
     const skip=[], gSkip=[];
+    /* v130 — how many times each row-shape has been seen in THIS response,
+       and whether the bridge is giving us real transaction ids. */
+    const shapeN={}; let idsSeen=0, idsMissing=0;
     /* remember what's on the token so the roles can be set without another call */
     const acctWas=(S.meta.acctList||[]).slice();
     S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
@@ -6496,13 +6499,36 @@ async function sfinPull(quiet){
             note("outside cycle",skip);
           return;
         }
-        /* a payment is not spending, so it never counts toward the cycle —
+        /* A payment is not spending, so it never counts toward the cycle —
            but it IS most of why the paper bill reads differently, so it is
-           recorded rather than vanishing */
-        if(SFIN_PAYMENT.test(desc)){ note("payment",inLive?skip:gSkip); return; }
+           recorded rather than vanishing.
+           v130 — and it must actually BE a payment. This tested the
+           description alone, so "USAA INSURANCE PAYMENT WWW.USAA.COM TX" —
+           an insurance bill with the word in its merchant name — was thrown
+           out twice, $160.29 off the September statement. The sign already
+           tells them apart: a card payment is a credit (amt < 0), a charge
+           is a charge. Nothing had to be asked of the description that the
+           amount was not already answering. */
+        if(amt<0&&SFIN_PAYMENT.test(desc)){ note("payment",inLive?skip:gSkip); return; }
         if(!amt) return;
-        /* no stable ids from the bridge — match on what the row actually is */
-        const sig=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
+        /* v130 — identity, best first.
+           The old key was `posted|amount|description`, which is an
+           ACROSS-pull test applied to WITHIN-pull data. A feed response is a
+           list of transactions, not a set: if it names the same charge
+           twice, there are two charges. Two cardholders each spending $5.00
+           at SQ *B JAY & FAMILY on Aug 30 produced one identical shape, and
+           the second was dropped as a re-send.
+             1. SimpleFIN's transaction id — unique per charge, stable across
+                pulls, and the only thing that answers both questions at once.
+             2. Failing that, the shape plus its Nth appearance in this
+                response. The two $5 charges become #1 and #2 and both
+                survive; a re-send next pull rebuilds the same keys and still
+                matches. */
+        const tid=t.id?String(t.id):"";
+        if(tid) idsSeen++; else idsMissing++;
+        const shape=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
+        const nth=(shapeN[shape]=(shapeN[shape]||0)+1);
+        const sig=tid?("id:"+tid):(shape+"#"+nth);
         const row={desc, amt, date:new Date(when).toISOString().slice(0,10),
                    cat:categorize(desc).cat};
         if(inLive){ if(seen[sig]) return; seen[sig]=1; rows.push(row); }
@@ -6566,6 +6592,9 @@ async function sfinPull(quiet){
       cycle:c.bill, window:c.start+" .. "+c.end,
       graceBill:g?g.bill:null, graceWindow:g?(g.start+" .. "+g.end):null,
       graceRows:g?gRows.length:null,
+      /* v130 — is the bridge sending transaction ids at all? If withId is 0
+         the fallback is carrying everything and open item 1 stays open. */
+      txIds:{withId:idsSeen, without:idsMissing},
       cardRows:rows.length, bankRows:bankRowsNew.length,
       accounts:(j.accounts||[]).slice(0,20).map(a=>({
         id:String(a.id||a.name), name:String(a.name||""),
