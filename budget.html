@@ -840,7 +840,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v125";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v128";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1014,6 +1014,65 @@ function undo(){
   toast("Undone");
 }
 function localSave(){ try{ localStorage.setItem("budget_state_v8",JSON.stringify(S)); }catch(e){} }
+
+/* ── the activity log ──────────────────────────────────────────────
+   v126. A running record of what this device actually DID — every card pull,
+   every duplicate it folded away, every account role it carried across a
+   changed id. Before this there was nothing: dupMerge() deleted rows and
+   left no trace but a toast.
+
+   localStorage, deliberately, and never S. S rides in the gist on every
+   sync, so a log worth reading would be kilobytes over the wire on every
+   write forever. Per-device is also the honest shape — it answers "what did
+   this phone do", which is the question you have when this phone looks wrong.
+
+   Capped by count AND by bytes: a few fat entries can blow the quota long
+   before 500 rows would. Oldest goes first.
+
+   Nothing in here may throw into its caller. A log that costs you a merge is
+   worse than no log at all. */
+const LOGKEY="budget_log_v1", LOG_MAX=500, LOG_BYTES=220000;
+function logRead(){
+  try{ const a=JSON.parse(localStorage.getItem(LOGKEY)||"[]");
+       return Array.isArray(a)?a:[]; }catch(e){ return []; }
+}
+function logCount(){ return logRead().length; }
+function logClear(){ try{ localStorage.removeItem(LOGKEY); }catch(e){} }
+function logit(kind,msg,data){
+  try{
+    const a=logRead();
+    a.push({t:Date.now(),k:String(kind),m:String(msg),
+            d:(data===undefined||data===null)?null:data});
+    while(a.length>LOG_MAX) a.shift();
+    let str=JSON.stringify(a);
+    while(str.length>LOG_BYTES&&a.length>1){ a.shift(); str=JSON.stringify(a); }
+    localStorage.setItem(LOGKEY,str);
+  }catch(e){}
+}
+/* readable on purpose — the whole point is handing it to somebody */
+function logText(){
+  const a=logRead(), p2=n=>String(n).padStart(2,"0");
+  const when=t=>{ const x=new Date(t);
+    return x.getFullYear()+"-"+p2(x.getMonth()+1)+"-"+p2(x.getDate())
+          +" "+p2(x.getHours())+":"+p2(x.getMinutes())+":"+p2(x.getSeconds()); };
+  const head=["budget.html activity log",
+    "app          "+APP_V,
+    "written      "+when(Date.now()),
+    "entries      "+a.length,
+    "sync         "+((typeof syncOn==="function"&&syncOn())?"on":"off"),
+    "card feed    "+((typeof sfinOn==="function"&&sfinOn())?"on":"off"),
+    "bank rows    "+((typeof bankRows==="function")?bankRows().length:"?"),
+    "-----------------------------------------------------------"];
+  return head.concat(a.map(e=>{
+    let line=when(e.t)+"  "+e.k+"  "+e.m;
+    if(e.d) line+="\n     "+JSON.stringify(e.d);
+    return line;
+  })).join("\n")+"\n";
+}
+function logExport(){
+  if(!logCount()){ toast("Nothing in the log yet"); return false; }
+  return deliver(logText(),"budget-log-"+stamp()+".txt","text/plain");
+}
 function save(){
   pushUndo();
   S.meta.savedAt=Date.now();
@@ -1159,7 +1218,10 @@ function payoffDone(rule){
 /* ---------- live card feed ----------
    Spending runs the 4th to the 3rd and lands on the following month's bill.
    One month accumulates live; everything past it keeps its flat target.
-   A closed cycle stays live a few more days so late-posting charges land. */
+   v127: a closed cycle keeps its own live statement for GRACE_DAYS so late
+   feed deliveries still land on it — but it no longer holds back the date.
+   Both bills are open at once on the 4th through the 7th, and a charge goes
+   to whichever one its POST date falls in. */
 const CYCLE_DAY=4, GRACE_DAYS=4;
 function nextMonth(k){ const {y,m}=parseYM(k); return m===12?ym(y+1,1):ym(y,m+1); }
 function liveCycle(today){
@@ -1167,12 +1229,37 @@ function liveCycle(today){
   const day=d.getDate();
   let y=d.getFullYear(), m=d.getMonth()+1;
   const back=()=>{ m--; if(m<1){ m=12; y--; } };
+  /* v127 — grace no longer moves the date. It used to step back for the whole
+     window, which meant that on days 4..7 the pull filtered incoming rows
+     against the CLOSED cycle's span and threw away everything posting in the
+     new one. Four days a month with a live counter reading nothing.
+     Which cycle is current is a question about today. Which closed statement
+     is still taking late data is a different question, and graceCycle()
+     answers that one. */
   if(day<CYCLE_DAY) back();                                  /* still inside last month's cycle */
-  else if(day<CYCLE_DAY+GRACE_DAYS) back();                  /* grace on the cycle that just shut */
   const startM=ym(y,m), bill=nextMonth(startM), e=parseYM(bill);
   return {start:startM+"-04",
           end:String(e.y)+"-"+String(e.m).padStart(2,"0")+"-03",
           spend:startM, bill:bill};
+}
+/* v127 — the cycle that just shut, for as long as the feed may still be
+   catching up on it. Null on every other day. The card seals a cycle by post
+   date, so nothing NEW can land in it; this exists only because SimpleFIN can
+   deliver a row days after the bank posted it. */
+function graceCycle(today){
+  const d=today||new Date(), day=d.getDate();
+  if(day<CYCLE_DAY||day>=CYCLE_DAY+GRACE_DAYS) return null;
+  const bill=liveCycle(d).bill, prev=prevMonth(bill), sp=cycleSpan(prev);
+  return {start:sp.start, end:sp.end, spend:prevMonth(prev), bill:prev};
+}
+function graceStmt(){
+  const g=graceCycle(); if(!g) return null;
+  const st=S.stmts&&S.stmts[g.bill];
+  return (st&&st.rows)?st:null;
+}
+function graceTotal(){
+  const st=graceStmt(); if(!st) return null;
+  return st.rows.reduce((a,r)=>a+r.amt,0);
 }
 /* Something you already know you're buying. It's keyed to the month you'll SPEND it,
    because that's how you think about it — but the money leaves on the following
@@ -1312,6 +1399,41 @@ function liveTotal(){
   const st=liveStmt(); if(!st) return null;
   return st.rows.reduce((a,r)=>a+r.amt,0);
 }
+/* v128 — what a month's statement actually came to, live or long closed.
+   Null when there is no statement or it carries no rows, which is the
+   difference between "this month is finished" and "this month has not
+   happened yet". */
+function stmtTotal(k){
+  const st=S.stmts&&S.stmts[k];
+  if(!st||!Array.isArray(st.rows)||!st.rows.length) return null;
+  return st.rows.reduce((a,r)=>a+(Number(r.amt)||0),0);
+}
+/* v128 — THE answer to "what does the card bill say for month k", and the
+   only one. build() and naturalAmt() both call this and must keep calling
+   this: v116 already required them to agree, because an override equal to the
+   placeholder has to recognise itself or retyping the number already on
+   screen can never release it. They had drifted apart in two places and this
+   is what closes that for good.
+
+   The order is the whole fix:
+     1. the cycle still filling up  -> its live running total
+     2. any month with a statement  -> what that statement came to. A closed
+        bill is the most certain number in the file and the one actually being
+        paid. Falling through to the target here is what showed $5,000 against
+        a $12,063 September.
+     3. everything else             -> what the card is allowed that month,
+        plus anything planned onto it. A month that has not happened yet. */
+function ccAmtFor(k){
+  if(k===liveCycle().bill){
+    const lt=liveTotal();
+    if(lt!==null) return -Math.round(lt*100)/100;
+  }
+  const st=stmtTotal(k);
+  if(st!==null) return -Math.round(st*100)/100;
+  let a=-targetAt(prevMonth(k));
+  const ex=plannedOnBill(k); if(ex) a-=ex;
+  return a;
+}
 function build(){
   _pstamp++; _pcache={};
   /* Computed once. A placeholder is only answered for as long as the transaction
@@ -1344,20 +1466,14 @@ function build(){
            cycle is still closing out, so the feed is the honest number there. */
         const ovr=(key in S.over)&&ovrLive(r.id,k);
         let amt=ovr?S.over[key]:amountAt(r,k);
-        if(!ovr&&r.id==="cc"&&k===liveCycle().bill){
-          const lt=liveTotal(); if(lt!==null) amt=-Math.round(lt*100)/100;
-        }
-        /* planned purchases inflate the bill they'll actually land on. the live
-           cycle is excluded — real charges are already arriving there, and adding
-           the plan on top would count the same purchase twice. */
-        else if(!ovr&&r.id==="cc"){
-          /* v116 — a placeholder bill is what the card is allowed for the month
-             that lands on it, not a figure typed into the rule once and left.
-             Raising the budget used to move the line the card is measured against
-             while leaving the bill it produces saying something else. */
-          amt=-targetAt(prevMonth(k));
-          const ex=plannedOnBill(k); if(ex) amt-=ex;
-        }
+        /* v128 — one function decides this, shared with naturalAmt(). It
+           covers the live cycle, any month carrying a real statement, and
+           the placeholder for a month that has not happened yet. v127's
+           separate grace branch is gone: the grace bill has a statement, so
+           rule 2 in there already answers it.
+           Planned purchases still only inflate a placeholder — a month with
+           real charges on it would otherwise count the same purchase twice. */
+        if(!ovr&&r.id==="cc") amt=ccAmtFor(k);
         /* v111 — a held number. `base` is what this cell worked out for itself
            when the number was typed; `amt` above is what it works out now. While
            those agree the feed has not moved and the held number stands. When
@@ -2545,16 +2661,15 @@ function pulseLiveCard(){
    months carry their planned purchases. Comparing against the wrong baseline is
    what let a tap-and-tap-away freeze the live total. */
 function naturalAmt(r,k){
-  if(r.ruleId==="cc"&&k===liveCycle().bill){
-    const lt=liveTotal();
-    if(lt!==null) return -Math.round(lt*100)/100;
-  }
-  let a=amountAt(r.rule,k);
-  /* v116 — the same rule as build(), and it has to be the same or an override
+  /* v116 — the same rule as build(), and it HAS to be the same or an override
      equal to the placeholder would never recognise itself and could not be
-     released by retyping the number it already shows. */
-  if(r.ruleId==="cc"){ a=-targetAt(prevMonth(k)); const ex=plannedOnBill(k); if(ex) a-=ex; }
-  return a;
+     released by retyping the number it already shows.
+     v128 — "the same rule" is now literally the same function. Keeping two
+     copies in step by hand did not work: build() used the cc rule's scheduled
+     amount on a live bill with no feed while this used the target, and v127's
+     grace branch was added to build() and not to here. */
+  if(r.ruleId==="cc") return ccAmtFor(k);
+  return amountAt(r.rule,k);
 }
 /* sign lock: money out stays money out unless you lead with + */
 function signed(raw,anchor){
@@ -3437,12 +3552,28 @@ function advHTML(){
       as one file. <b>Load a backup</b> reads one back in and replaces what's here.
       <b>Save as app</b> is different: it makes a copy of this page with your numbers already
       inside it, so it opens ready to go on a machine that's never seen it.
-      ${syncOn()?"With sync on, your gist already keeps its own history, so these are belt and braces.":""}</div>`;
+      ${syncOn()?"With sync on, your gist already keeps its own history, so these are belt and braces.":""}</div>
+
+    <div class="sh" style="margin-top:16px">Activity log</div>
+    <div class="crow"><button class="mini" id="advLog">Save the activity log</button>
+      <button class="mini" id="advLogClear">Clear it</button></div>
+    <div class="hint">A running record of what the app did on <b>this device</b> — every
+      card pull, every duplicate it merged, every account it re-seated.
+      <b>${logCount()}</b> entries right now. It lives on this device only, never
+      goes into your gist, and holds no card numbers or logins. Save it and send
+      it over when something needs explaining.</div>`;
 }
 function wireAdv(){
   const go=(id,fn)=>{ const b=document.getElementById(id); if(b) b.onclick=fn; };
   go("advIns",()=>openDrawer("ins"));
   go("advRec",()=>openDrawer("rec"));
+  go("advLog",()=>logExport());
+  go("advLogClear",()=>{
+    if(!logCount()){ toast("Nothing in the log yet"); return; }
+    if(!confirm("Clear the activity log? It only lives on this device and "
+               +"nothing else is affected.")) return;
+    logClear(); openDrawer("adv"); toast("Log cleared");
+  });
   document.querySelectorAll("[data-labdrop]").forEach(b=>b.onclick=ev=>{
     ev.preventDefault(); ev.stopPropagation();
     const [which,...rest]=b.dataset.labdrop.split("|");
@@ -3524,6 +3655,9 @@ function acctReseat(prev){
     if(!cands.every(c=>c.role===cands[0].role)) return;
     roles[id]=cands[0].role;
     const used=cands.shift(); delete roles[used.id];
+    logit("acct.reseat","carried a role onto a changed id",
+          {role:used.role, from:used.id, to:id,
+           name:String(a.name||"")});
     moved++;
   });
   return moved;
@@ -3707,12 +3841,19 @@ function dupSweep(){
      only consulted past DUP_MIN_BASE rows. The flat row cap always applies. */
   if(want>DUP_MAX_ROWS||(total>=DUP_MIN_BASE&&want/total>DUP_MAX_SHARE)){
     S.meta.dupHeld=want;                     /* the pane explains it */
+    logit("dup.hold","held back an oversized sweep — nothing deleted",
+          {wanted:want, bankRows:total, rowCap:DUP_MAX_ROWS,
+           shareCap:DUP_MAX_SHARE, pairs:sure.length});
     return 0;
   }
   delete S.meta.dupHeld;
   const gone=dupMerge(sure);
-  if(gone) toast(gone===1?"Merged a duplicate the card re-sent"
-                         :"Merged "+gone+" duplicates the card re-sent");
+  if(gone){
+    logit("dup.sweep","merged "+gone+" row"+(gone===1?"":"s"),
+          {gone, pairs:sure.length, bankRowsBefore:total});
+    toast(gone===1?"Merged a duplicate the card re-sent"
+                  :"Merged "+gone+" duplicates the card re-sent");
+  }
   return gone;
 }
 
@@ -3735,6 +3876,23 @@ function dupMerge(groups){
       if(S.hits) Object.keys(S.hits).forEach(kk=>{
         if(S.hits[kk]&&S.hits[kk].sig===d.sig) S.hits[kk].sig=keepSig; });
       if(S.tag) delete S.tag[d.sig];
+      /* v126 — both sides in full, because the PATTERN is what needs reading
+         back later. The automatic pass only fires on pairs whose wording
+         differs (dupGroups skips equal txt outright), so a run of these means
+         the feed is rewording descriptions rather than merely shifting a
+         posted date. Without the descriptions side by side that is invisible. */
+      logit("dup.merge","folded a re-sent row away",{
+        kept:{date:String(x.keep.date),
+              amt:Number(x.keep.t&&x.keep.t.amt)||0,
+              desc:String((x.keep.t&&x.keep.t.desc)||""),
+              sig:keepSig},
+        dropped:{date:String(d.date),
+                 amt:Number(d.t&&d.t.amt)||0,
+                 desc:String((d.t&&d.t.desc)||""),
+                 sig:String(d.sig)},
+        gapDays:(x.gap===undefined||x.gap===null)?null:x.gap,
+        sameWording:!!(x.keep.txt&&d.txt&&x.keep.txt===d.txt),
+        carriedTag:!!from, movedAssign:line||null, wide:!!x.wide});
     });
     const kill={}; x.drop.forEach(d=>kill[d.sig]=1);
     const before=bankRows().length;
@@ -6156,9 +6314,12 @@ async function sfinPull(quiet){
     return;
   }
   sfinSpend();
-  const c=liveCycle();
+  const c=liveCycle(), g=graceCycle();
   const SFIN_OVERLAP_DAYS=5;
-  const fromD=new Date(c.start+"T00:00:00");
+  /* v127 — during grace two statements are open, so reach back to the older
+     one's start rather than the current cycle's or the closed bill would stop
+     being topped up the moment the date turned. */
+  const fromD=new Date(((g&&g.start)||c.start)+"T00:00:00");
   fromD.setDate(fromD.getDate()-SFIN_OVERLAP_DAYS);
   /* One call feeds two streams with different appetites. The card only needs the
      open cycle. The account needs everything back to the records start on a first
@@ -6179,7 +6340,10 @@ async function sfinPull(quiet){
     const errs=[].concat(j.errors||[],j.errlist||[]).filter(Boolean);
     const endMs=new Date(c.end+"T23:59:59").getTime();
     const startMs=new Date(c.start+"T00:00:00").getTime();
-    const rows=[], seen={};
+    /* v127 — the closed cycle's span, open only during grace */
+    const gStartMs=g?new Date(g.start+"T00:00:00").getTime():0;
+    const gEndMs=g?new Date(g.end+"T23:59:59").getTime():0;
+    const rows=[], seen={}, gRows=[], gSeen={};
     /* remember what's on the token so the roles can be set without another call */
     const acctWas=(S.meta.acctList||[]).slice();
     S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
@@ -6215,16 +6379,23 @@ async function sfinPull(quiet){
            Capital One cuts the bill, so it's how we have to cut it too. The
            purchase date is only a fallback for rows that arrive without one. */
         const when=Number(t.posted||t.transacted_at||0)*1000;
-        if(!when||when<startMs||when>endMs) return;
+        if(!when) return;
+        /* v127 — the post date alone decides which bill this is. The two spans
+           never overlap (one ends on the 3rd, the next opens on the 4th), so a
+           row belongs to exactly one of them or to neither. */
+        const inLive=when>=startMs&&when<=endMs;
+        const inGrace=!!g&&when>=gStartMs&&when<=gEndMs;
+        if(!inLive&&!inGrace) return;
         const desc=String(t.description||t.payee||"").trim();
         if(SFIN_PAYMENT.test(desc)) return;
         const amt=-Number(t.amount||0);              /* purchases arrive negative */
         if(!amt) return;
         /* no stable ids from the bridge — match on what the row actually is */
         const sig=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
-        if(seen[sig]) return; seen[sig]=1;
-        rows.push({desc, amt, date:new Date(when).toISOString().slice(0,10),
-                   cat:categorize(desc).cat});
+        const row={desc, amt, date:new Date(when).toISOString().slice(0,10),
+                   cat:categorize(desc).cat};
+        if(inLive){ if(seen[sig]) return; seen[sig]=1; rows.push(row); }
+        else      { if(gSeen[sig]) return; gSeen[sig]=1; gRows.push(row); }
       });
     });
     if(bankBal!==null){
@@ -6252,10 +6423,42 @@ async function sfinPull(quiet){
     /* a filed statement is the real thing — never overwrite one */
     const held=S.stmts[c.bill];
     if(held&&!held.live){ setSync("ok","statement already filed"); return; }
-    /* any month that has rolled out of the live window stops updating */
-    Object.keys(S.stmts).forEach(k=>{ if(k!==c.bill&&S.stmts[k]&&S.stmts[k].live) delete S.stmts[k].live; });
+    /* v127 — during grace TWO bills are open: the one filling up and the one
+       still being topped up. Everything else stops updating. */
+    const keepLive={}; keepLive[c.bill]=1; if(g) keepLive[g.bill]=1;
+    Object.keys(S.stmts).forEach(k=>{ if(!keepLive[k]&&S.stmts[k]&&S.stmts[k].live) delete S.stmts[k].live; });
     S.stmts[c.bill]={rows, live:true, source:"feed", cycle:{start:c.start,end:c.end},
                      pulledAt:Date.now()};
+    if(g){
+      const gHeld=S.stmts[g.bill];
+      /* A hand-filed statement is the real thing and is never overwritten.
+         Nor is a populated one replaced by an empty pull: if the feed came
+         back with nothing that far back, that is the feed's reach failing,
+         not the month emptying, and overwriting would erase a real bill. */
+      const wouldEmpty=!gRows.length&&gHeld&&gHeld.rows&&gHeld.rows.length;
+      if(gHeld&&!gHeld.live){
+        logit("grace.skip","the closed bill is already filed by hand",{bill:g.bill});
+      }else if(wouldEmpty){
+        logit("grace.skip","kept the closed bill — the pull reached back empty",
+              {bill:g.bill, had:gHeld.rows.length});
+      }else{
+        S.stmts[g.bill]={rows:gRows, live:true, source:"feed",
+                         cycle:{start:g.start,end:g.end}, pulledAt:Date.now()};
+      }
+    }
+    /* v126 — the account ids are the reason this is worth recording. A
+       reissued card can arrive as a NEW account id, which is what orphans
+       roles and re-sends rows under changed wording. If duplicates spike,
+       compare the ids here across pulls. */
+    logit("pull","card feed pulled",{
+      cycle:c.bill, window:c.start+" .. "+c.end,
+      graceBill:g?g.bill:null, graceWindow:g?(g.start+" .. "+g.end):null,
+      graceRows:g?gRows.length:null,
+      cardRows:rows.length, bankRows:bankRowsNew.length,
+      accounts:(j.accounts||[]).slice(0,20).map(a=>({
+        id:String(a.id||a.name), name:String(a.name||""),
+        role:acctRole(String(a.id||a.name))})),
+      errors:errs.map(e=>String(e).slice(0,120))});
     const fresh=newAccts();
     sfin.lastPull=Date.now(); sfin.lastErr=errs.length?String(errs[0]):""; saveSfin();
     save(); render();
@@ -7340,16 +7543,14 @@ function cyclePos(d){
    of the cycle is left to pay for. `pace` is 1.0 when spending is dead on track
    to land exactly on target; 1.5 means you're heading for half again over. */
 function nudgeBucket(d){
-  /* v124 — the turnover days get their own voice.
-     liveCycle() holds the CLOSED cycle open for GRACE_DAYS, so on days
-     CYCLE_DAY..CYCLE_DAY+GRACE_DAYS-1 every number reachable from here still
-     belongs to the cycle that just shut. Returning "cycle" on CYCLE_DAY meant
-     announcing a clean slate and then letting buddyTail() quote the old
-     cycle's five-figure total beside it, which is how "new cycle, clean
-     slate — we're at $12,063 of $5,000 this cycle" happened.
-     So the grace days say what is actually true: last cycle's bill is still
-     settling, here is roughly where it lands, the new one is coming. The
-     clean-slate announcement waits for the first day the new cycle is live. */
+  /* v124 — the turnover days get their own voice, and v127 kept it.
+     The new cycle counts from the 4th now, so there IS a live number on those
+     days — but it is four days old and the feed is still delivering the tail
+     of the closed bill, so quoting it as the month's pace would be noise. The
+     grace days say the useful thing instead: roughly where last month's bill
+     landed, and that the new one is coming. buddyTail() reads graceTotal()
+     for this mood, not liveTotal(). The clean-slate announcement waits for
+     the first day nothing is still settling. */
   const dom=d.getDate();
   if(dom>=CYCLE_DAY&&dom<CYCLE_DAY+GRACE_DAYS) return "turnover";
   if(dom===CYCLE_DAY+GRACE_DAYS) return "cycle";
@@ -7362,10 +7563,10 @@ function nudgeBucket(d){
   /* A ratio built on almost nothing shouts at nothing: 3% of the target on day two
      is a pace of 1.9 and means only that somebody bought groceries. So pace only
      gets a voice once a fifth of the budget has actually gone.
-     This replaces a `day<=3` guard that could never fire — liveCycle() holds the
-     PREVIOUS cycle open for GRACE_DAYS, so the earliest day of a new cycle this
-     function is ever handed is CYCLE_DAY+GRACE_DAYS — the 8th, not the 5th as
-     this note used to say. The guard read correctly and was dead either way. */
+     This replaces a `day<=3` guard that could never fire. The turnover and
+     cycle moods return before this line on days CYCLE_DAY..CYCLE_DAY+GRACE_DAYS,
+     so the earliest day the pace code is ever handed is the 9th. The guard read
+     correctly and was dead either way. */
   const loud=pct>=0.20;
   if(loud&&pace>=1.35) return "hot";        /* on course to blow straight past it */
   if(pct>=0.80&&left<=8) return "close";    /* nearly there, nearly out of month */
@@ -7377,17 +7578,20 @@ function nudgeBucket(d){
    queued — ntfy delivers fixed text — so the silent one, which is deliberately
    two days stale, says as much rather than stating an old figure as fact. */
 function buddyTail(b){
+  /* v127 — turnover reports the OLD bill, and now has to say so out loud.
+     It used to read liveTotal() and get the right answer only because
+     liveCycle() was still pointing at the closed cycle. liveCycle() tells the
+     truth about the date now, so the closed bill is named directly. */
+  if(b==="turnover"){
+    const gt=graceTotal();
+    return gt===null?"":" looks like your old card bill lands around "
+          +money(Math.abs(gt))+". I'll let you know when the new cycle really gets going.";
+  }
   const lt=liveTotal();
   if(lt===null) return "";
   const spent=money(Math.abs(lt));
   const tgt=effTarget(liveCycle().spend);
   const of=tgt?" of "+money(tgt):"";
-  /* v124 — the turnover days. During grace this total IS the old cycle, and
-     the last charges are still posting, so it goes out as an estimate and
-     never against the target: that target belonged to a cycle that is over. */
-  if(b==="turnover")
-    return " looks like your old card bill lands around "+spent
-          +". I'll let you know when the new cycle really gets going.";
   if(b==="silent") return " last number I had was "+spent+of+" on this cycle.";
   let out=" we're at "+spent+of+" on the card this cycle.";
   /* The pace, out loud. A total on its own sounds fine and isn't — what makes it
@@ -7691,7 +7895,9 @@ const TAGS={good:"tada",early:"eyes",hot:"rotating_light",blown:"fire",
 const NUDGE_FMT="pace-3";
 function nudgeSig(d){
   const b=nudgeBucket(d); if(!b) return null;
-  const lt=liveTotal();
+  /* v127 — a turnover message quotes the closed bill, so that is the number
+     whose movement should replace what is already queued for tonight. */
+  const lt=(b==="turnover")?graceTotal():liveTotal();
   /* to the dollar. If what the app knows differs at all from what's queued for
      tonight, tonight's message gets replaced. */
   return b+"|"+(lt===null?"-":Math.round(Math.abs(lt)))+"|"+NUDGE_FMT;
