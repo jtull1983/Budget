@@ -840,7 +840,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v128";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v129";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1072,6 +1072,90 @@ function logText(){
 function logExport(){
   if(!logCount()){ toast("Nothing in the log yet"); return false; }
   return deliver(logText(),"budget-log-"+stamp()+".txt","text/plain");
+}
+
+/* ── the card log ──────────────────────────────────────────────────
+   v129. What the app currently HOLDS for the card, charge by charge, so it
+   can be laid next to the paper statement.
+
+   The two numbers are not the same quantity and are not supposed to be. The
+   app totals charges POSTED IN THE CYCLE. A statement's new balance carries
+   the previous balance forward and subtracts payments. The header says so,
+   and each month shows the arithmetic where the filed balance is known. */
+function ccStmtsWithRows(){
+  const st=S.stmts||{};
+  return Object.keys(st)
+    .filter(k=>st[k]&&Array.isArray(st[k].rows)&&st[k].rows.length)
+    .sort();
+}
+function ccStmtText(k){
+  const st=S.stmts&&S.stmts[k];
+  if(!st||!Array.isArray(st.rows)) return "";
+  const sp=(st.cycle&&st.cycle.start)?st.cycle:cycleSpan(k);
+  const rows=st.rows.slice()
+    .sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
+  const tot=rows.reduce((a,r)=>a+(Number(r.amt)||0),0);
+  const L=[];
+  L.push("");
+  L.push("=== "+k+"   "+MFULL[parseYM(k).m-1]+" "+parseYM(k).y+" bill ===");
+  L.push("cycle        "+sp.start+"  to  "+sp.end);
+  L.push("source       "+(st.source||"?")+(st.live?", still live":", closed"));
+  if(st.pulledAt)
+    L.push("last pull    "+new Date(st.pulledAt).toISOString().slice(0,16).replace("T"," "));
+  L.push("charges      "+rows.length);
+  L.push("app total    "+tot.toFixed(2));
+  const d=st.dates||{};
+  if(d.newBalance!==undefined&&d.newBalance!==null){
+    L.push("filed bill   "+Number(d.newBalance).toFixed(2)+"   (new balance as loaded)");
+    L.push("difference   "+(Number(d.newBalance)-tot).toFixed(2)
+          +"   <- carried balance and/or payments, not missing charges");
+  }
+  const ovr=S.over&&S.over["cc#"+k+"#0"];
+  if(ovr!==undefined&&ovr!==null)
+    L.push("typed over   "+Math.abs(Number(ovr)).toFixed(2)+"   (THIS is what the row shows)");
+  L.push("");
+  L.push("DATE         AMOUNT     CATEGORY        DESCRIPTION");
+  rows.forEach(r=>{
+    L.push(String(r.date||"?").padEnd(13)
+          +Number(r.amt||0).toFixed(2).padStart(9)+"  "
+          +String(r.cat||"").padEnd(16)
+          +String(r.desc||"").slice(0,60));
+  });
+  const sk=Array.isArray(st.skipped)?st.skipped:[];
+  if(sk.length){
+    L.push("");
+    L.push("-- the feed sent these and the app did NOT count them --");
+    L.push("DATE         AMOUNT     WHY             DESCRIPTION");
+    sk.forEach(x=>{
+      L.push(String(x.date||"?").padEnd(13)
+            +Number(x.amt||0).toFixed(2).padStart(9)+"  "
+            +String(x.why||"").padEnd(16)
+            +String(x.desc||"").slice(0,60));
+    });
+  }
+  return L.join("\n");
+}
+function ccLogText(){
+  const keys=ccStmtsWithRows();
+  const L=["budget.html card log",
+    "app          "+APP_V,
+    "written      "+new Date().toISOString().slice(0,16).replace("T"," "),
+    "statements   "+keys.length,
+    "",
+    "The app's total for a month is CHARGES POSTED IN THAT CYCLE.",
+    "A paper statement's new balance is a different quantity: it carries the",
+    "previous balance forward and subtracts your payments. The two are meant",
+    "to differ. Each month below shows the arithmetic where it can.",
+    "",
+    "Amounts are positive for a charge. Cycles run the 4th to the 3rd and are",
+    "cut by POSTED date, not the date of purchase."];
+  keys.forEach(k=>L.push(ccStmtText(k)));
+  if(!keys.length) L.push("","(no statements carrying any rows yet)");
+  return L.join("\n")+"\n";
+}
+function ccLogExport(){
+  if(!ccStmtsWithRows().length){ toast("No statements to export yet"); return false; }
+  return deliver(ccLogText(),"card-log-"+stamp()+".txt","text/plain");
 }
 function save(){
   pushUndo();
@@ -5826,6 +5910,13 @@ function feedHTML(){
   }
   if(done.length) h+=`<div class="flag good"><div class="ft">Statements loaded</div><div class="fb">${
     done.map(k=>`${MN[parseYM(k).m-1]} ${String(parseYM(k).y).slice(2)} (${S.stmts[k].rows.length})`).join(" · ")}</div></div>`;
+  if(done.length) h+=`<div class="crow" style="margin-bottom:6px">
+      <button class="mini" id="fExport" style="width:100%;padding:10px">Save the card log — every charge, itemised</button></div>
+    <div class="hint" style="margin-bottom:12px">Writes out every statement the app holds, charge by charge,
+      including the rows it deliberately did <b>not</b> count — payments, and anything posting just outside a
+      cycle. Hand it over next to your paper bill when the two disagree.
+      Remember the app totals <b>charges in the cycle</b>, while the bill carries the previous balance
+      forward and subtracts payments, so the two are meant to differ.</div>`;
 
   const dts=feedDraft&&feedDraft.dates;
   if(dts&&(dts.from||dts.due)){
@@ -5953,6 +6044,8 @@ function wireFeed(){
       S.catRules.splice(+b.dataset.rx,1); save(); openDrawer("feed");
       const c=document.getElementById("rulesCard"); if(c) c.classList.add("open"); });
   }
+  const fx=document.getElementById("fExport");
+  if(fx) fx.onclick=()=>ccLogExport();
   const applyAll=document.getElementById("fApplyAll");
   if(applyAll) applyAll.onclick=()=>{
     let n=0;
@@ -6344,6 +6437,10 @@ async function sfinPull(quiet){
     const gStartMs=g?new Date(g.start+"T00:00:00").getTime():0;
     const gEndMs=g?new Date(g.end+"T23:59:59").getTime():0;
     const rows=[], seen={}, gRows=[], gSeen={};
+    /* v129 — what gets discarded, so a discrepancy can be traced. Capped so
+       nothing here can bloat the gist. */
+    const SKIP_MAX=30, SKIP_NEAR=10*86400000;
+    const skip=[], gSkip=[];
     /* remember what's on the token so the roles can be set without another call */
     const acctWas=(S.meta.acctList||[]).slice();
     S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
@@ -6385,10 +6482,24 @@ async function sfinPull(quiet){
            row belongs to exactly one of them or to neither. */
         const inLive=when>=startMs&&when<=endMs;
         const inGrace=!!g&&when>=gStartMs&&when<=gEndMs;
-        if(!inLive&&!inGrace) return;
         const desc=String(t.description||t.payee||"").trim();
-        if(SFIN_PAYMENT.test(desc)) return;
         const amt=-Number(t.amount||0);              /* purchases arrive negative */
+        /* v129 — note it rather than dropping it silently */
+        const note=(why,arr)=>{ if(arr.length<SKIP_MAX)
+          arr.push({date:new Date(when).toISOString().slice(0,10),
+                    amt:amt, desc:desc.slice(0,60), why}); };
+        if(!inLive&&!inGrace){
+          /* Only a NEAR miss is evidence. A charge sitting a day the wrong
+             side of the boundary is exactly the shape a cycle disagreement
+             takes; one from three months ago is just history. */
+          if(Math.abs(when-startMs)<=SKIP_NEAR||Math.abs(when-endMs)<=SKIP_NEAR)
+            note("outside cycle",skip);
+          return;
+        }
+        /* a payment is not spending, so it never counts toward the cycle —
+           but it IS most of why the paper bill reads differently, so it is
+           recorded rather than vanishing */
+        if(SFIN_PAYMENT.test(desc)){ note("payment",inLive?skip:gSkip); return; }
         if(!amt) return;
         /* no stable ids from the bridge — match on what the row actually is */
         const sig=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
@@ -6428,7 +6539,7 @@ async function sfinPull(quiet){
     const keepLive={}; keepLive[c.bill]=1; if(g) keepLive[g.bill]=1;
     Object.keys(S.stmts).forEach(k=>{ if(!keepLive[k]&&S.stmts[k]&&S.stmts[k].live) delete S.stmts[k].live; });
     S.stmts[c.bill]={rows, live:true, source:"feed", cycle:{start:c.start,end:c.end},
-                     pulledAt:Date.now()};
+                     pulledAt:Date.now(), skipped:skip};
     if(g){
       const gHeld=S.stmts[g.bill];
       /* A hand-filed statement is the real thing and is never overwritten.
@@ -6443,7 +6554,8 @@ async function sfinPull(quiet){
               {bill:g.bill, had:gHeld.rows.length});
       }else{
         S.stmts[g.bill]={rows:gRows, live:true, source:"feed",
-                         cycle:{start:g.start,end:g.end}, pulledAt:Date.now()};
+                         cycle:{start:g.start,end:g.end}, pulledAt:Date.now(),
+                         skipped:gSkip};
       }
     }
     /* v126 — the account ids are the reason this is worth recording. A
