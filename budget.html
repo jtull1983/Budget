@@ -82,6 +82,22 @@ body.fitOn .navarr{display:none}
 /* takes the slack the Menu button used to, so the corner stays a corner whether
    or not there are any asset accounts to show */
 .toprow2 .grow{flex:1 1 auto;min-width:0}
+/* v133 — one line on a desktop. .top stops being a column and becomes a
+   wrapping row: brand and years take their natural width on the left, the
+   control row takes the rest, and the menu panel drops to a full-width line of
+   its own when it opens rather than trying to share the row.
+   .toprow shrinks before .toprow2 does — the years strip already scrolls
+   inside itself, so it is the one that can afford to give width up.
+   The hidden file inputs are position:absolute and out of flow, so they do not
+   count as flex children here.
+   Below 1100px nothing changes: the rows stay stacked because there is no width
+   to do otherwise, which is the same reason .navarr and #btnFit switch here. */
+@media(min-width:1101px){
+  .top{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:18px;row-gap:11px}
+  .top>.toprow{flex:0 1 auto;min-width:0}
+  .top>.toprow2{flex:1 1 auto;min-width:0}
+  .top>.menupanel{flex:0 0 100%;order:9}
+}
 .assets{flex:none;display:flex;align-items:center;gap:9px;cursor:pointer;
   background:transparent;border:1px solid var(--line2);border-radius:4px;
   padding:8px 13px;font:inherit;color:inherit}
@@ -467,6 +483,20 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .del{color:var(--dimmer);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase}
 .del:hover{color:var(--red)}
 .hint{font-size:10.5px;color:var(--dim);line-height:1.6;margin:2px 0 14px}
+/* v138 — explanations fold away behind an ⓘ. Scoped to #dbody so a hint
+   anywhere else in the app is unaffected, and driven by a class rather than an
+   inline style so the lines the code shows and hides by hand keep working. */
+#dbody .hint.tucked{display:none}
+#dbody .hint.tucked.show{display:block}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;flex:none;
+  width:15px;height:15px;padding:0;margin-left:7px;vertical-align:middle;
+  border:1px solid var(--line2);border-radius:50%;background:transparent;
+  color:var(--dimmer);font:inherit;font-size:9.5px;font-style:italic;
+  line-height:1;cursor:pointer}
+.ibtn:hover{border-color:var(--cyan);color:var(--cyan)}
+.ibtn.on{border-color:var(--cyan);color:var(--cyan);background:#11262a}
+/* standing on its own, with no heading to sit in */
+.ibtn.loose{margin:0 0 12px}
 
 .flag{border:1px solid var(--line2);border-left:2px solid var(--amber);border-radius:3px;
   padding:10px 12px;margin-bottom:9px;background:var(--panel)}
@@ -805,7 +835,6 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn" id="btnFit">See full year</button>
   </div>
   <div class="menupanel" id="menuPanel">
-    <button class="btn" id="btnFeed">Feed me info</button>
     <button class="btn" id="btnCard">Card review</button>
     <button class="btn" id="btnBank" hidden>Account activity</button>
     <button class="btn" id="btnMatch" hidden>Confirm <span id="matchCount"></span></button>
@@ -840,7 +869,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v132";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v139";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1073,6 +1102,11 @@ function logExport(){
   if(!logCount()){ toast("Nothing in the log yet"); return false; }
   return deliver(logText(),"budget-log-"+stamp()+".txt","text/plain");
 }
+/* v137 — same guard, same text, straight to the clipboard */
+function logCopy(){
+  if(!logCount()){ toast("Nothing in the log yet"); return false; }
+  return copyOut(logText(),"Activity log");
+}
 
 /* ── the card log ──────────────────────────────────────────────────
    v129. What the app currently HOLDS for the card, charge by charge, so it
@@ -1156,6 +1190,11 @@ function ccLogText(){
 function ccLogExport(){
   if(!ccStmtsWithRows().length){ toast("No statements to export yet"); return false; }
   return deliver(ccLogText(),"card-log-"+stamp()+".txt","text/plain");
+}
+/* v137 — same guard, same text, straight to the clipboard */
+function ccLogCopy(){
+  if(!ccStmtsWithRows().length){ toast("No statements to export yet"); return false; }
+  return copyOut(ccLogText(),"Card log");
 }
 function save(){
   pushUndo();
@@ -2426,6 +2465,33 @@ function render(anim,popTab){
       const own=segRows[g].filter(r=>!r.child), d=own.filter(rowDone);
       return d.length>=2 && d.length<own.length;
     };
+    /* v134 — the landed rows go to the top of their own band.
+       The fold header is created at the first landed row the loop meets, so its
+       position was decided by the sort rather than chosen. In Line items that put
+       "Already landed" underneath a charge that hadn't landed, which reads as if
+       the live charge were part of what had already gone.
+       Only positions this band already holds are rewritten, so nothing else in
+       the column moves — the card row, its budget and the off-book rows are in
+       bands of their own and never appear in segRows.
+       Units, not rows: foldRows() puts a group's children immediately behind it,
+       and a parent that moved without them would leave them under a heading they
+       don't belong to. Stable on both sides of the split, so the day order the
+       month is read by survives inside each half. */
+    const landedFirst=g=>{
+      if(!segOn(g)||!doneFold(g)) return;
+      const at=[];
+      shown.forEach((r,i)=>{ if(segOf(r)===g) at.push(i); });
+      const units=[];
+      at.forEach(i=>{
+        if(shown[i].child&&units.length) units[units.length-1].push(i);
+        else units.push([i]);
+      });
+      const done=units.filter(u=>rowDone(shown[u[0]]));
+      const live=units.filter(u=>!rowDone(shown[u[0]]));
+      const rows=[].concat.apply([],done.concat(live)).map(i=>shown[i]);
+      at.forEach((pos,n)=>{ shown[pos]=rows[n]; });
+    };
+    landedFirst("inc"); landedFirst("exp");
     shown.forEach((r,ri)=>{
       const sg=segOf(r);
       if(sg&&segOn(sg)){
@@ -2813,7 +2879,7 @@ function removeRow(r){
   /* It happened. Hiding it would put the column and the balance out of step with
      each other, and the balance is the one that can't be argued with. */
   if(r.real){ toast("That came off the account — it can't be deleted"); return; }
-  if(r.info){ toast("Reference only — remove it in Feed me info"); return; }
+  if(r.info){ toast("Reference only — remove it in Advanced \u2192 Statements"); return; }
   /* v109 — if a real transaction was sitting against this line, hand it back
      before the line goes. S.assign[r.key] outlived the row it named, so the
      transaction was neither shown here nor loose in the column: it still read
@@ -3640,18 +3706,39 @@ function advHTML(){
 
     <div class="sh" style="margin-top:16px">Activity log</div>
     <div class="crow"><button class="mini" id="advLog">Save the activity log</button>
+      <button class="mini" id="advLogCopy">Copy it</button>
       <button class="mini" id="advLogClear">Clear it</button></div>
     <div class="hint">A running record of what the app did on <b>this device</b> — every
       card pull, every duplicate it merged, every account it re-seated.
       <b>${logCount()}</b> entries right now. It lives on this device only, never
       goes into your gist, and holds no card numbers or logins. Save it and send
-      it over when something needs explaining.</div>`;
+      it over when something needs explaining.</div>
+
+    <div class="sh" style="margin-top:16px">Card log</div>
+    <div class="crow"><button class="mini" id="fExport">Save the card log</button>
+      <button class="mini" id="fCopy">Copy it</button></div>
+    <div class="hint">Every statement the app holds, charge by charge, including the rows
+      it deliberately did <b>not</b> count — payments, and anything posting just outside a
+      cycle. Lay it next to your paper bill when the two disagree.
+      Remember the app totals <b>charges in the cycle</b>, while the bill carries the previous
+      balance forward and subtracts payments, so the two are meant to differ.</div>
+
+    <div class="sh" style="margin-top:16px">Statements</div>
+    <div class="crow"><button class="mini" id="advFeed">Load a statement by hand</button></div>
+    <div class="hint">The card feed files every cycle on its own, so this is the way round
+      it rather than the way in: a CSV or PDF when the feed is down or reached back empty,
+      the rebuild for a cycle captured before a fix landed, and the tagging rules.</div>`;
 }
 function wireAdv(){
   const go=(id,fn)=>{ const b=document.getElementById(id); if(b) b.onclick=fn; };
   go("advIns",()=>openDrawer("ins"));
   go("advRec",()=>openDrawer("rec"));
   go("advLog",()=>logExport());
+  go("advLogCopy",()=>logCopy());
+  /* v139 — moved here from the statements pane */
+  go("fExport",()=>ccLogExport());
+  go("fCopy",()=>ccLogCopy());
+  go("advFeed",()=>{ feedDraft=null; openDrawer("feed"); });
   go("advLogClear",()=>{
     if(!logCount()){ toast("Nothing in the log yet"); return; }
     if(!confirm("Clear the activity log? It only lives on this device and "
@@ -4325,13 +4412,21 @@ const GUESSNAME={card:"a card",bank:"a bank account",asset:"an investment accoun
    them would light up. Tapping a role moves the row across instead of redrawing
    the panel, which would throw away the scroll position on a list this long. */
 const ASSETROLE=r=>r==="asset"||r==="loan";
+/* v136 — which of the three lists a role belongs in. Ignored accounts used to
+   fall through to "money" because they are not assets, which was never a
+   decision anybody made: it put every account you had deliberately dismissed
+   back into the one list you read to check your filing. Everything that has to
+   agree about where a row lives asks this — acctHTML when it builds a list,
+   wireAcct when it moves a row on a tap, acctEmptyPaint when it decides whether
+   to show the empty line. */
+const GROUPOF=r=>ASSETROLE(r)?"asset":r==="off"?"off":"money";
 function acctHTML(group){
-  const asset=group==="asset";
-  const list=(S.meta.acctList||[]).filter(a=>ASSETROLE(acctRole(a.id))===asset);
+  const asset=group==="asset", off=group==="off";
+  const list=(S.meta.acctList||[]).filter(a=>GROUPOF(acctRole(a.id))===group);
   const any=(S.meta.acctList||[]).length;
-  if(!any) return asset?"":`<div class="hint">Check the card once and the accounts on your
+  if(!any) return (asset||off)?"":`<div class="hint">Check the card once and the accounts on your
     SimpleFIN token will be listed here.</div>`;
-  const fresh=asset?[]:newAccts();
+  const fresh=(asset||off)?[]:newAccts();
   const row=a=>`<div class="acctrow${acctRole(a.id)==="new"?" fresh":""}" data-id="${a.id}">
       <div class="an"><b>${a.name||"Account"}</b>
         <span class="gn">${a.org||""}${typeof a.balance==="number"?" \u00b7 "+money(a.balance):""}${
@@ -4341,7 +4436,12 @@ function acctHTML(group){
           `<button class="mini role${acctRole(a.id)===k?" on":""}${
             acctRole(a.id)==="new"&&acctGuess(a)===k?" hint":""}" data-role="${k}">${l}</button>`).join("")}
       </div></div>`;
-  const head=asset
+  const head=off
+    ? `<div class="sh">Ignored</div>
+       <div class="hint" style="margin-bottom:8px">Nothing is read from these — no balance,
+         no transactions, no rows in the month. They stay listed so you can see what the
+         token is offering and send one back with a tap.</div>`
+    : asset
     ? `<div class="sh">Filed as an asset or a loan</div>
        <div class="hint" style="margin-bottom:8px">Balance only \u2014 no transactions, no rows
          in the month, no effect on the budget. Tap a different role to send one back.</div>`
@@ -4358,14 +4458,16 @@ function acctHTML(group){
         counted here is a balance the ending figures walk away from.</div>`;
   /* The empty line is rendered either way and shown or hidden as rows move, so a
      list that empties out says so without the panel being rebuilt. */
-  return `${head}<div id="acctList_${asset?"asset":"money"}">${list.map(row).join("")}</div>
-    <div class="hint" id="acctEmpty_${asset?"asset":"money"}" style="opacity:.7;display:${
-      list.length?"none":"block"}">${asset
+  return `${head}<div id="acctList_${group}">${list.map(row).join("")}</div>
+    <div class="hint" id="acctEmpty_${group}" style="opacity:.7;display:${
+      list.length?"none":"block"}">${off
+        ? "Nothing ignored. Tap <b>Ignore</b> on an account under Bank info."
+        : asset
         ? "Nothing filed as an asset yet. Tap <b>Asset</b> on an account under Bank info."
-        : "Every account is filed as an asset or a loan."}</div>`;
+        : "Every account is filed as an asset, a loan, or ignored."}</div>`;
 }
 function acctEmptyPaint(){
-  ["asset","money"].forEach(g=>{
+  ["asset","money","off"].forEach(g=>{
     const l=document.getElementById("acctList_"+g), e=document.getElementById("acctEmpty_"+g);
     if(l&&e) e.style.display=l.querySelector(".acctrow")?"none":"block";
   });
@@ -4379,8 +4481,7 @@ function wireAcct(){
       row.querySelectorAll(".role.hint").forEach(x=>x.classList.remove("hint"));
       row.classList.remove("fresh");     /* it has been filed; stop shouting */
       /* move it into the group it now belongs to */
-      const dest=document.getElementById(
-        ASSETROLE(b.dataset.role)?"acctList_asset":"acctList_money");
+      const dest=document.getElementById("acctList_"+GROUPOF(b.dataset.role));
       if(dest&&row.parentNode!==dest) dest.appendChild(row);
       acctEmptyPaint();
       if(b.dataset.role!=="bank"){                 /* stop using a balance we no longer trust */
@@ -5463,7 +5564,14 @@ function wireHand(){
 /* ---------- drawer ---------- */
 const drawer=document.getElementById("drawer"),scrim=document.getElementById("scrim");
 function openDrawer(w){
-  const titles={rec:"Recurring items",ins:"Check-up",feed:"Feed me info",
+  /* v135 — leaving Sync sideways for another panel never reaches closeDrawer(),
+     so fold it up here as well. Guarded on the panel being opened, not the one
+     being left: Sync rebuilds itself with openDrawer("sync") after nearly every
+     action inside it, and an unguarded reset would shut the sections under your
+     hands on every tap — and would undo dupJump, which opens two of them on
+     purpose and then re-renders to land you inside both. */
+  if(w!=="sync") syncOpen={};
+  const titles={rec:"Recurring items",ins:"Check-up",feed:"Statements",
                 sync:"Sync across devices",budget:"Budget adjustment",adv:"Advanced",
                 match:"Not seen on the account",bank:"Account activity",assets:"Assets",
                 line:lineTitle(), tx:txPaneTitle(), add:addTitle(),
@@ -5487,11 +5595,67 @@ function openDrawer(w){
   else if(w==="assets") wireAssets();
   else wireIns();
   drawer.classList.add("open"); scrim.classList.add("on");
+  tuckInfo();                     /* v138 — before tabify, so the icons are buttons already */
   tabifyDrawer();
   /* park focus at the top of the panel so the first Tab lands on the first control
      rather than dropping the user into whichever text field happens to be first */
   const db=document.getElementById("dbody");
   if(db) db.focus({preventScroll:true});
+}
+/* ── v138 — the explanations fold away ──────────────────────────────────────
+   .hint is already this file's class for "this paragraph explains something",
+   so it is the whole selector. Warnings and status blocks wear .flag and .fb
+   and are deliberately left alone: those show up exactly when something needs
+   saying, and putting them behind a tap would be the wrong way round.
+
+   A .hint carrying an id is not prose — it is a line the code shows and hides
+   itself (acctEmpty_*, bgDirty, bgScopeHint), and it writes display straight
+   onto the element, which would fight this. Those keep their old behaviour.
+
+   The icon goes on the nearest .sh heading ABOVE the hint, not next to it, so
+   one heading gets one icon however many paragraphs sit under it and the panel
+   keeps the shape you learned. Anything with no heading above it gets its own.
+
+   Runs on every render because openDrawer() rebuilds the body each time, which
+   also means an opened explanation shuts again on the next rebuild. Shut is the
+   resting state; that is the point of the change. */
+function infoBtn(loose){
+  const b=document.createElement("button");
+  b.type="button";
+  b.className="ibtn"+(loose?" loose":"");
+  b.textContent="i";
+  b.title="What this does";
+  b.setAttribute("aria-label","What this does");
+  return b;
+}
+function tuckInfo(){
+  const db=document.getElementById("dbody"); if(!db) return;
+  const wire=(b,list)=>{ b.onclick=ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    const on=!b.classList.contains("on");
+    b.classList.toggle("on",on);
+    list.forEach(h=>h.classList.toggle("show",on));
+  }; };
+  const byHead=[];                       /* [head, [hints]] — order preserved */
+  Array.prototype.forEach.call(db.querySelectorAll(".hint"),h=>{
+    if(h.id) return;                     /* the code owns this one */
+    if(!h.textContent.trim()) return;    /* nothing to hide */
+    h.classList.add("tucked");
+    let p=h.previousElementSibling, head=null;
+    while(p){
+      if(p.classList&&p.classList.contains("sh")){ head=p; break; }
+      p=p.previousElementSibling;
+    }
+    if(!head){
+      const b=infoBtn(true);
+      h.parentNode.insertBefore(b,h);
+      wire(b,[h]);
+      return;
+    }
+    const seen=byHead.find(x=>x[0]===head);
+    if(seen) seen[1].push(h); else byHead.push([head,[h]]);
+  });
+  byHead.forEach(([head,list])=>{ const b=infoBtn(false); head.appendChild(b); wire(b,list); });
 }
 /* anything in here with a click handler of its own can be reached and fired from
    the keyboard. `el.onclick` is truthy only where the code assigned one, which is
@@ -5504,7 +5668,12 @@ function tabifyDrawer(){
     el.tabIndex=0; el.setAttribute("role","button");
   });
 }
-function closeDrawer(){ drawer.classList.remove("open"); scrim.classList.remove("on"); }
+/* v135 — Sync folds itself back up on the way out. Sections opened to find one
+   thing used to stay open until the page was reloaded, so the panel you came
+   back to was never the short one the fold exists to give you. Every exit runs
+   through here: the X, the scrim, Escape and the back gesture. */
+function closeDrawer(){ drawer.classList.remove("open"); scrim.classList.remove("on");
+  syncOpen={}; }
 document.getElementById("dclose").onclick=closeDrawer;
 scrim.onclick=closeDrawer;
 /* a tap inside the panel must never reach the scrim behind it */
@@ -5536,7 +5705,9 @@ document.getElementById("btnCard").onclick=()=>{ nav={month:null,cat:null}; open
     bA.onmouseleave=hideTip;
   }
 }
-document.getElementById("btnFeed").onclick=()=>{ feedDraft=null; openDrawer("feed"); };
+/* v139 — btnFeed is gone from the menu, so its handler goes with it. Left in
+   place it would throw on null at load and take every handler wired after it
+   down with it. The pane is now reached from Advanced. */
 document.getElementById("stmtIn").addEventListener("change",async e=>{
   const files=e.target.files;
   try{ await ingestFiles(files); }
@@ -5935,13 +6106,8 @@ function feedHTML(){
       cycle used to be frozen with whatever was captured at the time, and this is the way out of that.
       It never replaces a statement with an empty one, keeps the number you typed over it if any, and
       asks first if the statement was loaded by hand. Costs one of the day's card checks.</div>`;
-  if(done.length) h+=`<div class="crow" style="margin-bottom:6px">
-      <button class="mini" id="fExport" style="width:100%;padding:10px">Save the card log — every charge, itemised</button></div>
-    <div class="hint" style="margin-bottom:12px">Writes out every statement the app holds, charge by charge,
-      including the rows it deliberately did <b>not</b> count — payments, and anything posting just outside a
-      cycle. Hand it over next to your paper bill when the two disagree.
-      Remember the app totals <b>charges in the cycle</b>, while the bill carries the previous balance
-      forward and subtracts payments, so the two are meant to differ.</div>`;
+  /* v139 — the card log lives in Advanced now, under the activity log. It is a
+     report you hand to somebody, which is what the rest of that section is. */
 
   const dts=feedDraft&&feedDraft.dates;
   if(dts&&(dts.from||dts.due)){
@@ -6069,8 +6235,6 @@ function wireFeed(){
       S.catRules.splice(+b.dataset.rx,1); save(); openDrawer("feed");
       const c=document.getElementById("rulesCard"); if(c) c.classList.add("open"); });
   }
-  const fx=document.getElementById("fExport");
-  if(fx) fx.onclick=()=>ccLogExport();
   document.querySelectorAll("#dbody .fRebuild").forEach(b=>{
     b.onclick=async()=>{
       if(b.disabled) return;
@@ -8493,12 +8657,17 @@ function syncHTML(){
       and every account on that token gets listed here to be told what it is.</div>`;
 
   const assetB=(sfinOn()?acctHTML("asset"):"")+liveLoanHTML()+handHTML();
+  const offB=sfinOn()?acctHTML("off"):"";
 
   const fresh=(typeof newAccts==="function"?newAccts():[]).length;
   let grp="";
   grp+=accSec("card","Card info",
               sfinOn()?(lt!==null?`${money(-lt)} this cycle`:"connected"):"not connected",card);
-  const nMoney=(S.meta.acctList||[]).filter(a=>!ASSETROLE(acctRole(a.id))).length;
+  /* v136 — counts what is in the list under it. It used to count ignored
+     accounts too, so the note and the list disagreed the moment you ignored
+     anything. */
+  const nMoney=(S.meta.acctList||[]).filter(a=>GROUPOF(acctRole(a.id))==="money").length;
+  const nOff=(S.meta.acctList||[]).filter(a=>acctRole(a.id)==="off").length;
   grp+=accSec("bank","Bank info",
               fresh?`${fresh} still need${fresh===1?"s":""} a role`
                    :sfinOn()?`${nMoney} card${nMoney===1?"":"s"} and account${nMoney===1?"":"s"}`
@@ -8506,6 +8675,11 @@ function syncHTML(){
   grp+=accSec("asset","Asset info",
               (()=>{ const n=assetLines().length;
                      return n?`${n} feeding the Assets figure`:"nothing typed in"; })(),assetB);
+  /* under Asset info for the same reason assets are down here: a list you file
+     something into once and then stop reading. Card info and Bank info are the
+     two you come back to. */
+  if(sfinOn()) grp+=accSec("ignored","Ignored accounts",
+              nOff?`${nOff} not read from`:"none",offB);
   h+=accSec("money","My bank, card and asset info",
             sfinOn()?"card, accounts, loans":"not connected",grp);
 
@@ -8916,7 +9090,8 @@ function cardHTML(){
       ${have===1?"is <b>1</b>":"are <b>none</b>"} loaded. One month tells you what you spent that month;
       two is the first point where a trend, an average, or a comparison means anything.<br><br>
       Remember a statement paid in one month covers the month before it — so ${y}'s spending arrives on the
-      statements paid <b>Feb ${y} through Jan ${y+1}</b>. Add them under <b>Feed me info</b>.</div></div>`;
+      statements paid <b>Feb ${y} through Jan ${y+1}</b>. Add them under
+      <b>Advanced \u2192 Statements</b>.</div></div>`;
   }
   const pct=v=>d.charged?Math.abs(v)/d.charged*100:0;
   let h=tempSec+`<div class="flag ${d.complete?"good":""}"><div class="ft">${
@@ -9379,6 +9554,36 @@ async function deliver(text,name,mime){
   }catch(err){}
   toast("This browser blocked the download");
   alert("This browser wouldn't save the file.\n\nIf you're inside an app's built-in browser, tap the ⋯ menu and choose \"Open in Safari\", then try again.");
+  return false;
+}
+/* v137 — the other way out of a log. Same text deliver() would write to a file,
+   put on the clipboard instead, because most of the time the log is going into a
+   message rather than into Files.
+   Two routes on purpose. navigator.clipboard is refused on an insecure origin,
+   inside some in-app webviews, and whenever the permission is denied; the
+   textarea below survives all three because it never asks the OS for anything —
+   it runs inside the tap that asked for it. Nothing in here throws into its
+   caller: a log that breaks the panel it lives in is worse than no button. */
+async function copyOut(text,what){
+  const said=(what||"That")+" copied";
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(text);
+      toast(said); return true;
+    }
+  }catch(e){}
+  try{
+    const ta=document.createElement("textarea");
+    ta.value=text; ta.setAttribute("readonly","");
+    ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
+    document.body.appendChild(ta);
+    ta.select();
+    if(ta.setSelectionRange) ta.setSelectionRange(0,String(text).length);
+    const won=!!(document.execCommand&&document.execCommand("copy"));
+    ta.remove();
+    if(won){ toast(said); return true; }
+  }catch(e){}
+  toast("This browser wouldn\u2019t let me copy");
   return false;
 }
 const up10=n=>Math.ceil(Math.abs(n)/10)*10;
