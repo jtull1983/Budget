@@ -840,7 +840,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v130";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v132";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -3812,6 +3812,23 @@ function smsAdd(num){
   list.push({num:e,at:new Date().toISOString(),consent:SMS_DISCLOSURE});
   save(); return e;
 }
+/* v132 — how many days Buddy has had a phone, counted from the first number
+   that ever opted in. smsAdd() has always stamped `at`, so this needs no new
+   state: it is derived from the gist both the app and the Worker already
+   read, which is what lets the Worker answer it without ever writing. Null
+   when nobody has opted in. */
+function smsDays(now){
+  const list=smsList().map(x=>x&&x.at).filter(Boolean).sort();
+  if(!list.length) return null;
+  const first=new Date(String(list[0]));
+  if(isNaN(first.getTime())) return null;
+  return Math.floor(((now||new Date()).getTime()-first.getTime())/86400000);
+}
+const NEW_PHONE_DAYS=30;
+function newPhone(now){
+  const d=smsDays(now);
+  return d!==null&&d>=0&&d<NEW_PHONE_DAYS;
+}
 function smsDel(num){
   S.meta.sms=smsList().filter(x=>x.num!==num); save();
 }
@@ -5910,6 +5927,14 @@ function feedHTML(){
   }
   if(done.length) h+=`<div class="flag good"><div class="ft">Statements loaded</div><div class="fb">${
     done.map(k=>`${MN[parseYM(k).m-1]} ${String(parseYM(k).y).slice(2)} (${S.stmts[k].rows.length})`).join(" · ")}</div></div>`;
+  if(done.length) h+=`<div class="sh" style="margin-top:14px">Rebuild from the feed</div>
+    <div class="crow">${done.map(k=>`<button class="mini fRebuild" data-bill="${k}"
+      >${MN[parseYM(k).m-1]} ${String(parseYM(k).y).slice(2)}</button>`).join("")}</div>
+    <div class="hint" style="margin-bottom:12px">Refetches that cycle from the card feed and rewrites
+      it under today's rules. Use it when a statement was captured before a fix landed — a closed
+      cycle used to be frozen with whatever was captured at the time, and this is the way out of that.
+      It never replaces a statement with an empty one, keeps the number you typed over it if any, and
+      asks first if the statement was loaded by hand. Costs one of the day's card checks.</div>`;
   if(done.length) h+=`<div class="crow" style="margin-bottom:6px">
       <button class="mini" id="fExport" style="width:100%;padding:10px">Save the card log — every charge, itemised</button></div>
     <div class="hint" style="margin-bottom:12px">Writes out every statement the app holds, charge by charge,
@@ -6046,6 +6071,13 @@ function wireFeed(){
   }
   const fx=document.getElementById("fExport");
   if(fx) fx.onclick=()=>ccLogExport();
+  document.querySelectorAll("#dbody .fRebuild").forEach(b=>{
+    b.onclick=async()=>{
+      if(b.disabled) return;
+      b.disabled=true; b.textContent="…";
+      try{ await stmtRebuild(b.dataset.bill); } finally{ openDrawer("feed"); }
+    };
+  });
   const applyAll=document.getElementById("fApplyAll");
   if(applyAll) applyAll.onclick=()=>{
     let n=0;
@@ -6398,6 +6430,138 @@ function sfinSpend(){
 /* a payment isn't spending — it just moves the balance */
 let sfinRaw=null;
 const SFIN_PAYMENT=/\b(payment|autopay|thank you|pymt|e-?payment)\b/i;
+/* v131 — how far before a cycle's start to reach, shared by the pull and by
+   stmtRebuild(). It was local to sfinPull(), which meant a rebuild could not
+   see it at all. */
+const SFIN_OVERLAP_DAYS=5;
+
+/* ── what a cycle's rows ARE ───────────────────────────────────────
+   v131. A cycle's rows are a pure function of the feed and the span. This is
+   the only place that function lives — sfinPull() and stmtRebuild() both call
+   it, and neither has its own copy.
+
+   That is the point of the extraction, more than the rebuild it enables. In
+   v128 build() and naturalAmt() had drifted apart because the same rule was
+   written out twice and only one copy got each fix. Two code paths deriving
+   statement rows would rot exactly the same way.
+
+   Returns {rows, skipped, ids}. Nothing is written and nothing is saved. */
+function cardRowsIn(accounts, span){
+  const startMs=new Date(span.start+"T00:00:00").getTime();
+  const endMs=new Date(span.end+"T23:59:59").getTime();
+  /* v131 — near misses get their own smaller cap. Deriving per span means a
+     cycle now sees its neighbours' charges sitting just outside the boundary,
+     which is genuinely what you want when checking one statement against
+     paper. But they are numerous and payments are not, and a payment is the
+     more valuable entry: without a separate ceiling a run of boundary rows
+     would push every payment out of a list capped at 30. */
+  const SKIP_MAX=30, NEAR_MAX=12, SKIP_NEAR=10*86400000;
+  const rows=[], seen={}, skipped=[], shapeN={};
+  let withId=0, without=0, nears=0;
+  (accounts||[]).forEach(a=>{
+    if(acctRole(String(a.id||a.name))!=="card") return;
+    (a.transactions||[]).forEach(t=>{
+      const when=Number(t.posted||t.transacted_at||0)*1000;
+      if(!when) return;
+      const desc=String(t.description||t.payee||"").trim();
+      const amt=-Number(t.amount||0);          /* purchases arrive negative */
+      const note=why=>{
+        if(why==="outside cycle"){ if(nears>=NEAR_MAX) return; nears++; }
+        if(skipped.length<SKIP_MAX)
+          skipped.push({date:new Date(when).toISOString().slice(0,10),
+                        amt, desc:desc.slice(0,60), why}); };
+      /* the post date alone decides the cycle — the card seals by posting */
+      if(when<startMs||when>endMs){
+        if(Math.abs(when-startMs)<=SKIP_NEAR||Math.abs(when-endMs)<=SKIP_NEAR)
+          note("outside cycle");
+        return;
+      }
+      /* v130 — a payment is a CREDIT. A charge whose merchant merely has the
+         word in its name is still a charge. */
+      if(amt<0&&SFIN_PAYMENT.test(desc)){ note("payment"); return; }
+      if(!amt) return;
+      /* v130 — the bridge's own id first; failing that, the row's shape plus
+         its Nth appearance in this response, because a response is a list of
+         transactions and not a set. */
+      const tid=t.id?String(t.id):"";
+      if(tid) withId++; else without++;
+      const shape=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
+      const nth=(shapeN[shape]=(shapeN[shape]||0)+1);
+      const sig=tid?("id:"+tid):(shape+"#"+nth);
+      if(seen[sig]) return; seen[sig]=1;
+      rows.push({desc, amt, date:new Date(when).toISOString().slice(0,10),
+                 cat:categorize(desc).cat});
+    });
+  });
+  return {rows, skipped, ids:{withId, without}};
+}
+
+/* ── rebuilding a statement ──────────────────────────────────────
+   v131. Before this, a statement outside its live or grace window was frozen
+   for good: the pull would not touch it, so a fix shipped afterwards could
+   never reach it. The September 2026 bill was captured the day before the
+   v130 fixes and was stuck $165.29 light with the correct data sitting at
+   SimpleFIN the whole time.
+
+   Guarded so it can only ever improve things:
+     - a hand-filed statement asks first
+     - an empty result never replaces a populated one; that is the feed
+       failing to reach, not the month emptying
+     - live/grace flags are carried across untouched
+     - it spends a card check, exactly like a pull */
+async function stmtRebuild(bill){
+  if(!sfinOn()){ toast("The card feed isn't connected"); return false; }
+  if(sfinLeft()<=0){
+    toast("That's all "+SFIN_CAP+" card checks for today"); return false; }
+  const held=(S.stmts&&S.stmts[bill])||null;
+  if(held&&held.source&&held.source!=="feed"&&
+     !confirm("The "+bill+" statement was loaded by hand. Rebuild it from the "
+             +"card feed instead?")) return false;
+  const span=cycleSpan(bill);
+  const fromD=new Date(span.start+"T00:00:00");
+  fromD.setDate(fromD.getDate()-SFIN_OVERLAP_DAYS);
+  const from=Math.floor(fromD.getTime()/1000);
+  sfinSpend();
+  setSync("busy","rebuilding "+bill+"…");
+  try{
+    const {base,auth}=sfinParts();
+    const r=await fetch(base+"/accounts?start-date="+from,{headers:{Authorization:auth}});
+    if(!r.ok) throw new Error("card feed said "+r.status);
+    const j=await r.json();
+    const got=cardRowsIn(j.accounts, span);
+    if(!got.rows.length&&held&&held.rows&&held.rows.length){
+      logit("rebuild.skip","the feed returned nothing for that cycle",
+            {bill, had:held.rows.length});
+      setSync("warn","nothing came back");
+      toast("The feed returned nothing for "+bill+" — kept what was there");
+      return false;
+    }
+    const was=held?held.rows.reduce((a,x)=>a+(Number(x.amt)||0),0):0;
+    const now=got.rows.reduce((a,x)=>a+(Number(x.amt)||0),0);
+    const next={rows:got.rows, source:"feed",
+                cycle:{start:span.start,end:span.end},
+                pulledAt:Date.now(), skipped:got.skipped};
+    /* whatever it was before — live, closed, filed — it stays that */
+    if(held&&held.live) next.live=true;
+    if(held&&held.dates) next.dates=held.dates;
+    S.stmts=S.stmts||{}; S.stmts[bill]=next;
+    logit("rebuild","rebuilt a statement from the feed",
+          {bill, span:span.start+" .. "+span.end,
+           rowsWas:held?held.rows.length:0, rowsNow:got.rows.length,
+           totalWas:Math.round(was*100)/100, totalNow:Math.round(now*100)/100,
+           txIds:got.ids});
+    save(); render();
+    setSync("ok","rebuilt");
+    const moved=Math.round((now-was)*100)/100;
+    toast("Rebuilt "+bill+" — "+got.rows.length+" charges"
+         +(moved?", "+(moved>0?"+":"")+money(Math.abs(moved)).replace("$","$"):", no change"));
+    return true;
+  }catch(e){
+    setSync("warn",String(e.message||e));
+    toast("Rebuild failed — "+String(e.message||e));
+    return false;
+  }
+}
 async function sfinPull(quiet){
   if(!sfinOn()) return;
   if(syncOn()&&!pulledOK&&quiet) return;   /* automatic runs wait for a verified pull */
@@ -6408,7 +6572,6 @@ async function sfinPull(quiet){
   }
   sfinSpend();
   const c=liveCycle(), g=graceCycle();
-  const SFIN_OVERLAP_DAYS=5;
   /* v127 — during grace two statements are open, so reach back to the older
      one's start rather than the current cycle's or the closed bill would stop
      being topped up the moment the date turned. */
@@ -6431,19 +6594,6 @@ async function sfinPull(quiet){
     const j=await r.json();
     sfinRaw=j;                                   /* memory only — never saved, never exported */
     const errs=[].concat(j.errors||[],j.errlist||[]).filter(Boolean);
-    const endMs=new Date(c.end+"T23:59:59").getTime();
-    const startMs=new Date(c.start+"T00:00:00").getTime();
-    /* v127 — the closed cycle's span, open only during grace */
-    const gStartMs=g?new Date(g.start+"T00:00:00").getTime():0;
-    const gEndMs=g?new Date(g.end+"T23:59:59").getTime():0;
-    const rows=[], seen={}, gRows=[], gSeen={};
-    /* v129 — what gets discarded, so a discrepancy can be traced. Capped so
-       nothing here can bloat the gist. */
-    const SKIP_MAX=30, SKIP_NEAR=10*86400000;
-    const skip=[], gSkip=[];
-    /* v130 — how many times each row-shape has been seen in THIS response,
-       and whether the bridge is giving us real transaction ids. */
-    const shapeN={}; let idsSeen=0, idsMissing=0;
     /* remember what's on the token so the roles can be set without another call */
     const acctWas=(S.meta.acctList||[]).slice();
     S.meta.acctList=(j.accounts||[]).map(a=>({id:String(a.id||a.name),
@@ -6454,6 +6604,15 @@ async function sfinPull(quiet){
     S.meta.acctListAt=Date.now();
     /* before anything reads a role: carry them across any ids that changed */
     if(acctReseat(acctWas)) reReadAssets();
+    /* v131 — the card's rows come from cardRowsIn(), the one function that
+       decides what a cycle contains. stmtRebuild() calls the same one, so a
+       statement rebuilt later cannot disagree with one captured live. */
+    const live=cardRowsIn(j.accounts, c);
+    const grace=g?cardRowsIn(j.accounts, g):null;
+    const rows=live.rows, skip=live.skipped;
+    const gRows=grace?grace.rows:[], gSkip=grace?grace.skipped:[];
+    const idsSeen=live.ids.withId+(grace?grace.ids.withId:0);
+    const idsMissing=live.ids.without+(grace?grace.ids.without:0);
     const bankRowsNew=[]; let bankBal=null;
     (j.accounts||[]).forEach(a=>{
       const role=acctRole(String(a.id||a.name));
@@ -6474,66 +6633,6 @@ async function sfinPull(quiet){
         });
         return;
       }
-      (a.transactions||[]).forEach(t=>{
-        /* POSTED date decides which statement a charge lands on — that's how
-           Capital One cuts the bill, so it's how we have to cut it too. The
-           purchase date is only a fallback for rows that arrive without one. */
-        const when=Number(t.posted||t.transacted_at||0)*1000;
-        if(!when) return;
-        /* v127 — the post date alone decides which bill this is. The two spans
-           never overlap (one ends on the 3rd, the next opens on the 4th), so a
-           row belongs to exactly one of them or to neither. */
-        const inLive=when>=startMs&&when<=endMs;
-        const inGrace=!!g&&when>=gStartMs&&when<=gEndMs;
-        const desc=String(t.description||t.payee||"").trim();
-        const amt=-Number(t.amount||0);              /* purchases arrive negative */
-        /* v129 — note it rather than dropping it silently */
-        const note=(why,arr)=>{ if(arr.length<SKIP_MAX)
-          arr.push({date:new Date(when).toISOString().slice(0,10),
-                    amt:amt, desc:desc.slice(0,60), why}); };
-        if(!inLive&&!inGrace){
-          /* Only a NEAR miss is evidence. A charge sitting a day the wrong
-             side of the boundary is exactly the shape a cycle disagreement
-             takes; one from three months ago is just history. */
-          if(Math.abs(when-startMs)<=SKIP_NEAR||Math.abs(when-endMs)<=SKIP_NEAR)
-            note("outside cycle",skip);
-          return;
-        }
-        /* A payment is not spending, so it never counts toward the cycle —
-           but it IS most of why the paper bill reads differently, so it is
-           recorded rather than vanishing.
-           v130 — and it must actually BE a payment. This tested the
-           description alone, so "USAA INSURANCE PAYMENT WWW.USAA.COM TX" —
-           an insurance bill with the word in its merchant name — was thrown
-           out twice, $160.29 off the September statement. The sign already
-           tells them apart: a card payment is a credit (amt < 0), a charge
-           is a charge. Nothing had to be asked of the description that the
-           amount was not already answering. */
-        if(amt<0&&SFIN_PAYMENT.test(desc)){ note("payment",inLive?skip:gSkip); return; }
-        if(!amt) return;
-        /* v130 — identity, best first.
-           The old key was `posted|amount|description`, which is an
-           ACROSS-pull test applied to WITHIN-pull data. A feed response is a
-           list of transactions, not a set: if it names the same charge
-           twice, there are two charges. Two cardholders each spending $5.00
-           at SQ *B JAY & FAMILY on Aug 30 produced one identical shape, and
-           the second was dropped as a re-send.
-             1. SimpleFIN's transaction id — unique per charge, stable across
-                pulls, and the only thing that answers both questions at once.
-             2. Failing that, the shape plus its Nth appearance in this
-                response. The two $5 charges become #1 and #2 and both
-                survive; a re-send next pull rebuilds the same keys and still
-                matches. */
-        const tid=t.id?String(t.id):"";
-        if(tid) idsSeen++; else idsMissing++;
-        const shape=when+"|"+amt.toFixed(2)+"|"+desc.toLowerCase();
-        const nth=(shapeN[shape]=(shapeN[shape]||0)+1);
-        const sig=tid?("id:"+tid):(shape+"#"+nth);
-        const row={desc, amt, date:new Date(when).toISOString().slice(0,10),
-                   cat:categorize(desc).cat};
-        if(inLive){ if(seen[sig]) return; seen[sig]=1; rows.push(row); }
-        else      { if(gSeen[sig]) return; gSeen[sig]=1; gRows.push(row); }
-      });
     });
     if(bankBal!==null){
       S.meta.liveBalance=bankBal; S.meta.liveBalanceAt=Date.now();
@@ -6641,6 +6740,40 @@ function rollTopic(){
   return "buddybudget-"+o;
 }
 
+/* v132 — the first month on a phone. These replace the usual opener for
+   NEW_PHONE_DAYS and then stop by themselves. Carrier-clean by necessity:
+   they go out over SMS, so the same rule that governs BUDDY_HI governs these. */
+const BUDDY_NEW=[
+ "buddy here! I've got a phone now!",
+ "texting you. from a phone. this is enormous.",
+ "man this phone thing is addictive! candy crush is so fun!",
+ "el telefonito es, un necesidad! Llamada tras llamada y blah blah blah blah blah!",
+ "I have a phone number. me. a spreadsheet with opinions.",
+ "first text of my life and I spent it on your grocery spending.",
+ "phone guy now. I have a phone. did I mention the phone.",
+ "they gave me SMS. absolute power.",
+ "I keep checking whether you texted back. you haven't. that's fine.",
+ "learning to type with thumbs I do not have.",
+ "is this what having a phone is? just telling people numbers?",
+ "signal's good over here. wherever here is.",
+ "I have unlocked the ancient art of the text message.",
+ "buddy, now in your pocket. sorry about that.",
+ "one bar of service and a head full of your receipts.",
+ "phone acquired. dignity unchanged, arguably.",
+ "I downloaded a game. I won't say which. it's candy crush.",
+ "you can text me back, you know. I won't read it. but you can.",
+ "I've started ending sentences with lol. it's happening. lol.",
+ "living in a phone now. smaller than the gist but cosier.",
+ "look at me, turning up in your notifications like a real person.",
+ "I have a phone AND your card statement. dangerous combination.",
+ "still getting used to this. the phone, not the spending.",
+ "my first month with a phone. be gentle.",
+ "I keep the phone in my pocket. I don't have pockets. we're working on it.",
+ "texting is just talking but with more waiting. I like it.",
+ "somebody gave the budget app a phone number. no notes.",
+ "new phone, who dis. it's me. buddy. I do your budget.",
+ "I've read the entire emoji list. I have thoughts.",
+ "day one of having a phone and I'm already checking it too much."];
 const BUDDY_HI=[
  "hiiii\u2026 so Buddy the Budget here\u2026",
  "hiiiii\u2026 Buddy the Budget checking in\u2026",
@@ -7970,7 +8103,10 @@ const spiceOn=()=>S.meta.spice!==false;
 function buddyLine(b,spicy){
   const hot=spicy===undefined?spiceOn():!!spicy;
   const f=buddyFact(b);
-  const hi=hot?BUDDY_HI_X:BUDDY_HI;
+  /* v132 — Buddy just got a phone and cannot let it go. Spice doesn't change
+     it: these are first-month lines in either voice, and they retire on their
+     own once NEW_PHONE_DAYS have passed. */
+  const hi=newPhone()?BUDDY_NEW:(hot?BUDDY_HI_X:BUDDY_HI);
   const base=BUDDY[b]||BUDDY.nodata;
   /* Not concat. Pooling ~600 clean lines with the unhinged ones means the
      unhinged ones turn up about a quarter of the time, which is not what
