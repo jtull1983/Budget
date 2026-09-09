@@ -120,7 +120,20 @@ body.fitOn .navarr{display:none}
 .assetrow:last-child{border-bottom:none}
 .assetrow .an{font-size:13px;display:flex;flex-direction:column;gap:2px;min-width:0}
 .assetrow .ao{font-size:10px;letter-spacing:.08em;color:var(--dimmer)}
-.assetrow .ab{font-size:13.5px;font-weight:600;white-space:nowrap}
+.assetrow .ab{font-size:13.5px;font-weight:600;white-space:nowrap;text-align:right}
+/* v142 — what it has done since it was first read, under the figure it belongs
+   to. Its own line rather than beside it: these numbers are read as a column and
+   a second figure on the same line breaks the scan. */
+.assetrow .ad{display:block;font-size:9.5px;font-weight:400;letter-spacing:.06em;
+  margin-top:3px;white-space:nowrap}
+.assetrow .ad.up{color:var(--teal)}
+.assetrow .ad.dn{color:var(--red)}
+.assetrow .ad.flat{color:var(--dimmer)}
+.assetsum .ad{display:block;font-size:10px;font-weight:400;letter-spacing:.06em;
+  margin-top:3px;text-align:right}
+.assetsum .ad.up{color:var(--teal)}
+.assetsum .ad.dn{color:var(--red)}
+.assetsum .ad.flat{color:var(--dimmer)}
 .assetrow .ab.dim{color:var(--dimmer);font-weight:400}
 .loandet .warn{color:var(--amber,#e0a458)}
 .loandet{font-size:10.5px;letter-spacing:.04em;color:var(--dimmer);
@@ -869,7 +882,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v139";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v142";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1007,6 +1020,21 @@ function migrate(s){
      Left in the file rather than torn out: nothing writes to it, and every read is a
      lookup that now misses. */
   if(!s.meta.txReset){ s.hits={}; s.props={}; s.meta.txReset=1; }
+  /* v142 — where an account started. One entry per account, written once and
+     never rewritten, so it costs a few hundred bytes forever rather than a few
+     hundred a week the way a full history would.
+     Seeded from the reading already in state: that reading was taken on a real
+     day off real balances, so the pane can show an honest dated change straight
+     away instead of a column of +$0 waiting a week to mean anything. */
+  if(!s.meta.assetBase||typeof s.meta.assetBase!=="object"){
+    s.meta.assetBase={};
+    const snap=s.meta.assets;
+    if(snap&&Array.isArray(snap.per)) snap.per.forEach(r=>{
+      const v=r.kind==="loan"?r.paid:r.balance;
+      if(v===null||v===undefined||!isFinite(v)) return;
+      s.meta.assetBase[String(r.id)]={at:snap.day,v:Number(v)};
+    });
+  }
   s.payee=s.payee||{};   /* ruleId -> merchant names you've attached by hand */
   s.learned=s.learned||{};
   /* v60 — biweekly rules used to carry an anchor date ("any payday you know")
@@ -1067,6 +1095,32 @@ function logRead(){
 }
 function logCount(){ return logRead().length; }
 function logClear(){ try{ localStorage.removeItem(LOGKEY); }catch(e){} }
+/* ── v141 — errors stop vanishing ───────────────────────────────────────────
+   There is not one console statement in this file and about thirty catch blocks
+   swallow, fourteen of them bare. So anything escaping one of those, and
+   anything thrown where nobody was catching, landed nowhere at all — which is
+   why v140's bug survived as long as it did.
+
+   These only OBSERVE. Nothing is caught differently, nothing retried, nothing
+   about what the app does changes; they write down what happened and get out of
+   the way. Both are passive listeners, so an existing handler still sees the
+   error exactly as before.
+
+   They cannot loop: logit() has its own try/catch and touches only
+   localStorage, so a throw while reporting a throw dies inside logit(). */
+function wireErrLog(){
+  window.addEventListener("error",ev=>{
+    logit("error",String((ev&&ev.message)||"script error"),
+          {at:((ev&&ev.filename)||"")+":"+((ev&&ev.lineno)||0)+":"+((ev&&ev.colno)||0),
+           stack:(ev&&ev.error&&ev.error.stack)?String(ev.error.stack).split("\n").slice(0,4).join(" | "):null});
+  });
+  window.addEventListener("unhandledrejection",ev=>{
+    const r=ev&&ev.reason;
+    logit("error","unhandled promise rejection",
+          {why:(r&&r.message)?String(r.message):String(r),
+           stack:(r&&r.stack)?String(r.stack).split("\n").slice(0,4).join(" | "):null});
+  });
+}
 function logit(kind,msg,data){
   try{
     const a=logRead();
@@ -1089,6 +1143,11 @@ function logText(){
     "written      "+when(Date.now()),
     "entries      "+a.length,
     "sync         "+((typeof syncOn==="function"&&syncOn())?"on":"off"),
+    /* v141 — the first question about a lost edit is whether both devices were
+       even pointed at the same gist. The id is not a credential and the token is
+       never written — only whether there is one. */
+    "gist         "+((typeof sync==="object"&&sync&&sync.gistId)||"none")
+      +((typeof sync==="object"&&sync&&sync.token)?" (token present)":" (no token)"),
     "card feed    "+((typeof sfinOn==="function"&&sfinOn())?"on":"off"),
     "bank rows    "+((typeof bankRows==="function")?bankRows().length:"?"),
     "-----------------------------------------------------------"];
@@ -5249,6 +5308,34 @@ function assetNext(d){
   }
   return r;
 }
+/* v142 — the measure has to be the same one the pane sorts and totals by, or the
+   change and the figure above it end up describing different things. For a loan
+   that is principal accumulated; for everything else, the balance. */
+function assetWorth(r){
+  if(!r) return null;
+  const v=r.kind==="loan"?r.paid:r.balance;
+  return (v===null||v===undefined||!isFinite(v))?null:Number(v);
+}
+function assetBaseSeed(per,day){
+  if(!S.meta.assetBase||typeof S.meta.assetBase!=="object") S.meta.assetBase={};
+  (per||[]).forEach(r=>{
+    const id=String(r.id);
+    if(S.meta.assetBase[id]) return;          /* written once, never rewritten */
+    const v=assetWorth(r);
+    if(v===null) return;                      /* a loan with no starting figure */
+    S.meta.assetBase[id]={at:day,v};
+  });
+}
+/* What a row has done since it was first read, or null when there is nothing
+   honest to say — no baseline, or a baseline taken on this very reading. Those
+   two zeroes mean different things and must not print the same. */
+function assetDelta(r,day){
+  const b=S.meta.assetBase&&S.meta.assetBase[String(r&&r.id)];
+  if(!b||!isFinite(b.v)) return null;
+  const now=assetWorth(r);
+  if(now===null) return null;
+  return {at:b.at, from:b.v, d:now-b.v, first:b.at===day};
+}
 /* Take the week's reading, once. Guarded on the age of the balances themselves:
    the reading day arriving is not the same as fresh numbers arriving, and
    stamping Friday's figures as Monday's would freeze a stale total for a whole
@@ -5272,6 +5359,11 @@ function assetSnap(){
                            proj:!!l.proj,run:l.run||0,extra:l.extra||0,at:l.at||"",
                            auto:l.auto||"",checked:l.checked||"",drift:l.drift}));
   const inc=loansCount();
+  /* v142 — first sighting of an account is its starting line. Written before the
+     reading is stored so a brand-new account is baselined on the same day it
+     first counts, and never rewritten afterwards — an account that drops off the
+     token and comes back must not silently restart its clock. */
+  assetBaseSeed(per,due);
   S.meta.assets={day:due,at:Date.now(),per:per,incLoan:inc,
                  total:per.reduce((s,x)=>s+(x.kind==="loan"
                    ?(inc?(x.paid||0):0):x.balance),0)};
@@ -5405,6 +5497,16 @@ function wireAssets(){
     retotalAssets(); save(); render(); openDrawer("assets");
   }
 }
+/* v142 — a row's change, or nothing at all. Its very first reading prints the
+   date it started rather than "+$0": no time has passed yet, and saying nothing
+   moved would be a claim this cannot make. */
+function deltaHTML(r,day){
+  const dd=assetDelta(r,day);
+  if(!dd) return "";
+  if(dd.first) return `<span class="ad flat">tracked from ${fmtDate(dd.at)}</span>`;
+  return `<span class="ad ${dd.d>0?"up":dd.d<0?"dn":"flat"}">${money0(dd.d)} since ${
+    fmtDate(dd.at)}</span>`;
+}
 function assetsHTML(){
   const snap=S.meta.assets, live=assetLines();
   if(!snap||!snap.per||!snap.per.length){
@@ -5423,8 +5525,22 @@ function assetsHTML(){
     :r.balance;
   const rows=all.slice().sort((a,b)=>worth(b)-worth(a));
   const n=assetNext(), tue=n.getDay()===2;
+  /* v142 — the header's change is summed over the rows below it, under the same
+     loans-included switch the total itself uses. A total whose parts do not add
+     up to it is worse than no total, so a row with no baseline is left out of
+     both sides rather than counted as having started at zero. */
+  let sumD=0, sumAny=false, sumFrom="";
+  rows.forEach(r=>{
+    if(r.kind==="loan"&&!snap.incLoan) return;
+    const dd=assetDelta(r,snap.day);
+    if(!dd||dd.first) return;
+    sumD+=dd.d; sumAny=true;
+    if(!sumFrom||dd.at<sumFrom) sumFrom=dd.at;
+  });
   let h=`<div class="assetsum"><span class="al">Assets</span>
-      <span class="av">${money(snap.total)}</span></div>
+      <span class="av">${money(snap.total)}${sumAny
+        ?`<span class="ad ${sumD>0?"up":sumD<0?"dn":"flat"}">${money0(sumD)} since ${
+           fmtDate(sumFrom)}</span>`:""}</span></div>
     <div class="sh">Read ${fmtDate(snap.day)} \u00b7 next ${tue?"Tuesday":"Monday"} ${fmtDate(ymdLocal(n))}</div>`;
   if(rows.length)
     h+=`<div class="card">`+rows.map(r=>{
@@ -5432,7 +5548,7 @@ function assetsHTML(){
         return `<div class="assetrow"><span class="an">${esc(r.name)}${
           r.org||!r.live?`<span class="ao">${esc(r.org||"")}${
             r.org&&!r.live?" \u00b7 ":""}${!r.live?"typed in":""}</span>`:""}</span>
-          <span class="ab">${money(r.balance)}</span></div>`;
+          <span class="ab">${money(r.balance)}${deltaHTML(r,snap.day)}</span></div>`;
       /* no original amount means no answer, not a large confident wrong one */
       if(r.paid===null||r.paid===undefined)
         return `<div class="assetrow"><span class="an">${esc(r.name)}
@@ -5443,7 +5559,7 @@ function assetsHTML(){
          the only place that says so. */
       return `<div class="assetrow"><span class="an">${esc(r.name)}
           <span class="ao">principal accumulated so far</span></span>
-          <span class="ab">${money(r.paid)}</span></div>`
+          <span class="ab">${money(r.paid)}${deltaHTML(r,snap.day)}</span></div>`
         + (r.drift!==null&&r.drift!==undefined&&r.drift>=6
             ? `<div class="loandet"><span class="warn">${r.drift} payments since you last
                checked it against the servicer \u2014 worth a look, escrow and payment
@@ -5458,7 +5574,12 @@ function assetsHTML(){
       tagged after this reading \u2014 ${late.map(a=>esc(a.name)).join(", ")}.
       ${late.length===1?"It joins":"They join"} the total on ${fmtDate(ymdLocal(n))}.</div>`;
   h+=`<div class="hint">These feed this number and nothing else. No transactions,
-      no rows in the month, no effect on the budget.</div>`;
+      no rows in the month, no effect on the budget.</div>
+    <div class="hint">The change under each figure is measured from the first reading
+      that account appeared in, which is dated on the row. An account tagged later
+      starts later, so the total's change only counts the ones with a run behind them.
+      On a typed-in account it moves when you edit the number, because that is the
+      only way that number ever moves.</div>`;
   return h;
 }
 
@@ -6317,6 +6438,7 @@ function keepBackup(o){
 function readBackup(){ try{ return JSON.parse(localStorage.getItem(BAKKEY)); }catch(e){ return null; } }
 function saveSync(){ try{ localStorage.setItem(SYNCKEY,JSON.stringify(sync)); }catch(e){} }
 const syncOn=()=>!!(sync.token&&sync.gistId);
+wireErrLog();   /* v141 — from here on, a throw anywhere lands in the log */
 
 let pillTimer=null;
 function pill(html,sticky){
@@ -6478,10 +6600,15 @@ async function syncPull(quiet){
   setSync("busy","checking…");
   try{
     const remote=await ghRead();
+    /* v141 — counts, not contents. bulk() is the same measure wouldGut uses, so
+       the log and the guard are describing the same thing in the same terms. */
+    logit("sync","pull read the remote",
+          {mine:bulk(S),theirs:bulk(remote),mineAt:ts(S),theirsAt:ts(remote)});
     if(ts(remote)>ts(S)){
       S=remote; migrate(S); localSave(); render();
       centerNow(false);                      /* the month list just changed shape */
       sync.lastPulled=ts(remote); saveSync(); pulledOK=true; keepBackup(remote);
+      logit("sync","took the remote copy",{now:bulk(S)});
       setSync("ok","pulled newer copy");
       if(!quiet) toast("Loaded the newer copy");
     } else {
@@ -6498,17 +6625,39 @@ async function syncPull(quiet){
         if(sent&&!quiet) toast("Sent this device\u2019s newer copy");
       } else setSync("ok", ts(S)>ts(remote) ? "local is newer" : "up to date");
     }
-  }catch(e){ setSync("err",netMsg(e)); }
+  }catch(e){ logit("sync","pull failed",{why:netMsg(e)}); setSync("err",netMsg(e)); }
 }
 async function syncPush(force){
   if(!syncOn()) return;
   setSync("busy","saving…");
   try{
-    let remote=null;
-    try{ remote=await ghRead(); }catch(e){}
+    let remote=null, readErr=null;
+    try{ remote=await ghRead(); }catch(e){ readErr=e; }
+    /* v140 — a read that FAILED is not a gist that is EMPTY, and the difference
+       is everything. Both guards below hang off `remote` being truthy, so a
+       thrown read used to skip the conflict check AND wouldGut and let the write
+       straight out. One bad moment on the network was enough for a device
+       holding almost nothing to flatten a full copy.
+       ghRead() never returns null — it throws on a bad status, on a gist with no
+       .json file, and on content it can't parse — so a null here means the read
+       did not happen, and there is no honest path that should continue.
+       force still wins: "Push now" deliberately skips both guards, and skips
+       this one too, which is why the message names it. */
+    if(readErr&&!force){
+      /* v141 — the exit that used to be invisible. This is the one that was
+         reporting "saved" while writing something nobody had checked. */
+      logit("sync","push refused — couldn't read the remote first",
+            {why:netMsg(readErr),mine:bulk(S)});
+      setSync("err","couldn't check the other copy");
+      toast("Nothing sent — I couldn't read the other copy first ("+netMsg(readErr)+
+            "). Try again, or Menu \u2192 Sync \u2192 Push now to send anyway.");
+      return false;
+    }
     if(!force&&remote){
       /* someone else saved after the copy this device started from */
       if(ts(remote)>sync.lastPulled){
+        logit("sync","push refused — theirs is newer",
+              {theirsAt:ts(remote),lastPulled:sync.lastPulled});
         setSync("warn","conflict — theirs is newer");
         toast("Someone saved a newer copy");
         return false;
@@ -6521,6 +6670,8 @@ async function syncPush(force){
            would otherwise overwrite everything. But a deliberate cut looks identical
            from here, so the message has to name the way through instead of just
            saying no. "Push now" passes force and skips this. */
+        logit("sync","push refused — would cut the remote",
+              {what:gut,mine:bulk(S),theirs:bulk(remote)});
         setSync("warn","refused \u00b7 Push now to override");
         toast("Push refused: that would cut "+gut+
               ". If you meant it, Menu \u2192 Sync \u2192 Push now.");
@@ -6528,10 +6679,12 @@ async function syncPush(force){
       }
     }
     await ghWrite(S);
+    logit("sync","pushed",{forced:!!force,checked:!!remote,mine:bulk(S)});
     sync.lastPulled=ts(S)||Date.now(); saveSync();
     setSync("ok","saved "+new Date().toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}));
     return true;
-  }catch(e){ setSync("err",netMsg(e)); return false; }
+  }catch(e){ logit("sync","push failed",{why:netMsg(e),forced:!!force});
+             setSync("err",netMsg(e)); return false; }
 }
 let pushTimer=null;
 function schedulePush(){
