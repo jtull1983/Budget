@@ -242,17 +242,54 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 }
 @media(max-width:760px){
   .top{padding:12px 12px;padding-top:calc(18px + env(safe-area-inset-top,0px));gap:9px}
-  /* one line, as it always was: the title keeps its full width and the year strip
-     takes what's left and scrolls inside itself. What changed in v35 is only that
-     the overflow now lives in the strip instead of stretching the whole page. */
+  /* v145 — everything on one line: version chip, years, hamburger, assets.
+     .top becomes a single non-wrapping row and both of its old rows become
+     ordinary items inside it, so the four survivors sit side by side. The menu
+     panel still needs a line of its own, which is what the 100% basis and the
+     order do when it opens. */
+  .top{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:10px;row-gap:9px}
+  .top>.toprow{flex:0 1 auto;min-width:0;gap:8px}
+  .top>.toprow2{flex:1 1 auto;min-width:0;gap:8px}
+  .top>.menupanel{flex:0 0 100%;order:9}
+
+  /* the title text goes, the chip it carried does not */
   .toprow .brand{flex:0 0 auto;overflow:visible}
   .brand h1{font-size:12px}
+  .brand h1 .tt{display:none}
+  .brand h1 .vtag{display:inline-flex}
+
+  /* the controls that earn their width, and the ones that don't */
+  .toprow2 #btnUndo{display:none}          /* it is in the menu on a phone */
+  .toprow2 .navarr{display:none}           /* swipe does this */
+  .toprow2 #btnFit{display:none}           /* v133 already hides it up here */
+  .toprow2 .menupad{display:none}          /* nothing left to line the menu up with */
+  .toprow2 .statuspill{display:none}       /* the pill floats; it needn't hold a slot */
+  .toprow2 .grow{display:none}
+
+  /* Menu becomes a hamburger: the widest fixed control on the row, and the only
+     one whose meaning survives losing its word */
+  .menubtn>span{display:none}
+  .menubtn>.car{display:none}
+  .menubtn::before{content:"\u2261";font-size:19px;line-height:1}
+  .menubtn{padding:7px 11px}
+
+  /* the years give width up first — the strip already scrolls inside itself, so
+     it is the only thing here that can lose room without losing anything */
+  .years{flex:1 1 auto}
+  .ytab{padding:7px 11px;font-size:12.5px}
+
+  /* the figure people read, not a control: it keeps its size */
+  .assets{flex:0 0 auto;margin-left:auto}
+  #btnUndoMenu{display:block}
   .stats{gap:14px}
   .stats .v{font-size:17px}
   .row .lbl{font-size:13.5px}
   .row .amt{font-size:14px}
   .mfoot .v{font-size:21px}
 }
+/* v145 — the menu's Undo is the phone's. Above 760px the header still carries
+   its own, and showing both would put two of the same control on one screen. */
+#btnUndoMenu{display:none}
 .statuspill .ok{color:var(--teal)} .statuspill .busy{color:var(--cyan)}
 .statuspill .err{color:var(--red)} .statuspill .warn{color:var(--amber)}
 .years{display:flex;gap:5px;align-items:stretch;min-width:0;
@@ -278,21 +315,36 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mcol.now{background:#241f0c;box-shadow:inset 0 0 0 1px var(--amber)}
 .mcol:last-child{border-right:none}
 
-/* fixed-height header so every month lines up exactly */
-.mhead{flex:none;position:relative;z-index:20;height:74px;padding:10px 11px;
+/* fixed-height header so every month lines up exactly.
+   v146 — one line instead of two stacked, 38px instead of 74. The height has to
+   stay fixed and the overflow hidden: a month carrying a tag, or a long name in
+   a narrow column, would otherwise sit a few pixels taller than its neighbours
+   and throw every row beside it out of line. */
+.mhead{flex:none;position:relative;z-index:20;height:38px;padding:0 11px;
   background:linear-gradient(#1a272d,#141e23);border-bottom:1px solid var(--line2);
-  display:flex;flex-direction:column;justify-content:space-between}
+  display:flex;flex-direction:row;align-items:center;justify-content:space-between;
+  gap:8px;overflow:hidden}
 .mcol.now .mhead{background:linear-gradient(#3a2f0e,#282108);border-bottom-color:#7a6320}
-.mname{height:19px;line-height:19px;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--txt);display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden}
+.mname{height:38px;line-height:38px;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--txt);display:flex;align-items:center;gap:5px;white-space:nowrap;
+  overflow:hidden;min-width:0;flex:0 1 auto}
+/* v146 — the year is quieter than the month but has to stay: at four columns
+   across, one of these is next January. */
+.mname .yr{color:var(--dimmer);font-weight:600}
 .mcol.past .mname{color:var(--dim)}
-.tag{height:17px;line-height:15px;font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:0 6px;
+.tag{height:15px;line-height:13px;font-size:8.5px;font-weight:700;letter-spacing:.04em;padding:0 5px;
   border-radius:2px;text-transform:uppercase;flex:none;display:inline-flex;align-items:center}
 .tag.three{background:#3a2c14;color:var(--amber);border:1px solid #6b5325}
 .tag.now{background:#4a3b10;color:#ffd98a;border:1px solid #977a24}
-.onhand{display:flex;justify-content:space-between;align-items:baseline;height:22px}
-.onhand .k{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer)}
-.onhand .v{font-size:17px;font-weight:700;color:var(--cyan)}
+/* v146 — the label rides above its own figure rather than beside it, which puts
+   the pair on one line's height. Fixed height and no wrapping, same reason the
+   header has them. */
+.onhand{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;
+  height:38px;flex:0 0 auto;line-height:1}
+.onhand .k{font-size:8px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dimmer);height:9px;line-height:9px;white-space:nowrap}
+.onhand .v{font-size:15px;font-weight:700;color:var(--cyan);height:17px;line-height:17px;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
 .mcol.now .onhand .v{color:#ffd98a}
 
 .rows{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
@@ -303,11 +355,24 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .mhead{box-shadow:0 6px 12px -8px rgba(0,0,0,.85)}
 .mfoot{box-shadow:0 -8px 14px -8px rgba(0,0,0,.9)}
 .mcol .addrow{flex:none}
-.row{display:flex;align-items:center;gap:6px;padding:8px 11px;min-height:36px;position:relative}
+/* v147 — 36px of row to hold 13px of text was 8px of padding on a line one line
+   high. 30px still clears it, and buys about one extra row in five. The font is
+   deliberately unchanged: shrinking the type is how you build a column that
+   holds more and shows less. The whole row stays the tap target. */
+.row{display:flex;align-items:center;gap:6px;padding:5px 11px;min-height:30px;position:relative}
 .row .lbl{flex:1;font-size:13px;font-weight:600;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row.inc .lbl{color:#e2f2f4}
 .row .amt{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;cursor:text;
   padding:1px 3px;border-radius:2px;border:1px solid transparent}
+/* v148 — what has already gone, struck through, beside what the month owes.
+   Struck because that is what the rows themselves look like once they land, so
+   the heading reads the way its contents do. */
+.row.seg .amt .landed{margin-left:6px;font-weight:600;font-size:12px;color:var(--dimmer)}
+/* the slash is real text, not a ::before — it has to survive a copy and be read
+   out loud. Only the figure is struck, not the separator. */
+.row.seg .amt .landed s{text-decoration:line-through;text-decoration-thickness:1px}
+/* the second triangle: same control as the one on the left, at the other end */
+.row.seg .tri.lt{margin-left:7px;cursor:pointer}
 .row.inc .amt{color:var(--teal)}
 .row.exp .amt{color:#ffb8a4}
 .row .amt.man{color:var(--amber)}
@@ -386,7 +451,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .amtin{width:84px;font-weight:700;background:#0c1418;border:1px solid var(--teal);border-radius:2px;
   padding:1px 3px;font-size:11.5px;text-align:right;outline:none;font-variant-numeric:tabular-nums}
 
-.addrow{padding:5px 7px 8px}
+.addrow{padding:3px 7px 4px}
 .mcol.blank{opacity:.55}
 .mcol.refonly{opacity:.62}
 .nodata{padding:26px 12px;text-align:center;color:var(--dimmer);
@@ -396,11 +461,17 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
 .addbtn:hover{border-color:#4a6f79;color:var(--teal)}
 
-.mfoot{flex:none;position:relative;z-index:15;height:74px;padding:10px 11px;overflow:hidden;border-top:1px solid var(--line2);
+/* v147 — 56px instead of 74. Stacked tighter, nothing removed, type unchanged.
+   Still a FIXED height: it is what keeps one column's rows level with the next
+   one's, and a month whose footer grew a line would throw the grid out. */
+.mfoot{flex:none;position:relative;z-index:15;height:56px;padding:5px 11px;overflow:hidden;border-top:1px solid var(--line2);
   background:linear-gradient(#16232a,#101a1f)}
-.mfoot .k{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer)}
-.mfoot .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;display:block}
-.mfoot .nowbal{font-size:10px;color:var(--dimmer);letter-spacing:.05em;margin-top:2px}
+.mfoot .k{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer);
+  height:11px;line-height:11px}
+.mfoot .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;display:block;
+  height:23px;line-height:23px}
+.mfoot .nowbal{font-size:10px;color:var(--dimmer);letter-spacing:.05em;margin-top:0;
+  line-height:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bigpick{display:block;width:100%;text-align:left;background:#0e151b;border:1px solid var(--line);
   border-radius:10px;padding:16px 14px;margin-bottom:10px;color:var(--txt);font:inherit;
   font-size:14px;font-weight:600;letter-spacing:.03em;cursor:pointer}
@@ -848,6 +919,12 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn" id="btnFit">See full year</button>
   </div>
   <div class="menupanel" id="menuPanel">
+    <!-- v145 — Undo lives here on a phone, where the header has no width to
+         spare for a control used once a week. Two buttons rather than one moved
+         by script at a breakpoint: a move would have to re-run on every rotate
+         and would fight placeMenu(). Both are wired to the same handler, and CSS
+         shows exactly one of them. -->
+    <button class="btn" id="btnUndoMenu">\u21b6 Undo</button>
     <button class="btn" id="btnCard">Card review</button>
     <button class="btn" id="btnBank" hidden>Account activity</button>
     <button class="btn" id="btnMatch" hidden>Confirm <span id="matchCount"></span></button>
@@ -882,7 +959,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v142";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v149";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -1545,7 +1622,15 @@ function payish(r){
 function rowBand(r){
   if(r.ruleId==="cc"||r.cc||r.budget) return 3;   /* card and its budget, at the foot */
   if(r.off) return 2;                             /* purple: shown, never counted */
-  if(r.kind==="inc") return payish(r)?0:1;        /* v112 — a credit is not a payday */
+  /* v144 — direction decides it. v112 sent a credit that wasn't a paycheck down
+     into the expense band, which was right while that band was called "Line
+     items" and the other one claimed to be paydays. With the headings reading
+     Ins and Outs the question answers itself, and a $500 repayment drawn as a
+     positive number among the outgoings never read as anything but a mistake.
+     payish() still decides whether something counts as a PAYDAY, which is a
+     different question and still has a caller. It just no longer decides which
+     end of the column the row is drawn at. */
+  if(r.kind==="inc") return 0;
   return 1;
 }
 function sortRows(rows){
@@ -2247,8 +2332,12 @@ function fitGrid(){
   const bar=document.querySelector(".bottombar"), hint=document.getElementById("swipeHint");
   const top=sc.getBoundingClientRect().top;
   const wide=(window.innerWidth||0)>1100;
-  const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0)+(wide?20:0);
-  const h=Math.max(320,(window.innerHeight||800)-top-below-6);
+  /* v147 — bar and hint are both display:none and have been for a long time, so
+     these measure 0 either way; they stay because the day one comes back this
+     keeps working. What goes is the 20px and the 6px of slack that were guarding
+     against them — held back on every screen, for furniture that isn't there. */
+  const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0);
+  const h=Math.max(320,(window.innerHeight||800)-top-below-2);
   document.documentElement.style.setProperty("--gridh",h+"px");
   if(wide&&!fitMode){
     const cw=Math.floor((sc.clientWidth||1200)/6);
@@ -2331,16 +2420,56 @@ const doneOpen=new Set();
 const doneKey=(k,g)=>k+"|done|"+g;
 function segOf(r){ const b=rowBand(r); return b===0?"inc":b===1?"exp":null; }
 function segKey(k,g){ return k+"|seg:"+g; }
+/* v149 — what a row still wants from you, or null when it is settled.
+   Lifted straight out of the draw loop, which worked this out inline to decide
+   whether to print a chip. Both callers use it now: a row that shows a chip and
+   folds anyway, or folds while showing one, would be impossible to explain, and
+   two similar-looking rules in two places is how that happens.
+   A card payment is not asking — its chip explains why the row is not in the
+   total, and there is nothing to be done about it. */
+function rowAsk(r){
+  if(!r||!r.real||r.ccpay) return null;
+  const g=txTag(r.tx);
+  if(r.transfer&&!r.assignedKey) return "assign";
+  const known=!!(g.label||(!r.transfer&&S.merch&&S.merch[normMerchant(r.tx.desc)]));
+  return known?null:"name it";
+}
 function rowDone(r){
   /* a folded group is done only when every occupant of it is */
   if(r.group) return r.rows.length>0&&r.rows.every(x=>!!(x.real||x.hit));
   return !!(r.real||r.hit);
 }
+/* v148 — the card bill row for a month, or null. The bill only; its budget row
+   is a plan for next month and is not money leaving this one. */
+function ccBillOf(k){
+  const M=MODEL.find(x=>x.k===k);
+  if(!M) return null;
+  return (M.rows||[]).find(r=>(r.ruleId==="cc"||r.cc)&&!r.budget&&!r.child)||null;
+}
 function segHead(k,g,list){
   const own=list.filter(r=>!r.child);          /* a group already carries its children */
   const shut=segShut.has(segKey(k,g));
-  const tot=own.reduce((a,r)=>a+r.amount,0);
-  const cnt=own.reduce((a,r)=>a+(r.count||1),0);
+  let tot=own.reduce((a,r)=>a+r.amount,0);
+  let cnt=own.reduce((a,r)=>a+(r.count||1),0);
+  /* v148 — the card bill belongs in what the month owes. It sits in a band of
+     its own at the foot (rowBand 3) so this heading never counted it, and on a
+     month with a statement coming that is not a small understatement — it is the
+     one figure that decides whether the month works.
+     The budget row is deliberately not counted: it is a plan for NEXT month's
+     bill, and counting it here would count the same spending twice. */
+  const bill=g==="exp"?ccBillOf(k):null;
+  if(bill){ tot+=bill.amount; cnt+=(bill.count||1); }
+  /* what has already gone. Band rows only — the right-hand figure names the rows
+     the second triangle can unfold, and the bill is not one of them. */
+  const land=own.filter(rowDone);
+  const lTot=land.reduce((a,r)=>a+r.amount,0);
+  const lCnt=land.reduce((a,r)=>a+(r.count||1),0);
+  /* v149 — offered only when there is something it would hide. The struck total
+     beside it still counts every landed row, named or not: that figure answers
+     "how much of this month has already happened", which does not change when
+     somebody names a transaction. */
+  const foldable=land.filter(r=>!rowAsk(r)).length>=1&&land.length<own.length;
+  const lOpen=doneOpen.has(doneKey(k,g));
   const done=own.length>0&&own.every(rowDone);
   const el=document.createElement("div");
   el.className="row seg "+g+(done?" done":"");
@@ -2348,11 +2477,25 @@ function segHead(k,g,list){
      with the amounts, which is where every other triangle in the app lives, but
      that is not where it was asked for. */
   el.innerHTML=`<span class="tri${shut?"":" up"}">\u25be</span>
-    <span class="lbl">${g==="inc"?"Paychecks":"Line items"}
+    <span class="lbl">${g==="inc"?"Ins":"Outs"}
       <span class="gn">\u00d7${cnt}</span></span>
-    <span class="amt">${money(tot)}</span>`;
-  el.title=(shut?"Show":"Hide")+" "+(g==="inc"?"income":"expenses")+" for this month";
-  el.onclick=()=>{ const key=segKey(k,g);
+    <span class="amt">${money(tot)}${land.length
+      ? `<span class="landed" title="already landed \u00d7${lCnt}">/ <s>${money(lTot)}</s></span>`
+      : ""}${foldable
+      ? `<span class="tri lt${lOpen?" up":""}" data-landed="1">\u25be</span>`
+      : ""}</span>`;
+  el.title=(shut?"Show":"Hide")+" money "+(g==="inc"?"in":"out")+" for this month";
+  el.onclick=ev=>{
+    /* v148 — the second triangle unfolds the landed rows; the heading around it
+       still collapses the whole band. Checked before the band toggle so a tap on
+       the triangle does not do both. */
+    if(ev&&ev.target&&ev.target.closest&&ev.target.closest("[data-landed]")){
+      ev.stopPropagation();
+      const dk=doneKey(k,g);
+      doneOpen.has(dk)?doneOpen.delete(dk):doneOpen.add(dk);
+      render(); return;
+    }
+    const key=segKey(k,g);
     segShut.has(key)?segShut.delete(key):segShut.add(key); render(); };
   return el;
 }
@@ -2360,7 +2503,10 @@ function segHead(k,g,list){
    band holds both kinds — if everything in it has landed the band heading is
    already the one control, and nesting a second identical one inside it just
    makes two taps out of one. */
-function doneHead(k,g,list){
+/* v148 — retired. Both of its jobs, showing the landed total and toggling the
+   landed rows, are in segHead() now. Kept rather than deleted: doneKey() and
+   doneOpen are still the state it used, and this documents where it went. */
+function doneHead_retired(k,g,list){
   const open=doneOpen.has(doneKey(k,g));
   const tot=list.reduce((a,r)=>a+r.amount,0);
   const cnt=list.reduce((a,r)=>a+(r.count||1),0);
@@ -2470,16 +2616,21 @@ function render(anim,popTab){
     col.className="mcol"+(past?" past":"")+(now?" now":"")
                 +(M.noData?(M.rows.length?" refonly":" blank"):"");
     if(anim) col.style.animationDelay=(ci*0.035)+"s";
+    /* v146 — the NOW badge is gone. The current column already carries a gold
+       background, a gold border and gold figures; the badge said it a fourth
+       time and cost a line of header on every month to do it.
+       The counts stay: those say something no colour is saying. */
     const tags=(M.payCount>2?'<span class="tag three">3 checks</span>':"")
-             + (M.cleanCount>2?'<span class="tag clean">3 cleans</span>':"")
-             + (now?'<span class="tag now">now</span>':"");
+             + (M.cleanCount>2?'<span class="tag clean">3 cleans</span>':"");
     const cls=M.end<0?"neg":M.end<S.meta.buffer?"low":"ok";
     /* open the Budget row and the button below changes what it adds */
     const budOpen=expanded.has(M.k+"|budget");
     col.innerHTML=`
       <div class="mhead">
-        <div class="mname">${MFULL[m-1].slice(0,perView()>3?3:9)} ${perView()<=3?"’"+String(y).slice(2):""} ${tags}</div>
-        <div class="onhand"><span class="k">On hand</span><span class="v">${M.noData?"\u2014":money(M.onhand)}</span></div>
+        <div class="mname">${MFULL[m-1].slice(0,3)} <span class="yr">’${
+          String(y).slice(2)}</span> ${tags}</div>
+        <div class="onhand"><span class="k">On hand</span><span class="v">${
+          M.noData?"\u2014":money(M.onhand)}</span></div>
       </div>
       <div class="rows"></div>
       <div class="addrow"><button class="addbtn">${budOpen?"+ add a budget line":"+ add a new line"}</button></div>
@@ -2518,11 +2669,16 @@ function render(anim,popTab){
     const segOn=g=>segRows[g].filter(r=>!r.child).length>=2;
     /* v118 — only fold the landed rows when there is something unlanded left to
        look at, and only when folding actually saves a line. */
-    const doneMade={};
     const doneList=g=>segRows[g].filter(r=>!r.child&&rowDone(r));
+    /* v148 — one landed row is enough now. It used to take two, because folding
+       cost a whole heading row to draw and saving one line was not worth one
+       line. The heading is free, so the floor drops to one. */
     const doneFold=g=>{
       const own=segRows[g].filter(r=>!r.child), d=own.filter(rowDone);
-      return d.length>=2 && d.length<own.length;
+      /* v149 — there has to be something the fold would actually hide. If every
+         landed row is still asking to be named, a triangle here would hide
+         nothing, which reads as broken. */
+      return d.filter(r=>!rowAsk(r)).length>=1 && d.length<own.length;
     };
     /* v134 — the landed rows go to the top of their own band.
        The fold header is created at the first landed row the loop meets, so its
@@ -2557,10 +2713,12 @@ function render(anim,popTab){
         if(!segMade[sg]){ segMade[sg]=1; box.appendChild(segHead(M.k,sg,segRows[sg])); }
         if(segShut.has(segKey(M.k,sg))) return;
       }
-      if(sg&&segOn(sg)&&doneFold(sg)&&rowDone(r)){
-        if(!doneMade[sg]){ doneMade[sg]=1; box.appendChild(doneHead(M.k,sg,doneList(sg))); }
-        if(!doneOpen.has(doneKey(M.k,sg))) return;
-      }
+      /* v148 — no second heading. The band heading carries the landed total and
+         the triangle that unfolds these rows.
+         v149 — but a row still asking to be named stays on screen. Folding it
+         away was the surest way for it to stay unnamed forever. */
+      if(sg&&segOn(sg)&&doneFold(sg)&&rowDone(r)&&!rowAsk(r)
+         &&!doneOpen.has(doneKey(M.k,sg))) return;
       if(r.budget){
         const p=r.plan, key=M.k+"|budget", open=expanded.has(key);
         const el=document.createElement("div");
@@ -2634,11 +2792,11 @@ function render(anim,popTab){
          against, and the card payment says why it isn't in the total. Once all
          three are settled the row goes quiet, which is the point. */
       if(r.real){
+        /* v149 — same source as the fold uses, so the chip and the folding can
+           never disagree about whether this row is settled. `g` is still read
+           further down for the made-a-rule-from-this marker. */
         const g=txTag(r.tx);
-        const known=!!(g.label||(!r.transfer&&S.merch&&S.merch[normMerchant(r.tx.desc)]));
-        const txt=r.ccpay?"card payment"
-                 :(r.transfer&&!r.assignedKey)?"assign"
-                 :(!known?"name it":null);
+        const txt=r.ccpay?"card payment":rowAsk(r);
         if(txt){
           const chip=document.createElement("span");
           chip.className=r.ccpay?"tk":"tq";
@@ -2804,6 +2962,9 @@ function render(anim,popTab){
   const thEl=document.getElementById("appTitle");
   if(thEl&&thEl.dataset.t!==appT){
     thEl.dataset.t=appT;
+    /* v145 — the chip is its own element now. On a phone the title text is
+       hidden and the chip is not: it is the part that changes, and the part you
+       check after a deploy. */
     thEl.innerHTML=`<span class="tt">${appT}</span><span class="vtag">${APP_V}</span>`;
     document.title=appT+" "+APP_V;
   }
@@ -3222,6 +3383,9 @@ function lineHTML(){
   return `<div id="linepane">${box.innerHTML}</div>`+lineExtra();
 }
 function wireLinePay(){
+  /* v144 — the checkbox is no longer drawn, so this finds nothing and returns.
+     Left wired into the pane rather than unhooked: it is one guarded lookup, and
+     a saved state that still carries notPay is not a reason to change more. */
   const box=document.getElementById("lnPay");
   const r=lineCtx&&lineCtx.r;
   if(!box||!r) return;
@@ -3232,7 +3396,7 @@ function wireLinePay(){
     if(r.rule){ if(notPay) r.rule.notPay=true; else delete r.rule.notPay; }
     else if(r.oneoff){ if(notPay) r.oneoff.notPay=true; else delete r.oneoff.notPay; }
     save(); render();
-    toast(notPay?"Moved to Line items":"Counted as a paycheck");
+    toast(notPay?"Moved to Outs":"Counted as a paycheck");
   };
 }
 function wireLineTemp(){
@@ -3287,11 +3451,18 @@ function lineTempHTML(){
       ${held?`<button class="mini" id="lnTempOff">Drop it</button>`:""}</div>
   </div>`;
 }
-/* v112 — only offered on income, because it is the only band the question means
-   anything in. Reads as a question rather than a setting: the row is already
-   sitting under a heading that makes a claim about it, and this is where that
-   claim gets corrected. */
+/* v144 — retired. This asked whether a credit belonged under Paychecks, and its
+   answer moved the row between bands. Bands now go by direction, so the checkbox
+   would sit there looking like it should do something and do nothing at all,
+   which is worse than not offering it.
+   Returns "" rather than being deleted: both call sites concatenate it, and a
+   heading with nothing under it is the failure mode to avoid.
+   Saved notPay flags are untouched — they still keep a rebate out of the payday
+   tally, which is what they were always really for. */
 function linePayHTML(){
+  return "";
+}
+function linePayHTML_retired(){
   const r=lineCtx&&lineCtx.r;
   /* the card bill row carries kind:"inc" too — rowBand() never reaches the income
      test for it because the cc check fires first, but this guard has to exclude it
@@ -3302,11 +3473,11 @@ function linePayHTML(){
   const yes=payish(r);
   return `<div class="steps"><div class="sh">Is this a paycheck?</div>
     <label class="chk"><input type="checkbox" id="lnPay" ${yes?"checked":""}>
-      Count it under Paychecks</label>
+      Count it under Ins</label>
     <div class="hint" style="margin-top:6px">Money in either way — this only decides
       which heading it sits under and whether it counts toward the month's payday
       tally. Turn it off for a refund, a rebate or a one-off credit and it drops to
-      <b>Line items</b> instead.</div>
+      <b>Outs</b> instead.</div>
   </div>`;
 }
 function lineExtra(){
@@ -9844,6 +10015,9 @@ document.addEventListener("keydown",e=>{
 
 /* menu */
 document.getElementById("btnUndo").onclick=undo;
+/* v145 — the phone's Undo, in the menu. Same handler, and it shuts the panel
+   afterwards because the thing being undone is behind it. */
+document.getElementById("btnUndoMenu").onclick=()=>{ closeMenu(); undo(); };
 const fitBtn=document.getElementById("btnFit");
 if(fitBtn) fitBtn.onclick=()=>{
   fitMode=!fitMode;
