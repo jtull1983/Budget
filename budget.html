@@ -1036,7 +1036,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v161";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v163";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -6768,9 +6768,29 @@ function gh(path,opts){
     headers:Object.assign({Authorization:"Bearer "+sync.token,
       Accept:"application/vnd.github+json","Content-Type":"application/json"},(opts&&opts.headers)||{})}));
 }
+/* v163 — a failed fetch throws a TypeError, which is why that test was here. So
+   does every null dereference and bad property read, and syncPull() runs
+   migrate() and render() inside its try — so a real bug came back as a network
+   problem, to the person and to the log, pointing every investigation at the
+   wifi. Hit while testing v162: a state render() choked on was logged as
+   "pull failed — couldn't reach GitHub".
+   Browsers are consistent about the wording, and the patterns below were already
+   in the second half of this test. It should have been resting on them alone. */
+/* v163 — what was actually thrown, for the log rather than the pill. netMsg()
+   translates for a person glancing at a status line; this is for the person
+   reading the log afterwards trying to work out what happened, and the two want
+   different things. One frame of stack is enough to place it and short enough to
+   stay readable. */
+function rawErr(e){
+  if(!e) return null;
+  const m=(e&&e.message)||String(e);
+  const at=(e&&e.stack)?String(e.stack).split("\n")[1]:null;
+  return at?(m+" @"+at.trim()):m;
+}
+const NETRE=/load failed|failed to fetch|networkerror|network request failed|network error/i;
 function netMsg(e){
   if(e&&e.message==="FILEURL") return "needs a web address, not a local file";
-  if(e instanceof TypeError||/load failed|failed to fetch|network/i.test(e&&e.message||""))
+  if(NETRE.test((e&&e.message)||""))
     return "couldn't reach GitHub — check the connection";
   return (e&&e.message)||"something went wrong";
 }
@@ -6888,6 +6908,10 @@ let pulledOK=false;
    gut-guard refuses would be retried on every three-minute pull, toasting each
    time; with it, one attempt per edit. */
 let healedAt=0;
+/* v162 — which remote stamp the gut-guard has already refused, so a held pull is
+   reported once rather than on every three-minute poll. Same job healedAt does
+   for the heal path. */
+let gutHeldAt=0;
 /* Is there work on this device that GitHub has never seen? savedAt only moves on
    a real save(), so a local stamp ahead of the remote one is not a clock quirk —
    it is an edit that never got pushed. */
@@ -6906,6 +6930,34 @@ async function syncPull(quiet){
     logit("sync","pull read the remote",
           {mine:bulk(S),theirs:bulk(remote),mineAt:ts(S),theirsAt:ts(remote)});
     if(ts(remote)>ts(S)){
+      /* v162 — the same test the push side has, pointed the other way.
+         wouldGut(a,b) asks whether a is dramatically thinner than b; the push
+         asks wouldGut(S,remote), and this asks whether taking THEIRS would cut
+         what is here. Without it, a device carrying a stale thin copy that saves
+         once becomes the newest thing in the system and every other device
+         swallows it — which is exactly what happened on the 9th, when 19 named
+         transactions became 6 and the pill said "pulled newer copy".
+         No automatic push in reply: the remote may be thin because somebody
+         meant it, and answering with an overwrite is the same mistake facing the
+         other way. It stops and says so.
+         pulledOK stays false on purpose — while the two copies disagree this
+         badly, nothing should be writing anywhere on its own.
+         The copy is kept either way, so whichever one turns out to be right is
+         still in the history. */
+      const gut=wouldGut(remote,S);
+      if(gut){
+        keepBackup(remote);
+        logit("sync","pull held back — the remote is thinner",
+              {what:gut,mine:bulk(S),theirs:bulk(remote),
+               mineAt:ts(S),theirsAt:ts(remote)});
+        setSync("warn","held back \u00b7 theirs is smaller");
+        if(gutHeldAt!==ts(remote)){
+          gutHeldAt=ts(remote);
+          toast("Held back a copy that would have dropped "+gut+
+                ". Nothing was changed \u2014 Menu \u2192 Sync to compare them.");
+        }
+        return;
+      }
       S=remote; migrate(S); localSave(); render();
       centerNow(false);                      /* the month list just changed shape */
       sync.lastPulled=ts(remote); saveSync(); pulledOK=true; keepBackup(remote);
@@ -6926,7 +6978,8 @@ async function syncPull(quiet){
         if(sent&&!quiet) toast("Sent this device\u2019s newer copy");
       } else setSync("ok", ts(S)>ts(remote) ? "local is newer" : "up to date");
     }
-  }catch(e){ logit("sync","pull failed",{why:netMsg(e)}); setSync("err",netMsg(e)); }
+  }catch(e){ logit("sync","pull failed",{why:netMsg(e),raw:rawErr(e)});
+             setSync("err",netMsg(e)); }
 }
 async function syncPush(force){
   if(!syncOn()) return;
@@ -6948,7 +7001,7 @@ async function syncPush(force){
       /* v141 — the exit that used to be invisible. This is the one that was
          reporting "saved" while writing something nobody had checked. */
       logit("sync","push refused — couldn't read the remote first",
-            {why:netMsg(readErr),mine:bulk(S)});
+            {why:netMsg(readErr),raw:rawErr(readErr),mine:bulk(S)});
       setSync("err","couldn't check the other copy");
       toast("Nothing sent — I couldn't read the other copy first ("+netMsg(readErr)+
             "). Try again, or Menu \u2192 Sync \u2192 Push now to send anyway.");
@@ -6984,7 +7037,7 @@ async function syncPush(force){
     sync.lastPulled=ts(S)||Date.now(); saveSync();
     setSync("ok","saved "+new Date().toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}));
     return true;
-  }catch(e){ logit("sync","push failed",{why:netMsg(e),forced:!!force});
+  }catch(e){ logit("sync","push failed",{why:netMsg(e),raw:rawErr(e),forced:!!force});
              setSync("err",netMsg(e)); return false; }
 }
 let pushTimer=null;
