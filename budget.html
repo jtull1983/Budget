@@ -102,12 +102,18 @@ body.fitOn .navarr{display:none}
   background:transparent;border:1px solid var(--line2);border-radius:4px;
   padding:8px 13px;font:inherit;color:inherit}
 .assets:hover{border-color:var(--teal)}
-.assets .al{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+/* v160 — the label belongs over the figure, not beside it. Set here as well as
+   in the phone block because the desktop rule sets its own alignment and would
+   otherwise keep the old one. */
+.assets{flex-direction:column;align-items:center;text-align:center}
+.assets .al{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
+  text-align:center}
 .assets .av{font-size:13.5px;font-weight:600;color:var(--teal);white-space:nowrap}
 /* On a phone the row has no width to spare, so the label goes above the number
    rather than beside it. */
 @media(max-width:1100px){
-  .assets{flex-direction:column;align-items:flex-end;gap:0;padding:5px 10px;line-height:1.25}
+  /* v160 — centred over the number rather than pinned to its right edge */
+  .assets{flex-direction:column;align-items:center;gap:0;padding:5px 10px;line-height:1.25}
   .assets .al{font-size:8.5px;letter-spacing:.1em}
   .assets .av{font-size:13px}
 }
@@ -224,7 +230,13 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .swipehint button:disabled{opacity:.3}
 .swipehint,.bottombar{display:none !important}
 @media(min-width:1101px){
-  .scroller{padding-bottom:14px;overflow-x:auto;overflow-y:hidden}
+  /* v159 — the home indicator is drawn by iOS over whatever is underneath it and
+   cannot be removed by a page. What it should be sitting on is the page
+   background, not the last inch of a column, so the grid stops above it.
+   env() is 0 on anything without an indicator, so this changes nothing
+   elsewhere. */
+.scroller{padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));
+  overflow-x:auto;overflow-y:hidden}
   .scroller:not(.fit) .rail{width:max-content;min-width:100%}
   .scroller:not(.fit) .mcol{flex:0 0 var(--colw,248px);
     width:var(--colw,248px);min-width:var(--colw,248px)}
@@ -392,7 +404,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* v148 — what has already gone, struck through, beside what the month owes.
    Struck because that is what the rows themselves look like once they land, so
    the heading reads the way its contents do. */
-.row.seg .amt .landed{margin-left:5px;font-weight:600;font-size:11px;color:var(--dimmer)}
+.row.seg .amt .landed{margin-left:5px;font-weight:600;font-size:1.048em;color:var(--dimmer)}
 /* v151 — the figures are the controls. A 12px triangle is a small target at the
    end of a row that does something else on a miss, so each number now does what
    the control beside it does. Padding is what turns a number into a target;
@@ -655,8 +667,12 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* A section heading. Deliberately slimmer than a row — it is a control, not a
    line of the budget, and two of them on every column would otherwise cost four
    rows of height in a place already short of it. */
+/* v161 — the heading is one unit. Every size inside it is em against this row,
+   so one font-size here scales the label, the count, both figures and both
+   triangles together. overflow:hidden is what lets fitSegs() read scrollWidth
+   and find out what the content actually wants. */
 .row.seg{min-height:24px;padding:4px 11px 4px 5px;cursor:pointer;gap:4px;
-  border-top:1px solid var(--line);margin-top:3px}
+  border-top:1px solid var(--line);margin-top:3px;font-size:10.5px;overflow:hidden}
 .rows > .row.seg:first-child{border-top:none;margin-top:0}
 /* v154 — a heading is the opposite shape to a budget line. There the label is
    the long part and flexes; here it is one short word and the right-hand side
@@ -667,12 +683,14 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
    number that runs out of room can be a smaller number, a word cannot be a
    shorter word. Letter-spacing drops too — .14em was tuned when this row had
    one figure on it and room to be airy. */
-.row.seg .lbl{flex:0 0 auto;font-size:9.5px;font-weight:700;letter-spacing:.08em;
+.row.seg .lbl{flex:0 0 auto;font-size:.905em;font-weight:700;letter-spacing:.08em;
   text-transform:uppercase;color:var(--dimmer);white-space:nowrap;overflow:visible}
-.row.seg .gn{font-size:8.5px;font-weight:600;color:var(--dimmer);letter-spacing:.04em}
-.row.seg .amt{flex:1 1 auto;min-width:0;text-align:right;font-size:10.5px;
-  font-weight:700;opacity:.85;cursor:pointer;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
+.row.seg .gn{font-size:.81em;font-weight:600;color:var(--dimmer);letter-spacing:.04em}
+/* v161 — no ellipsis and no flexing. It takes its natural width and an auto
+   margin pushes it right; a shrinking flex child would make the row always look
+   like it fits and fitSegs() would never fire. */
+.row.seg .amt{flex:0 0 auto;margin-left:auto;text-align:right;font-size:1em;
+  font-weight:700;opacity:.85;cursor:pointer;white-space:nowrap;overflow:visible}
 .row.seg.inc .amt{color:var(--teal)}
 .row.seg.exp .amt{color:#ffb8a4}
 .row.seg.done .lbl,.row.seg.done .amt{text-decoration:line-through;opacity:.4;filter:grayscale(.8)}
@@ -687,7 +705,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .oldperiod[open] summary::before{content:"▾ ";}
 /* wider than it looks: the glyph is small on purpose but the tap target has to
    clear a thumb, so the whole heading is clickable and this just aims the eye */
-.row.seg .tri{font-size:11px;width:14px;text-align:center;padding-left:0;color:var(--dim)}
+.row.seg .tri{font-size:1.048em;width:1.33em;text-align:center;padding-left:0;color:var(--dim);
+  flex:0 0 auto}
 .row.seg .tri.up{color:var(--teal)}
 .row.grp{cursor:pointer}
 .row.grp .lbl{font-weight:700}
@@ -988,7 +1007,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
          shows exactly one of them.
          v155 — last, so it lands in the empty cell beside Advanced. First put it
          top-left and pushed every other button along. -->
-    <button class="btn" id="btnUndoMenu">\u21b6 Undo</button>
+    <button class="btn" id="btnUndoMenu">↶ Undo</button>
   </div>
   <input type="file" id="fileIn" accept=".json" class="vh">
   <input type="file" id="stmtIn" multiple accept=".csv,.txt,.tsv,.pdf,application/pdf,text/csv" class="vh">
@@ -1017,7 +1036,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v156";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v161";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2395,9 +2414,11 @@ function shiftView(n){
    The floor matters as much as the shrinking. Below SEG_MIN a figure stops being
    readable, and an ellipsis is the better outcome — so it is kept as the last
    resort rather than taken away. */
+/* v161 — the ROW, not the amount. Scaling only the figures left the label at
+   full size beside a squeezed number and read like two rows welded together. */
 const SEG_MAX=10.5, SEG_MIN=8;
 function fitSegs(){
-  const els=document.querySelectorAll(".row.seg .amt");
+  const els=document.querySelectorAll(".row.seg");
   if(!els.length) return;
   for(let pass=0;pass<2;pass++){
     const want=[];
@@ -2424,7 +2445,13 @@ function fitGrid(){
      these measure 0 either way; they stay because the day one comes back this
      keeps working. What goes is the 20px and the 6px of slack that were guarding
      against them — held back on every screen, for furniture that isn't there. */
-  const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0);
+  /* v159 — the scroller's bottom padding sits OUTSIDE the height set below, so
+     it has to come off or the rail runs past the window by exactly that much.
+     Read rather than hard-coded: it is 14px plus the safe-area inset, which is a
+     different number on every device and unknowable from here.
+     This was always wrong by the 14px; the inset only made it visible. */
+  const pad=parseFloat(getComputedStyle(sc).paddingBottom)||0;
+  const below=(bar?bar.offsetHeight:0)+(hint&&hint.offsetHeight?hint.offsetHeight:0)+pad;
   const h=Math.max(320,(window.innerHeight||800)-top-below-2);
   document.documentElement.style.setProperty("--gridh",h+"px");
   if(wide&&!fitMode){
@@ -2572,9 +2599,9 @@ function segHead(k,g,list){
       ? `<span class="landed${foldable?" tap":""}"${foldable?' data-landed="1"':""
         } title="${foldable?(lOpen?"Hide":"Show")+" what has already landed \u00b7 ":""
         }\u00d7${lCnt}">/ <s>${money(lTot)}</s></span>`
-      : ""}${foldable
+      : ""}</span>${foldable
       ? `<span class="tri lt${lOpen?" up":""}" data-landed="1">\u25be</span>`
-      : ""}</span>`;
+      : ""}`;
   el.title=(shut?"Show":"Hide")+" money "+(g==="inc"?"in":"out")+" for this month";
   el.onclick=ev=>{
     /* v148 — the second triangle unfolds the landed rows; the heading around it
@@ -2733,8 +2760,10 @@ function render(anim,popTab){
         <div class="k">Left at end</div>
         <div class="v ${M.noData?"":cls}">${M.noData?"\u2014":money(M.end)}</div>
         ${M.noData?"":`<div class="nowbal${
-            typeof S.meta.liveBalance==="number"?" live":""}">${money(nowBalance())} in there now${
-            typeof S.meta.liveBalance==="number"?" \u00b7 from your bank":""}</div>`}
+            typeof S.meta.liveBalance==="number"?" live":""}" title="${
+            typeof S.meta.liveBalance==="number"
+              ?"Pulled from your bank":"The balance you typed in"}">${
+            money(nowBalance())} current</div>`}
         ${M.noData?`<div class="infon">not counted for running total</div>`:""}
       </div>`;
     const box=col.querySelector(".rows");
