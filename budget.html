@@ -270,16 +270,35 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
      one whose meaning survives losing its word */
   .menubtn>span{display:none}
   .menubtn>.car{display:none}
-  .menubtn::before{content:"\u2261";font-size:19px;line-height:1}
+  /* v150 — the character itself. v145 wrote "\u2261", which is the JavaScript
+     escape; CSS wants a backslash and bare hex, so the backslash escaped the
+     letter u and the button read "u2261". The file is UTF-8 and already carries
+     ‹ › ▾ × ↶ literally, so there is nothing to escape around. */
+  .menubtn::before{content:"☰";font-size:17px;line-height:1}
   .menubtn{padding:7px 11px}
 
   /* the years give width up first — the strip already scrolls inside itself, so
      it is the only thing here that can lose room without losing anything */
   .years{flex:1 1 auto}
-  .ytab{padding:7px 11px;font-size:12.5px}
+  /* v150 — two digits and an apostrophe. That is most of the width the strip was
+     taking and none of what it was saying; the full year stays in the title, so
+     a long press or a screen reader still gets it. Desktop keeps the long form,
+     where four columns can span a year boundary and the century is worth
+     seeing. */
+  .ytab{padding:7px 9px;font-size:12.5px;letter-spacing:.06em}
+  .ytab[data-y] .y4{display:none}
+  .ytab[data-y] .y2{display:inline}
 
+  /* v150 — years · assets · ☰, in that order. The years live in .toprow and the
+     assets figure in .toprow2, which stays true because v133's desktop layout is
+     built on it. Both rows are already flex items on one line here, so the order
+     is set on the items rather than by moving anything in the DOM. */
+  .top>.toprow{order:1}
+  .top>.toprow2{order:2;justify-content:flex-end}
+  .toprow2 #btnAssets{order:1}
+  .toprow2 .menubtn{order:2}
   /* the figure people read, not a control: it keeps its size */
-  .assets{flex:0 0 auto;margin-left:auto}
+  .assets{flex:0 0 auto}
   #btnUndoMenu{display:block}
   .stats{gap:14px}
   .stats .v{font-size:17px}
@@ -296,6 +315,8 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .years::-webkit-scrollbar{display:none}
 .ytab{flex:0 0 auto}
+/* v150 — long form everywhere except the phone, where the rule above flips it */
+.ytab[data-y] .y2{display:none}
 .ytab{border:1px solid var(--line2);background:var(--panel);color:var(--dim);
   padding:8px 15px;border-radius:4px;font-size:13.5px;font-weight:700;letter-spacing:.1em;transition:.14s}
 .ytab:hover{color:var(--txt);border-color:#47757a}
@@ -367,7 +388,16 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 /* v148 — what has already gone, struck through, beside what the month owes.
    Struck because that is what the rows themselves look like once they land, so
    the heading reads the way its contents do. */
-.row.seg .amt .landed{margin-left:6px;font-weight:600;font-size:12px;color:var(--dimmer)}
+.row.seg .amt .landed{margin-left:5px;font-weight:600;font-size:11px;color:var(--dimmer)}
+/* v151 — the figures are the controls. A 12px triangle is a small target at the
+   end of a row that does something else on a miss, so each number now does what
+   the control beside it does. Padding is what turns a number into a target;
+   negative margins keep the heading looking exactly as it did. */
+.row.seg .amt .whole,.row.seg .amt .landed.tap{cursor:pointer;padding:3px 2px;margin:-3px 0;
+  border-radius:3px}
+.row.seg .amt .whole:hover{background:#17272c}
+.row.seg .amt .landed.tap:hover{background:#17272c;color:var(--dim)}
+.row.seg .amt .landed.tap s{cursor:pointer}
 /* the slash is real text, not a ::before — it has to survive a copy and be read
    out loud. Only the figure is struck, not the separator. */
 .row.seg .amt .landed s{text-decoration:line-through;text-decoration-thickness:1px}
@@ -391,6 +421,17 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row .dot{width:4px;height:4px;border-radius:50%;flex:none;background:#3e545e}
 .row.oneoff .dot{background:var(--violet)}
 .row.manual .dot{background:var(--amber)}
+/* v153 — the lines that are not part of the month's normal shape, said where the
+   eye already is rather than in a 4px dot at the edge. Same two colours the dots
+   were already using, so there is nothing new to learn.
+   Two colours and not one: a one-off will not be here next month, a manual line
+   will be and is waiting for a number. The second is the more actionable of the
+   two and folding them together would bury it.
+   Scoped to .lbl on purpose — a landed row is struck through and greyed, and
+   that should keep winning, because finished matters more than what kind. */
+.row.oneoff:not(.off) .lbl{color:var(--violet)}
+.row.manual:not(.off) .lbl{color:var(--amber)}
+.row.oneoff.manual:not(.off) .lbl{color:var(--amber)}   /* typed-in wins: it wants doing */
 /* A real transaction off the account. It gets a cyan dot so a glance separates
    what happened from what is only predicted. The card payment sits at half
    strength: in the column because you asked to see everything move, out of the
@@ -613,10 +654,21 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
 .row.seg{min-height:24px;padding:4px 11px 4px 5px;cursor:pointer;gap:4px;
   border-top:1px solid var(--line);margin-top:3px}
 .rows > .row.seg:first-child{border-top:none;margin-top:0}
-.row.seg .lbl{font-size:9.5px;font-weight:700;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--dimmer)}
-.row.seg .gn{font-size:9px;font-weight:600;color:var(--dimmer);letter-spacing:.06em}
-.row.seg .amt{font-size:11px;font-weight:700;opacity:.85;cursor:pointer}
+/* v154 — a heading is the opposite shape to a budget line. There the label is
+   the long part and flexes; here it is one short word and the right-hand side
+   carries two figures, a slash and two triangles. Leaving .lbl on flex:1 meant
+   the four characters that could not afford to shrink were the ones that did,
+   and OUTS arrived as OUT… on a narrow column.
+   So the label takes its natural width and the figures take the remainder: a
+   number that runs out of room can be a smaller number, a word cannot be a
+   shorter word. Letter-spacing drops too — .14em was tuned when this row had
+   one figure on it and room to be airy. */
+.row.seg .lbl{flex:0 0 auto;font-size:9.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dimmer);white-space:nowrap;overflow:visible}
+.row.seg .gn{font-size:8.5px;font-weight:600;color:var(--dimmer);letter-spacing:.04em}
+.row.seg .amt{flex:1 1 auto;min-width:0;text-align:right;font-size:10.5px;
+  font-weight:700;opacity:.85;cursor:pointer;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
 .row.seg.inc .amt{color:var(--teal)}
 .row.seg.exp .amt{color:#ffb8a4}
 .row.seg.done .lbl,.row.seg.done .amt{text-decoration:line-through;opacity:.4;filter:grayscale(.8)}
@@ -959,7 +1011,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v149";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v154";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2479,8 +2531,11 @@ function segHead(k,g,list){
   el.innerHTML=`<span class="tri${shut?"":" up"}">\u25be</span>
     <span class="lbl">${g==="inc"?"Ins":"Outs"}
       <span class="gn">\u00d7${cnt}</span></span>
-    <span class="amt">${money(tot)}${land.length
-      ? `<span class="landed" title="already landed \u00d7${lCnt}">/ <s>${money(lTot)}</s></span>`
+    <span class="amt"><span class="whole" title="${
+      shut?"Show":"Hide"} this band">${money(tot)}</span>${land.length
+      ? `<span class="landed${foldable?" tap":""}"${foldable?' data-landed="1"':""
+        } title="${foldable?(lOpen?"Hide":"Show")+" what has already landed \u00b7 ":""
+        }\u00d7${lCnt}">/ <s>${money(lTot)}</s></span>`
       : ""}${foldable
       ? `<span class="tri lt${lOpen?" up":""}" data-landed="1">\u25be</span>`
       : ""}</span>`;
@@ -2562,7 +2617,11 @@ function render(anim,popTab){
   const vis=ys.slice(winStart,winStart+WIN);
   yEl.innerHTML =
       (winStart>0?`<button class="ytab arrow" id="yprev" title="Earlier years">‹</button>`:"")
-    + vis.map(y=>`<button class="ytab ${y===YEAR?"on":""}" data-y="${y}">${y}</button>`).join("")
+    /* v150 — both forms are written, and CSS shows one. Doing it here rather than
+       measuring the viewport in script means it follows a rotation on its own and
+       never disagrees with the media query that the rest of this header uses. */
+    + vis.map(y=>`<button class="ytab ${y===YEAR?"on":""}" data-y="${y}" title="${y}"
+        ><span class="y4">${y}</span><span class="y2">’${String(y).slice(2)}</span></button>`).join("")
     + (winStart<maxStart?`<button class="ytab arrow" id="ynext" title="Later years">›</button>`:"");
   document.querySelectorAll("[data-y]").forEach(b=>b.onclick=()=>{
     const next=+b.dataset.y;
@@ -2649,12 +2708,18 @@ function render(anim,popTab){
       nd.innerHTML=`<div>No records</div><div class="nd2">before the budget started</div>`;
       box.appendChild(nd);
     }
-    /* Several hits from one rule fold into one line — but only when the month is
-       actually crowded. Folding two paycheques behind a ▾ hides the thing you opened
-       the app to look at, and every tap to unfold is one the month didn't need.
-       Past the threshold the column stops being readable and the fold earns itself. */
-    const FOLD_AT=16;
-    const crowded=M.rows.length>FOLD_AT;
+    /* Several hits from one rule used to fold into one line once a month passed
+       sixteen rows: two paycheques became "Andrea Paycheck ×2", two cleanings
+       became one row.
+       v152 — not any more. That was a height trade made when a column held
+       fourteen rows; v146 and v147 took it to nineteen, and a folded pair hides
+       the dates, which is most of what anybody opens the month to see.
+       foldRows() and everything that understands a group row are deliberately
+       left in place. Turning this back on is then a flag rather than a rewrite,
+       and the uncrowded path below is the one the app has taken on every normal
+       month since v72.1 anyway — this is not a new code path, it is that one,
+       always. */
+    const crowded=false;
     const shown=foldRows(M.rows,crowded,M.k);
     let plan=trimPlan();
     /* with no statement history there's no category breakdown yet — but a planned
