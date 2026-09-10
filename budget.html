@@ -240,6 +240,15 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .scroller::-webkit-scrollbar-thumb{background:#6fe0cf;border-radius:6px;border:3px solid #0c1216}
   .scroller::-webkit-scrollbar-thumb:hover{background:#9df3e6}
 }
+/* v155 — these two defaults have to sit ABOVE the phone block, not below it.
+   @media adds no specificity, so a base rule setting the same property on the
+   same selector wins by coming later — silently, since nothing is malformed.
+   v150 hid the long year form in the query and the short form in a base rule
+   400 lines down, and the boxes came out empty. v145 lost Undo the same way.
+   Fixed by placement rather than by out-specifying the base rule, because that
+   would leave the trap set for whatever gets added down there next. */
+.ytab[data-y] .y2{display:none}   /* long form everywhere; the phone flips it */
+#btnUndoMenu{display:none}        /* the header carries its own Undo above 760px */
 @media(max-width:760px){
   .top{padding:12px 12px;padding-top:calc(18px + env(safe-area-inset-top,0px));gap:9px}
   /* v145 — everything on one line: version chip, years, hamburger, assets.
@@ -285,7 +294,7 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
      a long press or a screen reader still gets it. Desktop keeps the long form,
      where four columns can span a year boundary and the century is worth
      seeing. */
-  .ytab{padding:7px 9px;font-size:12.5px;letter-spacing:.06em}
+  .ytab[data-y],.ytab.arrow{padding:6px 8px;font-size:12.5px;letter-spacing:.04em}
   .ytab[data-y] .y4{display:none}
   .ytab[data-y] .y2{display:inline}
 
@@ -306,17 +315,12 @@ label.mini,label.btn{display:inline-flex;align-items:center;justify-content:cent
   .row .amt{font-size:14px}
   .mfoot .v{font-size:21px}
 }
-/* v145 — the menu's Undo is the phone's. Above 760px the header still carries
-   its own, and showing both would put two of the same control on one screen. */
-#btnUndoMenu{display:none}
 .statuspill .ok{color:var(--teal)} .statuspill .busy{color:var(--cyan)}
 .statuspill .err{color:var(--red)} .statuspill .warn{color:var(--amber)}
 .years{display:flex;gap:5px;align-items:stretch;min-width:0;
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .years::-webkit-scrollbar{display:none}
 .ytab{flex:0 0 auto}
-/* v150 — long form everywhere except the phone, where the rule above flips it */
-.ytab[data-y] .y2{display:none}
 .ytab{border:1px solid var(--line2);background:var(--panel);color:var(--dim);
   padding:8px 15px;border-radius:4px;font-size:13.5px;font-weight:700;letter-spacing:.1em;transition:.14s}
 .ytab:hover{color:var(--txt);border-color:#47757a}
@@ -971,18 +975,20 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
     <button class="btn" id="btnFit">See full year</button>
   </div>
   <div class="menupanel" id="menuPanel">
-    <!-- v145 — Undo lives here on a phone, where the header has no width to
-         spare for a control used once a week. Two buttons rather than one moved
-         by script at a breakpoint: a move would have to re-run on every rotate
-         and would fight placeMenu(). Both are wired to the same handler, and CSS
-         shows exactly one of them. -->
-    <button class="btn" id="btnUndoMenu">\u21b6 Undo</button>
     <button class="btn" id="btnCard">Card review</button>
     <button class="btn" id="btnBank" hidden>Account activity</button>
     <button class="btn" id="btnMatch" hidden>Confirm <span id="matchCount"></span></button>
     <button class="btn" id="btnBudget">Budget adjustment</button>
     <button class="btn" id="btnSync">Sync</button>
     <button class="btn warn" id="btnAdv">Advanced <span id="insCount"></span></button>
+    <!-- v145 — Undo lives here on a phone, where the header has no width to spare
+         for a control used once a week. Two buttons rather than one moved by
+         script at a breakpoint: a move would have to re-run on every rotate and
+         would fight placeMenu(). Both are wired to the same handler, and CSS
+         shows exactly one of them.
+         v155 — last, so it lands in the empty cell beside Advanced. First put it
+         top-left and pushed every other button along. -->
+    <button class="btn" id="btnUndoMenu">\u21b6 Undo</button>
   </div>
   <input type="file" id="fileIn" accept=".json" class="vh">
   <input type="file" id="stmtIn" multiple accept=".csv,.txt,.tsv,.pdf,application/pdf,text/csv" class="vh">
@@ -1011,7 +1017,7 @@ body.locked .top,body.locked .scroller,body.locked .drawer,body.locked .statuspi
 <div class="pickwrap" id="pickWrap"><div class="pick" id="pick"></div></div>
 
 <script>
-const APP_V="v154";   /* bump this in the same edit that bumps ?v= in the URL */
+const APP_V="v156";   /* bump this in the same edit that bumps ?v= in the URL */
 
 /* ── baked state ──────────────────────────────────────────────
    "Save as app" rewrites the line below with your current numbers,
@@ -2379,6 +2385,36 @@ function shiftView(n){
   if(viewIndex!==before) render("anim-spill");
 }
 
+/* v156 — the band headings shrink to fit. What has to fit depends on the column
+   count, the screen width and how many digits this month happens to have, none
+   of which the stylesheet can see, so it is measured.
+   Read once and write once per heading rather than stepping the size down and
+   re-measuring: a step loop is a forced reflow per step, per heading, on every
+   render. The ratio is slightly optimistic because letter-spacing does not scale
+   with font-size, which is what the 0.97 and the second pass are for.
+   The floor matters as much as the shrinking. Below SEG_MIN a figure stops being
+   readable, and an ellipsis is the better outcome — so it is kept as the last
+   resort rather than taken away. */
+const SEG_MAX=10.5, SEG_MIN=8;
+function fitSegs(){
+  const els=document.querySelectorAll(".row.seg .amt");
+  if(!els.length) return;
+  for(let pass=0;pass<2;pass++){
+    const want=[];
+    els.forEach(el=>{                       /* read everything first */
+      if(pass===0) el.style.fontSize="";
+      want.push([el,el.scrollWidth,el.clientWidth]);
+    });
+    let changed=false;
+    want.forEach(([el,need,have])=>{        /* then write everything */
+      if(!have||need<=have+0.5) return;
+      const cur=parseFloat(el.style.fontSize)||SEG_MAX;
+      const px=Math.max(SEG_MIN,Math.floor(cur*(have/need)*0.97*10)/10);
+      if(px<cur-0.05){ el.style.fontSize=px+"px"; changed=true; }
+    });
+    if(!changed) break;
+  }
+}
 function fitGrid(){
   const sc=document.getElementById("scroller"); if(!sc) return;
   const bar=document.querySelector(".bottombar"), hint=document.getElementById("swipeHint");
@@ -3036,7 +3072,7 @@ function render(anim,popTab){
 
   if(rollLoans()) reReadAssets();
   paintAssets();
-  fitGrid(); localSave(); stampSaved();
+  fitGrid(); fitSegs(); localSave(); stampSaved();
   const cb=document.getElementById("btnCard");
   if(cb){ const st=cardBtnState(); cb.textContent=st.label;
           cb.classList.toggle("warn",st.mode==="waiting"); }
@@ -10204,7 +10240,7 @@ function atTop(el){
 let rzTimer=null, lastPer=perView();
 addEventListener("resize",()=>{
   clearTimeout(rzTimer);
-  rzTimer=setTimeout(()=>{ fitGrid(); if(perView()!==lastPer){ lastPer=perView(); render(null); } centerWide(); },160);
+  rzTimer=setTimeout(()=>{ fitGrid(); if(perView()!==lastPer){ lastPer=perView(); render(null); } fitSegs(); centerWide(); },160);
 });
 /* Android/Chrome installability — the manifest is generated from inside the file */
 try{
