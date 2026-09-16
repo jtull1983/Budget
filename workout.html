@@ -1,4 +1,4 @@
-<!-- JART Training Log — v1.9.3 -->
+<!-- JART Training Log — v1.12.0 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -297,6 +297,11 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
 .hist .g{color:var(--dim)}
 .close{position:absolute;top:12px;right:14px;color:var(--mut);font-size:20px}
 
+.restpill{position:fixed;left:50%;bottom:146px;transform:translateX(-50%);z-index:60;
+  display:none;background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+  padding:7px 16px;font-size:11px;color:var(--mut);letter-spacing:.1em}
+.restpill.on{display:block}
+.restpill.ready{color:var(--gr);border-color:var(--gr)}
 .toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);
   background:var(--panel2);border:1px solid var(--line);border-radius:5px;
   padding:10px 14px;font-size:12px;z-index:80;opacity:0;pointer-events:none;
@@ -325,13 +330,14 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
 
 <footer>
   <div class="fin">
-    <button class="gen" id="finish">FINISH &amp; PROGRAM NEXT</button>
+    <button class="gen" id="finish">FINISH &amp; COPY TO CLIPBOARD</button>
   </div>
   <div class="prog"><div class="progf" id="progf"></div></div>
 </footer>
 
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"><button class="close" id="shclose">×</button><div id="shbody"></div></div>
+<div class="restpill" id="restpill"></div>
 <div class="toast" id="toast"></div>
 <div class="tmr" id="tmr"><div class="tmrbox">
   <div class="tmrlab" id="tmrlab"></div>
@@ -343,7 +349,7 @@ footer{position:fixed;bottom:0;left:0;right:0;z-index:40;background:var(--bg);
 <input type="file" id="fileIn" accept=".json" style="display:none">
 
 <script>
-const VERSION='1.9.3';
+const VERSION='1.12.0';
 const KEY='jart_workout_v1';
 const SEEDV=6;   // bump when seed() targets or day order change
 let bootErr=null;
@@ -358,7 +364,7 @@ function seed(){
   const O=(name,o={})=>Object.assign(E(name,o),{optional:true});
   return {
   meta:{version:1,savedAt:null},
-  prefs:{lastDayId:null,gym:'home',
+  prefs:{lastDayId:null,gym:'home',sfx:true,voice:true,restSecs:120,ssRestSecs:75,
     base:{day1:13,day2:12}},   // sessions already banked outside the app
   exercises:{
     /* ---------------- Day 1 — Upper ---------------- */
@@ -580,7 +586,7 @@ function expand(c){
     full.startedAt=x.startedAt||null; full.endedAt=x.endedAt||null;
     full.gym=x.gym||'home'; full.watch=x.watch||{}; full.notes=x.notes||'';
     full.mood=x.mood||null; full.warm=x.warm||{done:false,secs:0};
-    full.events=x.events||[]; if(x.pace) full.pace=x.pace;
+    full.events=x.events||[]; if(x.pace) full.pace=x.pace; if(x.marks) full.marks=x.marks;
     (x.entries||[]).forEach(e=>{
       const t=full.entries.find(z=>z.exerciseId===e.exerciseId);
       if(!t) return;
@@ -709,6 +715,19 @@ function ev(k,exId,setIdx){
 }
 /* Turns the raw click stream into something worth reading: how long you actually
    rested, where you stood around, and which taps were just a peek. */
+/* A compact record of when each set went in: [exerciseId, setIndex, epoch seconds].
+   Thirty-odd entries a session, which is small enough to keep forever and is what
+   lets a heart-rate trace be lined up against individual sets after the fact. */
+function markTimes(s){
+  const E=(s.events||[]).filter(x=>x.k==='input'&&x.e).sort((a,b)=>a.t-b.t);
+  const out=[];
+  E.forEach(x=>{
+    const last=out[out.length-1];
+    if(last&&last[0]===x.e&&last[1]===x.s) last[2]=Math.round(x.t/1000);
+    else out.push([x.e,x.s,Math.round(x.t/1000)]);
+  });
+  return out;
+}
 function paceStats(s){
   const E=(s.events||[]).slice().sort((a,b)=>a.t-b.t);
   if(!E.length) return null;
@@ -1069,7 +1088,9 @@ $('main').addEventListener('focusin',e=>{
 $('main').addEventListener('keydown',e=>{
   if(e.target.dataset&&e.target.dataset.f==='note'&&e.key==='Enter'&&!e.shiftKey){
     e.preventDefault();
-    e.target.blur(); save();      // dismiss the keyboard, leave the note open to read back
+    const pad=e.target.closest('.npad');
+    if(pad) cur().entries[+pad.dataset.e].sets[+pad.dataset.set].npad=false;
+    e.target.blur(); save(); draw();
   }
 });
 $('main').addEventListener('click',e=>{
@@ -1118,6 +1139,7 @@ $('main').addEventListener('click',e=>{
     en.sets.forEach(x=>{ if(x.r==null&&!x.skipped&&x.tr!=null){
       x.r=x.tr; if(x.w==null) x.w=x.tw; filled++; } });
     en.status='done'; en.skipReason=null; ev('done',en.exerciseId);
+    ding('click'); restAfter(en);
     collapseIfDone(en.block);
     stamp(); save(); draw();
     if(filled) toast(filled+' blank set'+(filled>1?'s':'')+' taken as the prescribed numbers.');
@@ -1147,11 +1169,99 @@ $('main').addEventListener('input',e=>{
   const v=e.target.value.trim(), n=v===''?null:parseFloat(v);
   snap('n'+row.dataset.e+':'+row.dataset.set+':'+e.target.dataset.f);
   s[e.target.dataset.f]=isNaN(n)?null:n;
-  if(s.r!=null) s.skipped=false;
+  if(s.r!=null){ s.skipped=false; if(e.target.dataset.f==='r') restAfter(en); }
   e.target.classList.toggle('ghost',s[e.target.dataset.f]==null);
   ev('input',en.exerciseId,+row.dataset.set);
   stamp(); save();
 });
+
+/* ============ sound ============ */
+/* Tones are synthesised, so there are no audio files and nothing to load.
+   iOS will not let a page make noise until the user has tapped it once, so the
+   context is unlocked on the first tap and reused after that. */
+let AC=null;
+function audioReady(){
+  if(!S||!S.prefs||S.prefs.sfx===false) return null;
+  try{
+    if(!AC){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; AC=new C(); }
+    if(AC.state==='suspended') AC.resume();
+  }catch(_){ AC=null; }
+  return AC;
+}
+function tone(freq,dur,delay,vol,shape){
+  if(!AC) return;
+  try{
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.type=shape||'sine'; o.frequency.value=freq;
+    const t=AC.currentTime+(delay||0);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.linearRampToValueAtTime(vol==null?0.28:vol,t+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t+dur+0.03);
+  }catch(_){}
+}
+/* The phone can read things out. iOS needs a tap before it will speak, same as audio. */
+function say(t){
+  if(!S||!S.prefs||S.prefs.voice===false) return;
+  try{
+    const ss=window.speechSynthesis; if(!ss) return;
+    const u=new SpeechSynthesisUtterance(String(t));
+    u.rate=1.05; u.pitch=1; u.volume=1;
+    ss.cancel(); ss.speak(u);
+  }catch(_){}
+}
+const SOUNDS={
+  tick:  ()=>tone(660,0.05,0,0.11,'square'),
+  tickhi:()=>tone(990,0.07,0,0.20,'square'),
+  go:    ()=>{ tone(659,0.12,0,0.30); tone(988,0.24,0.10,0.30); },
+  target:()=>{ tone(1319,0.16,0,0.30); tone(1760,0.34,0.13,0.24); },
+  stop:  ()=>{ tone(880,0.10,0,0.28); tone(587,0.28,0.09,0.28); },
+  click: ()=>tone(1150,0.04,0,0.10,'triangle'),
+  rest:  ()=>{ tone(784,0.13,0,0.30); tone(784,0.16,0.20,0.30); },
+  finish:()=>{ tone(523,0.15,0,0.30); tone(659,0.15,0.13,0.30); tone(784,0.5,0.27,0.30); }
+};
+function ding(name){
+  if(!S||!S.prefs||S.prefs.sfx===false) return;
+  if(!audioReady()) return;
+  (SOUNDS[name]||SOUNDS.click)();
+}
+document.addEventListener('click',()=>{ audioReady(); },{once:true});
+document.addEventListener('touchend',()=>{ audioReady(); },{once:true});
+
+/* ============ rest timer ============ */
+let restIv=null, restT0=0, restDinged=false, restGoalSecs=0, restLabel='REST';
+function startRest(secs,label){
+  const goal=(secs==null?((S.prefs&&S.prefs.restSecs==null)?120:S.prefs.restSecs):secs);
+  if(!goal){                              // turned off — stop anything already running
+    clearInterval(restIv); restIv=null; restT0=0; paintRest(); return;
+  }
+  clearInterval(restIv);
+  restT0=Date.now(); restGoalSecs=goal; restDinged=false; restLabel=label||'NEXT SET IN';
+  restIv=setInterval(paintRest,1000); paintRest();
+}
+function paintRest(){
+  const el=$('restpill'); if(!el) return;
+  if(!restT0){ el.classList.remove('on'); return; }
+  const s=Math.floor((Date.now()-restT0)/1000), left=restGoalSecs-s;
+  if(s>restGoalSecs+240){ clearInterval(restIv); restIv=null; restT0=0; el.classList.remove('on'); return; }
+  el.classList.add('on');
+  el.classList.toggle('ready',left<=0);
+  const mmss=v=>Math.floor(v/60)+':'+String(v%60).padStart(2,'0');
+  el.textContent = left>0 ? restLabel+'  '+mmss(left) : 'GO  \u2014 resting '+mmss(s);
+  if(left<=3&&left>0) ding('tick');
+  if(left<=0&&!restDinged){ restDinged=true; ding('rest'); say('Back on it'); }
+}
+/* A superset rests once, after the second half. Solo lifts rest after every set. */
+function restAfter(en){
+  const mem=cur().entries.filter(x=>x.block===en.block);
+  if(mem.length>1){
+    if(mem[mem.length-1].exerciseId!==en.exerciseId) return;   // mid-pair, keep moving
+    startRest((S.prefs&&S.prefs.ssRestSecs!=null)?S.prefs.ssRestSecs:75,'NEXT ROUND IN');
+    return;
+  }
+  startRest(null,'NEXT SET IN');
+}
 
 /* ============ stopwatch ============ */
 let TM={iv:null,e:null,ei:null,s:null,phase:null,n:0};
@@ -1165,22 +1275,33 @@ function tmrPaint(){
 }
 function openTimer(exId,ei,setIdx){
   const X=S.exercises[exId];
-  TM={iv:null,e:exId,ei:(ei==null?null:ei),s:(setIdx==null?null:setIdx),phase:'count',n:10};
+  TM={iv:null,e:exId,ei:(ei==null?null:ei),s:(setIdx==null?null:setIdx),phase:'count',n:10,tgt:null};
+  try{
+    if(ei!=null&&setIdx!=null){ const z=cur().entries[ei].sets[setIdx]; TM.tgt=z&&z.tr||null; }
+  }catch(_){}
   $('tmrlab').textContent=(exId==='__warm'?'WARM-UP':(X?X.name.toUpperCase():''))
     +(setIdx!=null?' \u00b7 SET '+(setIdx+1):'');
   $('tmrstop').textContent='STOP & LOG';
   tmrPaint(); $('tmr').classList.add('on');
+  audioReady();
   TM.iv=setInterval(()=>{
     if(TM.phase==='count'){
       TM.n--;
-      if(TM.n<=0){ TM.phase='up'; TM.n=0; }
-    } else TM.n++;
+      if(TM.n<=0){ TM.phase='up'; TM.n=0; ding('go'); say('Go'); }
+      else { ding(TM.n<=3?'tickhi':'tick'); if(TM.n<=5) say(TM.n); }
+    } else {
+      TM.n++;
+      // the bell marks the target but the clock keeps running until you stop it
+      if(TM.tgt&&TM.n===TM.tgt){ ding('target'); say('Target'); }
+      if(TM.tgt&&TM.n===TM.tgt+30) ding('target');
+    }
     tmrPaint();
   },1000);
 }
 function closeTimer(){ clearInterval(TM.iv); TM.iv=null; $('tmr').classList.remove('on'); }
 $('tmrx').addEventListener('click',e=>{ e.stopPropagation(); closeTimer(); });
 function tmrLog(){
+  const TMei=TM.ei;
   const secs=TM.phase==='up'?TM.n:0;
   if(TM.e==='__warm'){
     const c=cur(); c.warm.secs=secs; c.warm.done=true;
@@ -1189,7 +1310,9 @@ function tmrLog(){
     st.r=secs; st.skipped=false;
     ev('timer',TM.e,TM.s);
   }
+  ding('stop');
   closeTimer(); stamp(); save(); draw();
+  try{ restAfter(cur().entries[TMei]); }catch(_){ startRest(); }
   toast(fmtT(secs)+' logged. Pencil next to it if you need to fix the number.');
 }
 $('tmrstop').addEventListener('click',e=>{ e.stopPropagation(); tmrLog(); });
@@ -1240,6 +1363,67 @@ function goalBars(ids){
   }).filter(Boolean).join('');
   return rows?`<div class="gbars">${rows}</div>`:'';
 }
+async function copyLogOut(){
+  const txt=fullLog();
+  try{ await navigator.clipboard.writeText(txt); return txt.length; }
+  catch(e){
+    try{
+      const ta=document.createElement('textarea'); ta.value=txt;
+      ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      return txt.length;
+    }catch(_){ return 0; }
+  }
+}
+/* Paste back what comes out of a chat: one object, or several for several days.
+   {"day":"day1","entries":{"latPulldown":[{"w":130,"r":8}]},"rationale":{...}} */
+function dayOf(k){ const d=S.days.find(x=>x.order.flat().includes(k)); return d?d.id:null; }
+function applyRx(txt){
+  let data;
+  const clean=String(txt||'').replace(/^\s*```(?:json)?/i,'').replace(/```\s*$/,'').trim();
+  try{ data=JSON.parse(clean); }catch(_){ return {ok:false,msg:'That is not valid JSON.'}; }
+  const packs=Array.isArray(data)?data:[data];
+  let n=0; const days=new Set(), unknown=[];
+  packs.forEach(pk=>{
+    const entries=(pk&&pk.entries)||{}, rat=(pk&&pk.rationale)||{};
+    Object.keys(entries).forEach(k=>{
+      const X=S.exercises[k], sets=entries[k];
+      if(!X||!Array.isArray(sets)||!sets.length){ unknown.push(k); return; }
+      X.target=sets.map(t=>({w:(t.w==null?0:+t.w), r:(t.r==null?0:+t.r)}));
+      const d=pk.day||dayOf(k);
+      if(d){
+        days.add(d);
+        if(!S.prescriptions[d]) S.prescriptions[d]={generatedAt:new Date().toISOString(),entries:{},rationale:{}};
+        S.prescriptions[d].generatedAt=new Date().toISOString();
+        S.prescriptions[d].entries[k]=X.target;
+        if(rat[k]) S.prescriptions[d].rationale[k]=rat[k];
+      }
+      n++;
+    });
+  });
+  if(!n) return {ok:false,msg:'No exercises in that. Check the keys match the app.'};
+  if(S.current&&!hasData(S.current)) S.current=newSession(S.current.dayId);
+  save(); draw();
+  return {ok:true,n,days:[...days],unknown};
+}
+function rxSheet(){
+  $('shbody').innerHTML=`<h2 class="sh1">Next instructions</h2>
+    <div class="hint">Paste the JSON that came back from the chat. One object, or a list
+      of them if more than one day changed. It overwrites the numbers the app worked out
+      for itself.</div>
+    <textarea class="ta" id="rxbox" style="min-height:190px" placeholder='{"day":"day1","entries":{"latPulldown":[{"w":130,"r":8}]},"rationale":{"latPulldown":"held"}}'></textarea>
+    <div class="acts"><button class="abtn pri" id="rxApply">APPLY</button>
+      <button class="abtn" id="rxCancel">CANCEL</button></div>`;
+  $('sheet').classList.add('on'); $('scrim').classList.add('on');
+  $('rxCancel').addEventListener('click',closeSheet);
+  $('rxApply').addEventListener('click',()=>{
+    const r=applyRx($('rxbox').value);
+    if(!r.ok){ toast(r.msg,true); return; }
+    closeSheet();
+    toast(r.n+' exercise'+(r.n===1?'':'s')+' updated'+(r.days.length?' across '+r.days.join(' and '):'')+
+      (r.unknown.length?'. Skipped unknown: '+r.unknown.join(', '):'.'));
+  });
+}
 function summary(c){
   const vol=c.entries.reduce((a,e)=>a+e.sets.reduce((b,x)=>b+((x.w||0)*(x.r||0)),0),0);
   const setsDone=c.entries.reduce((a,e)=>a+e.sets.filter(x=>x.r!=null).length,0);
@@ -1259,6 +1443,10 @@ function summary(c){
       <div class="bs"><b>${mins??'—'}</b><span>MINUTES</span></div>
     </div>
     <div class="sh2">Progress toward goals</div>
+    <div class="acts" style="margin:2px 0 16px">
+      <button class="abtn" id="copyAgain">COPY AGAIN</button>
+      <button class="abtn pri" id="pasteRx">UPLOAD NEXT INSTRUCTIONS</button>
+    </div>
     <div class="gwrap">${goals.map((x,i)=>`
       <div class="grow">
         <div class="glab"><b>${x.X.name}</b><span>${x.g.now} → ${x.X.goal.label}</span></div>
@@ -1268,6 +1456,11 @@ function summary(c){
         <div class="gpct">${(x.f.pct*100).toFixed(0)}% of ${x.X.goalF.label}</div>`:''}
       </div>`).join('')}</div>`;
   $('sheet').classList.add('on'); $('scrim').classList.add('on');
+  $('copyAgain').addEventListener('click',async()=>{
+    const n=await copyLogOut();
+    toast(n?'Copied '+n+' characters again.':'Clipboard refused. Use EXPORT LOG in the menu.',!n);
+  });
+  $('pasteRx').addEventListener('click',rxSheet);
   const reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   document.querySelectorAll('.gfill').forEach(el=>{
     const w=el.dataset.p+'%';
@@ -1281,8 +1474,12 @@ $('finish').addEventListener('click',()=>{
   const hr=prompt('Optional — avg HR, peak HR, minutes. Comma separated. Leave blank to skip.');
   if(hr){ const p=hr.split(',').map(x=>parseFloat(x.trim()));
     c.watch={avgHR:p[0]||null,peakHR:p[1]||null,duration:p[2]||null}; }
+  ding('finish'); say('Session complete');
+  clearInterval(restIv); restIv=null; restT0=0; paintRest();
   c.endedAt=new Date().toISOString();
-  c.pace=paceStats(c); delete c.events;
+  c.pace=paceStats(c);
+  c.marks=markTimes(c);       // when each set was actually entered
+  delete c.events;
   S.prefs.makeup=c.entries
     .filter(e=>e.status==='skipped'&&e.skipReason==='time')
     .map(e=>e.exerciseId);
@@ -1292,8 +1489,11 @@ $('finish').addEventListener('click',()=>{
   const next=S.days.find(d=>d.id!==c.dayId)||S.days[0];
   S.current=newSession(next.id); S.prefs.makeup=[]; openEx=null;
   UNDO=[]; save(); draw(); startClock();
-  summary(c);
-  if(res&&res.moved) toast(res.moved);
+  copyLogOut().then(n=>{
+    summary(c);
+    toast(n?'Whole log copied \u2014 paste it into the chat.'
+           :'Could not reach the clipboard. Use COPY AGAIN or EXPORT LOG.',!n);
+  });
 });
 $('menu').addEventListener('click',()=>{
   const c0=cur();
@@ -1327,6 +1527,21 @@ $('menu').addEventListener('click',()=>{
       <button class="abtn" id="expLog">EXPORT LOG</button>
       <button class="abtn" id="saveNow">SAVE NOW</button>
     </div>
+    <div class="sh2">Sound</div>
+    <div class="acts">
+      <button class="abtn${(S.prefs.sfx===false)?'':' pri'}" id="sfxBtn">${(S.prefs.sfx===false)?'SOUND OFF':'\u2713 SOUND ON'}</button>
+    </div>
+    <div class="acts" style="margin-top:6px">
+      <button class="abtn${(S.prefs.voice===false)?'':' pri'}" id="voiceBtn">${(S.prefs.voice===false)?'VOICE OFF':'\u2713 VOICE ON'}</button>
+    </div>
+    <div class="kv"><span>Rest between sets (seconds, 0 = never)</span>
+      <input class="num" id="restSecs" inputmode="numeric" style="flex:none;width:60px"
+        value="${(S.prefs.restSecs==null?120:S.prefs.restSecs)}"></div>
+    <div class="kv"><span>Rest after a full superset round</span>
+      <input class="num" id="ssRestSecs" inputmode="numeric" style="flex:none;width:60px"
+        value="${(S.prefs.ssRestSecs==null?75:S.prefs.ssRestSecs)}"></div>
+    <div class="hint">Countdown ticks, a bell when a timed hold reaches its target, and a
+      nudge when you have rested long enough. Your phone's mute switch silences all of it.</div>
     <div class="sh2">Undo</div>
     <div class="acts">
       <button class="abtn" id="undoBtn">UNDO LAST</button>
@@ -1359,6 +1574,30 @@ $('menu').addEventListener('click',()=>{
   $('saveNow').addEventListener('click',()=>{
     const ok=writeNow();
     toast(ok?'Saved.':'Still failing: '+(lastErr||'unknown'),!ok);
+  });
+  $('sfxBtn').addEventListener('click',()=>{
+    S.prefs.sfx=(S.prefs.sfx===false);
+    const b=$('sfxBtn');
+    b.textContent=S.prefs.sfx?'\u2713 SOUND ON':'SOUND OFF';
+    b.classList.toggle('pri',!!S.prefs.sfx);
+    if(S.prefs.sfx){ audioReady(); ding('go'); }
+    save();
+  });
+  $('restSecs').addEventListener('input',e2=>{
+    const n=parseInt(e2.target.value,10);
+    S.prefs.restSecs=isNaN(n)?120:Math.max(0,n); save();
+  });
+  $('ssRestSecs').addEventListener('input',e2=>{
+    const n=parseInt(e2.target.value,10);
+    S.prefs.ssRestSecs=isNaN(n)?75:Math.max(0,n); save();
+  });
+  $('voiceBtn').addEventListener('click',()=>{
+    S.prefs.voice=(S.prefs.voice===false);
+    const b=$('voiceBtn');
+    b.textContent=S.prefs.voice?'\u2713 VOICE ON':'VOICE OFF';
+    b.classList.toggle('pri',!!S.prefs.voice);
+    if(S.prefs.voice) say('Voice on');
+    save();
   });
   $('undoBtn').addEventListener('click',()=>{ if(undo()) closeSheet(); });
   $('shakeBtn').addEventListener('click',()=>{
@@ -1699,6 +1938,14 @@ function logBlock(s,lines){
   const w=s.watch||{};
   if(w.avgHR||w.peakHR||w.duration)
     L.push('  watch: avg '+(w.avgHR||'-')+' / peak '+(w.peakHR||'-')+' / '+(w.duration||'-')+' min');
+  if(s.marks&&s.marks.length){
+    const t0=s.marks[0][2];
+    L.push('  set times (minutes from the first entry):');
+    L.push('    '+s.marks.map(m=>{
+      const X=S.exercises[m[0]];
+      return (X?X.name:m[0])+' s'+(m[1]+1)+' @'+(((m[2]-t0)/60).toFixed(1));
+    }).join('; '));
+  }
   const P=s.pace;
   if(P&&P.n){
     L.push('  pace: '+P.n+' rests, median '+P.med+'s (range '+P.min+'-'+P.max+'s)'+
@@ -1760,8 +2007,9 @@ const PRELOAD=[
 },
 {
   id:'s1756832000000', dayId:'day1', dayLabel:'Day 1 \u2014 Upper',
-  startedAt:'2026-09-02T12:53:00-04:00', endedAt:'2026-09-02T14:08:00-04:00',
+  startedAt:'2026-09-02T13:00:02-04:00', endedAt:'2026-09-02T14:18:03-04:00',
   gym:'home', mood:'meh', warm:{done:true,secs:300}, program:true,
+  watch:{avgHR:127, peakHR:159, duration:78, active:599},
   pace:{n:22,med:114,min:7,max:940,rushed:7,dragged:5,peeks:0,idle:0,idleMin:0},
   skipped:{cablePullThrough:'time', gobletSquat:'time'},
   data:{
@@ -1786,6 +2034,7 @@ function buildPreloaded(P){
   Object.assign(sess,{id:P.id, startedAt:P.startedAt, endedAt:P.endedAt,
     gym:P.gym, mood:P.mood||null, warm:P.warm||{done:false,secs:0}, notes:''});
   if(P.pace) sess.pace=P.pace;
+  if(P.watch) sess.watch=P.watch;
   delete sess.events;
   Object.entries(P.data||{}).forEach(([k,rows])=>{
     const e=sess.entries.find(x=>x.exerciseId===k); if(!e) return;
