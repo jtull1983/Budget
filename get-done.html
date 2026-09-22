@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Get Shit Done — v1.10.1
+  Get Shit Done — v1.10.2
   Single file, no build step, no dependencies, no server.
   Data lives in localStorage in the visitor's own browser — nothing is sent anywhere.
   Drop this file in a repo and serve it (e.g. GitHub Pages) or just open it directly.
@@ -324,7 +324,9 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important;-webkit-user-selec
 .alert{display:block;width:100%;text-align:left;margin:12px 0 0;padding:11px 14px;border-radius:14px;font-size:14px;
   background:rgba(var(--gc),.14);border:1px solid rgba(var(--gc),.5);color:var(--text)}
 .alert b{color:rgb(var(--gc));font-weight:650}
-.daytop{display:flex;align-items:center;gap:12px}
+.day{flex-direction:column;gap:0}
+.daytop{display:flex;align-items:center;gap:12px;cursor:pointer}
+.daylist{width:100%}
 .daytop .dayhead{flex:1;min-width:0}
 .daylist{padding:0 0 2px}
 .tk{border-radius:16px;margin-top:6px;padding:3px 3px 3px 8px;background:transparent;border:1.5px solid rgba(var(--dc),.5);
@@ -608,8 +610,8 @@ function dayCard(d,k){
   if(k!=null&&past)st+=';opacity:'+Math.max(.4,1-.13*(-k)).toFixed(2);
   return '<div class="day'+(isT?" is-today":"")+(past&&k==null?" past":"")+(list.length?" has":"")+'" style="'+st+'" data-drop="'+key+'">'+
     (pct?'<div class="dayfill" style="width:calc(68px + (100% - 68px) * '+(pct/100)+')"></div>':"")+
-    '<div class="daytop"><div class="daymark"><div class="d">'+d.getDate()+'</div><div class="m">'+DAYSHORT[dow]+'</div></div>'+
-    '<div class="dayhead" data-daytoggle="'+key+'"><span class="name">'+(isT?"Today":DAYNAME[dow])+'</span>'+
+    '<div class="daytop" data-daytoggle="'+key+'"><div class="daymark"><div class="d">'+d.getDate()+'</div><div class="m">'+DAYSHORT[dow]+'</div></div>'+
+    '<div class="dayhead"><span class="name">'+(isT?"Today":DAYNAME[dow])+'</span>'+
       (list.length?'<span class="count">'+doneN+'/'+list.length+'</span>':"")+
       '<button class="dayplus'+(isOpen?" open":"")+'" data-dayadd="'+key+'" aria-label="'+
         (isOpen?"Close":"Add to "+DAYNAME[dow])+'">+</button></div></div>'+
@@ -765,6 +767,12 @@ function taskRow(t,i,n){
 function refocus(sel){var n=document.querySelector(sel);if(n)n.focus()}
 function wireTasks(el){
   each(el,"[data-tk]",function(n){n.onpointerdown=tkDown});
+  each(el,"[data-daytoggle]",function(n){n.onclick=function(e){
+    if(e.target.closest("[data-dayadd]"))return;
+    var key=n.getAttribute("data-daytoggle");
+    if(S.ui.collapsed[key])delete S.ui.collapsed[key];else S.ui.collapsed[key]=true;
+    if(openAdd===key)openAdd=null;
+    save();renderWeek()}});
   each(el,"[data-check]",function(n){n.onclick=function(){if(Date.now()-justDragged<400)return;var t=task(n.getAttribute("data-check"));if(!t)return;
     t.done=!t.done;t.doneTs=t.done?Date.now():null;save();render()}});
   each(el,"[data-note]",function(n){n.onclick=function(){if(Date.now()-justDragged<400)return;var id=n.getAttribute("data-note"),o=tkOpen[id]=tkOpen[id]||{};
