@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Get Shit Done — v1.9.1
+  Get Shit Done — v1.10.1
   Single file, no build step, no dependencies, no server.
   Data lives in localStorage in the visitor's own browser — nothing is sent anywhere.
   Drop this file in a repo and serve it (e.g. GitHub Pages) or just open it directly.
@@ -170,7 +170,7 @@ h1{margin:0;font-size:26px;line-height:1.1;letter-spacing:.01em;font-weight:800}
 .addrow input{flex:1;background:transparent;border:0;padding:6px 0;font-size:16px;color:var(--text)}
 .addrow input.field{flex:1;margin:0;padding:11px 13px}
 .addrow input::placeholder{color:var(--muted);opacity:.7}
-.addrow .plus{color:var(--muted);font-size:16px;width:21px;text-align:center}
+.addrow .plus{display:none}
 
 /* ---- callouts / empty ---- */
 .callout{background:var(--gold-tint);border:1px solid var(--gold);border-radius:var(--r);
@@ -386,6 +386,11 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important;-webkit-user-selec
   padding:3px 9px;border-radius:99px;white-space:nowrap}
 .nd-body small{display:block;width:100%;color:var(--muted);font-size:12px}
 .nd.checked .nd-in{text-decoration:line-through;color:var(--muted)}
+.nd-name{flex:1;min-width:0;padding:6px 2px;font-size:15.5px;font-weight:650;color:rgb(var(--gc));word-break:break-word;
+  text-decoration:underline;text-decoration-color:rgba(var(--gc),.45);text-decoration-thickness:1.5px;text-underline-offset:4px}
+.nd-name::after{content:" \2197";font-size:.8em;opacity:.8}
+.nd-name.sm{padding:0;font-size:15px}
+.nd.checked .nd-name,.tk-item.checked .nd-name{color:var(--muted);text-decoration:line-through}
 .nd.checked .nd-top .mini{background:rgb(var(--gc));border-color:rgb(var(--gc));color:#111318}
 .nd-links{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 2px 27px}
 .nd-link{display:inline-flex;align-items:center;gap:2px;background:rgba(var(--gc),.15);border-radius:99px;padding:3px 3px 3px 10px;font-size:13px}
@@ -972,7 +977,7 @@ function sheetGoal(){
   h+='<div id="tabBody">'+goalTab(g,tab)+'</div>';
   sheetBody.innerHTML=h;wireHead();
   each(sheetBody,"[data-tab]",function(n){
-    n.onclick=function(){S.ui.goalTab[g.id]=n.getAttribute("data-tab");save();renderSheet()}});
+    n.onclick=function(){var t=n.getAttribute("data-tab");S.ui.goalTab[g.id]=t;if(t==="needs")focusNext="needadd";save();renderSheet()}});
   wireGoalTab(g,tab);
 }
 function moveRow(m,isCur){
@@ -991,8 +996,8 @@ function needRow(n){
   var h='<div class="nd'+(n.done?" checked":"")+'">'+
     '<div class="nd-top"><button class="mini" data-ndtick="'+n.id+'">✓</button>'+
     '<div class="nd-body">'+
-    '<input class="nd-in" data-ndtext="'+n.id+'" value="'+esc(n.text)+'" enterkeyhint="done">'+
-    (main?'<a class="nd-open" href="'+esc(main.url)+'" target="_blank" rel="noopener">'+esc(main.label)+' ↗</a>':"")+
+    (main&&!o.link?'<a class="nd-name" href="'+esc(main.url)+'" target="_blank" rel="noopener">'+esc(n.text||main.label)+'</a>':
+      '<input class="nd-in" data-ndtext="'+n.id+'" value="'+esc(n.text)+'" enterkeyhint="done">')+
     (its.length?'<small>'+di+'/'+its.length+' on the list</small>':"")+'</div>'+
     '<button class="tk-ic'+(o.link?" on":links.length?" has":"")+'" data-ndlink="'+n.id+'" aria-label="Add link">'+IC.link+'</button>'+
     '<button class="tk-ic'+(o.list?" on":its.length?" has":"")+'" data-ndlist="'+n.id+'" aria-label="List">'+IC.list+'</button>'+
@@ -1000,16 +1005,15 @@ function needRow(n){
   if(links.length>1)h+='<div class="nd-links">'+links.slice(1).map(function(l){
     return '<span class="nd-link"><a href="'+esc(l.url)+'" target="_blank" rel="noopener">'+esc(l.label)+'</a>'+
       '<button data-ndlrm="'+n.id+'|'+l.id+'" aria-label="Remove link">×</button></span>'}).join("")+'</div>';
-  if(o.link)h+='<div class="nd-panel drop"><input class="field" type="url" inputmode="url" data-ndlin="'+n.id+'" data-focus="ndl:'+n.id+'" placeholder="Paste a link, hit return" enterkeyhint="done">'+
+  if(o.link)h+='<div class="nd-panel drop"><input class="field" type="url" inputmode="url" data-ndlin="'+n.id+'" data-focus="ndl:'+n.id+'" placeholder="Stick link in here" enterkeyhint="done" value="'+esc(main?main.url:"")+'">'+
     (main?'<button class="kill" data-ndlrm="'+n.id+'|'+main.id+'">Remove link</button>':"")+'</div>';
   if(o.list)h+='<div class="nd-panel drop">'+its.map(function(x){
       var io=ndOpen[n.id+"|"+x.id]||{};
       var row='<div class="tk-item'+(x.done?" checked":"")+'"><button class="mini" data-nditk="'+n.id+'|'+x.id+'">✓</button>'+
-        '<span class="txt">'+esc(x.text)+'</span>'+
-        (x.link?'<a class="nd-open sm" href="'+esc(x.link.url)+'" target="_blank" rel="noopener">'+esc(x.link.label)+' ↗</a>':"")+
+        (x.link?'<a class="nd-name sm txt" href="'+esc(x.link.url)+'" target="_blank" rel="noopener">'+esc(x.text)+'</a>':'<span class="txt">'+esc(x.text)+'</span>')+
         '<button class="tk-ic sm'+(io.link?" on":x.link?" has":"")+'" data-ndilink="'+n.id+'|'+x.id+'" aria-label="Add link">'+IC.link+'</button>'+
         '<button class="tk-ic sm" data-ndirm="'+n.id+'|'+x.id+'" aria-label="Remove">'+IC.x+'</button></div>';
-      if(io.link)row+='<div class="nd-panel" style="padding-left:38px"><input class="field" type="url" inputmode="url" data-ndilin="'+n.id+'|'+x.id+'" data-focus="ndil:'+n.id+':'+x.id+'" placeholder="Paste a link, hit return" enterkeyhint="done" value="'+esc(x.link?x.link.url:"")+'">'+
+      if(io.link)row+='<div class="nd-panel" style="padding-left:38px"><input class="field" type="url" inputmode="url" data-ndilin="'+n.id+'|'+x.id+'" data-focus="ndil:'+n.id+':'+x.id+'" placeholder="Stick link in here" enterkeyhint="done" value="'+esc(x.link?x.link.url:"")+'">'+
         (x.link?'<button class="kill" data-ndilrm="'+n.id+'|'+x.id+'">Remove link</button>':"")+'</div>';
       return row}).join("")+
     '<input class="tk-add" data-ndiadd="'+n.id+'" data-focus="ndi:'+n.id+'" placeholder="Add to this list" enterkeyhint="done" autocomplete="off"></div>';
@@ -1034,10 +1038,9 @@ function goalTab(g,tab){
     var nl=ndOpen.__new||{};
     return '<p class="hint">What this goal needs before it can move. Use the link and list icons to attach links or a whole shopping list to one need.</p>'+
       (g.needs||[]).map(needRow).join("")+
-      '<div class="addrow"><span class="plus">+</span><input type="text" class="field" data-needadd placeholder="'+esc(ph)+'" data-focus="needadd" enterkeyhint="done">'+
-      '<button class="tk-ic'+(nl.link?" on":nl.url?" has":"")+'" data-newneedlink aria-label="Add link">'+IC.link+'</button></div>'+
-      (nl.link?'<div class="nd-panel drop" style="padding-left:4px"><input class="field" type="url" inputmode="url" data-newneedlin data-focus="newneedlink" placeholder="Paste a link for it, hit return" enterkeyhint="done" value="'+esc(nl.url||"")+'">'+
-        (nl.url?'<button class="kill" data-newneedlinrm>Remove link</button>':"")+'</div>':"");
+      '<div class="addrow"><input type="text" class="field" data-needadd value="'+esc(nl.text||"")+'" placeholder="'+esc(ph)+'" data-focus="needadd" enterkeyhint="done" autocomplete="off">'+
+      '<button class="tk-ic'+(nl.link?" on":"")+'" data-newneedlink aria-label="Make it a link">'+IC.link+'</button></div>'+
+      (nl.link?'<div class="nd-panel drop" style="padding-left:0"><input class="field" type="url" inputmode="url" data-newneedlin data-focus="newneedlink" placeholder="Stick link in here" enterkeyhint="done" autocomplete="off"></div>':"");
   }
   if(tab==="barriers")
     return '<p class="hint">What\u2019s actually stopping it. Tap the box when a barrier is cleared.</p>'+
@@ -1139,17 +1142,36 @@ function wireGoalTab(g,tab){
     var v=n.value.trim();if(!v){d.text=n.value="";touch(g);save();return}d.text=v;touch(g);save()};
     n.onkeydown=function(e){if(e.key==="Enter")n.blur()}});
   var na=B.querySelector("[data-needadd]");
-  if(na)na.onkeydown=function(e){if(e.key!=="Enter")return;e.preventDefault();var v=na.value.trim();if(!v)return;na.value="";
-    var nl=ndOpen.__new||{},links=nl.url?[{id:uid(),url:nl.url,label:host(nl.url)}]:[];
-    g.needs=g.needs||[];g.needs.push({id:uid(),text:v,done:false,links:links,items:[]});g.needHint="";ndOpen.__new={};touch(g);focusNext="needadd";commit()};
+  function newNeed(text,url){
+    text=(text||"").trim();url=(url||"").trim();if(!text&&!url)return false;
+    if(url&&!/^https?:\/\//i.test(url))url="https://"+url;
+    g.needs=g.needs||[];
+    g.needs.push({id:uid(),text:text||host(url),done:false,links:url?[{id:uid(),url:url,label:host(url)}]:[],items:[]});
+    g.needHint="";ndOpen.__new={};touch(g);save();render();return true;
+  }
+  if(na){
+    na.oninput=function(){ndOpen.__new=ndOpen.__new||{};ndOpen.__new.text=na.value};
+    na.onkeydown=function(e){if(e.key!=="Enter")return;e.preventDefault();
+      if(newNeed(na.value,"")){focusNext="needadd";renderSheet()}};
+  }
   var nnl=B.querySelector("[data-newneedlink]");
-  if(nnl)nnl.onclick=function(){ndOpen.__new=ndOpen.__new||{};ndOpen.__new.link=!ndOpen.__new.link;if(ndOpen.__new.link)focusNext="newneedlink";renderSheet()};
+  if(nnl){
+    nnl.onpointerdown=function(e){e.preventDefault()};
+    nnl.onclick=function(){var nw=ndOpen.__new=ndOpen.__new||{};if(na)nw.text=na.value;
+      nw.link=!nw.link;focusNext=nw.link?"newneedlink":"needadd";renderSheet()};
+  }
   var nnli=B.querySelector("[data-newneedlin]");
-  if(nnli){nnli.onkeydown=function(e){if(e.key!=="Enter")return;e.preventDefault();var u=nnli.value.trim();if(!u)return;
-      if(!/^https?:\/\//i.test(u))u="https://"+u;ndOpen.__new={link:false,url:u};focusNext="needadd";renderSheet()};
-    nnli.onchange=function(){if(!nnli.value.trim())return;later()}}
-  var nnrm=B.querySelector("[data-newneedlinrm]");
-  if(nnrm)nnrm.onclick=function(){ndOpen.__new={};renderSheet()};
+  if(nnli){
+    nnli.onkeydown=function(e){if(e.key!=="Enter")return;e.preventDefault();
+      var nw=ndOpen.__new||{};
+      if(!nnli.value.trim()){nw.link=false;focusNext="needadd";renderSheet();return}
+      var u=nnli.value;nnli.value="";
+      if(newNeed(nw.text,u)){focusNext="needadd";renderSheet()}
+    };
+    /* iOS toolbar "Done" dismisses the keyboard instead of pressing return: still save it */
+    nnli.onchange=function(){var u=nnli.value;if(!u.trim())return;nnli.value="";
+      if(newNeed((ndOpen.__new||{}).text,u))later()};
+  }
   each(B,"[data-ndtick]",function(n){n.onclick=function(){var d=findIn(g.needs,n.getAttribute("data-ndtick"));if(d){d.done=!d.done;touch(g);commit()}}});
   each(B,"[data-ndrm]",function(n){n.onclick=function(){var id=n.getAttribute("data-ndrm");
     g.needs=g.needs.filter(function(x){return x.id!==id});commit()}});
@@ -1160,7 +1182,7 @@ function wireGoalTab(g,tab){
   each(B,"[data-ndlin]",function(n){
     var id=n.getAttribute("data-ndlin");
     var add=function(){var u=n.value.trim();if(!u)return false;n.value="";if(!/^https?:\/\//i.test(u))u="https://"+u;
-      var d=findIn(g.needs,id);if(!d)return false;d.links=d.links||[];d.links.push({id:uid(),url:u,label:host(u)});
+      var d=findIn(g.needs,id);if(!d)return false;d.links=[{id:uid(),url:u,label:host(u)}].concat((d.links||[]).slice(1));
       ndOpen[id].link=false;touch(g);save();render();return true};
     n.onkeydown=function(e){if(e.key!=="Enter")return;e.preventDefault();if(add())renderSheet()};
     n.onchange=function(){if(add())later()};
@@ -1381,6 +1403,12 @@ function sheetSettings(){
     S.goals.filter(function(g){return !g.archived}).length+' goals on the board.</p>';
   h+='<div class="lbl">Mode</div><button class="btn ghost" data-switch>'+(MODE==="work"?"Switch to Get Shit Done":"Switch to Work: TODO")+'</button>'+
     '<p class="hint">Work and personal keep completely separate goals and tasks. Shortcut: Alt + W.</p>';
+  var perm=("Notification" in window)?Notification.permission:"unsupported";
+  h+='<div class="lbl">Notifications</div><button class="btn ghost" data-testnote>Send a test notification</button>'+
+    '<p class="hint">'+(perm==="granted"?"Notifications are on for this device.":
+      perm==="denied"?"Notifications are blocked. Turn them on in your phone\u2019s Settings for this app, then try again.":
+      perm==="unsupported"?"On iPhone, this only works once the app is on your Home Screen and opened from there.":
+      "The first tap asks your permission.")+'</p>';
   h+='<div class="lbl">Look</div><div class="pick">'+
     ["system","light","dark"].map(function(x){
       return '<button data-theme="'+x+'"'+(S.ui.theme===x?' class="on"':"")+'>'+
@@ -1398,6 +1426,7 @@ function sheetSettings(){
   [].forEach.call(B.querySelectorAll("[data-theme]"),function(n){
     n.onclick=function(){S.ui.theme=n.getAttribute("data-theme");applyTheme();save();renderSheet()}});
   B.querySelector("[data-switch]").onclick=function(){switchMode()};
+  B.querySelector("[data-testnote]").onclick=function(){testNotify()};
   B.querySelector("[data-clear]").onclick=function(){
     var cut=Date.now()-12096e5,n=S.tasks.length;
     S.tasks=S.tasks.filter(function(t){return !(t.done&&t.doneTs&&t.doneTs<cut)});
@@ -1505,7 +1534,37 @@ document.addEventListener("keydown",function(e){
   if(e.altKey&&!e.metaKey&&!e.ctrlKey&&(e.code==="KeyW"||e.key==="w"||e.key==="W")){e.preventDefault();switchMode()}
 });
 
-applyMode();var brainOpen=false;
+applyMode();/* ---------- notifications ---------- */
+function swReady(){
+  if(!("serviceWorker" in navigator))return Promise.resolve(null);
+  navigator.serviceWorker.register("sw.js").catch(function(){});
+  return Promise.race([navigator.serviceWorker.ready,new Promise(function(r){setTimeout(function(){r(null)},3000)})]);
+}
+function testNotify(){
+  if(!("Notification" in window)){
+    toast(/iP(hone|ad|od)/.test(navigator.userAgent)&&!navigator.standalone?"Add it to your Home Screen first, then open it from there":"This browser can\u2019t show notifications");
+    return;
+  }
+  var send=function(){
+    var title=MODE==="work"?"Work: TODO":"Get Shit Done";
+    var opts={body:MODE==="work"?"Test notification. Morning check-ins will land like this.":"Test ping. If you can see this, morning check-ins will reach you.",tag:"gsd-test"};
+    swReady().then(function(r){
+      if(r&&r.showNotification)return r.showNotification(title,opts).then(function(){toast("Sent. Check your notifications.")});
+      new Notification(title,opts);toast("Sent. Check your notifications.");
+    }).catch(function(){
+      try{new Notification(title,opts);toast("Sent. Check your notifications.")}
+      catch(e){toast("Couldn\u2019t send it. Is sw.js uploaded next to the app?")}
+    });
+  };
+  if(Notification.permission==="granted")return send();
+  if(Notification.permission==="denied"){toast("Notifications are blocked. Turn them on in Settings for this app.");return}
+  Notification.requestPermission().then(function(p){
+    if(p==="granted")send();else toast("No permission, no ping");
+    if(cur&&cur.t==="settings")renderSheet();
+  });
+}
+if("serviceWorker" in navigator)window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})});
+var brainOpen=false;
 function openBrainDock(){
   brainOpen=true;document.getElementById("brainFab").classList.add("hide");
   var dk=document.getElementById("brainDock");dk.classList.add("open");
